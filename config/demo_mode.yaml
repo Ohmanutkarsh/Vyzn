@@ -1,0 +1,21 @@
+# Demo Mode Configuration
+# Accelerates lifecycle and retention for fast professor grading demonstrations
+# Simulates full 72-hour lifecycle in under 60 seconds
+
+demo_mode:
+  enabled: true
+  site_id: "site_college_grading_demo"
+  site_name: "Academic Project Evaluation Demo"
+  
+  # Accelerated Retention: 60-second raw retention instead of 72 hours
+  raw_retention_hours: 0.02          # ~72 seconds
+  reaper_sweep_interval_sec: 5       # Sweep every 5 seconds
+  disk_safety_threshold_pct: 80.0    # Tight threshold to demonstrate emergency purge
+  
+  # Scoring & Detection Calibration
+  alert_score_threshold: 70
+  generate_sample_clips: true
+  
+  # Simulation Parameters
+  simulated_cameras: 3
+  fps_rate: 4.0

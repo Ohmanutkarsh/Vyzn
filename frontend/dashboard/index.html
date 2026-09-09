@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VYZN Netra — Zero-Fatigue Intelligent Edge Surveillance</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Top Navigation Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand-group">
+        <div class="logo-badge">NETRA</div>
+        <div class="brand-titles">
+          <h1>VYZN Surveillance Console</h1>
+          <span class="sub-caption">Edge Intelligence Layer • Nagpur Hub</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="status-indicator">
+          <span class="status-dot"></span>
+          <span id="system-status-text">SYSTEM ONLINE</span>
+        </div>
+        <div class="clock-display" id="clock">--:--:-- UTC</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="dashboard-content">
+    <!-- Key Metric Counters (The Metrics That Matter) -->
+    <section class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Verified Alerts (This Week)</div>
+        <div class="metric-value text-teal" id="verified-alerts-count">4</div>
+        <div class="metric-subtext">Delivered to WhatsApp / Telegram</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">False Motions Filtered</div>
+        <div class="metric-value" id="filtered-motions-count">142</div>
+        <div class="metric-subtext">Ceiling fans, shadows, traffic</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Active Camera Streams</div>
+        <div class="metric-value" id="active-cameras-count">3 / 3</div>
+        <div class="metric-subtext">RTSP Decimated at 4 FPS</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Disk Storage Safety</div>
+        <div class="metric-value text-amber" id="disk-free-display">--%</div>
+        <div class="metric-subtext" id="reaper-status-text">72h Reaper Guard Active</div>
+      </div>
+    </section>
+
+    <!-- Central Operational Viewport -->
+    <section class="main-workspace">
+      <!-- Left Column: Live Camera & Stream Controls -->
+      <div class="live-panel">
+        <div class="panel-header">
+          <div class="camera-tabs" id="camera-tabs">
+            <button class="cam-tab active" data-cam="cam_corridor">Corridor (Day)</button>
+            <button class="cam-tab" data-cam="cam_cash_counter">Cash Counter (Zone)</button>
+            <button class="cam-tab" data-cam="cam_shutter_night">Rear Shutter (Night IR)</button>
+          </div>
+          <div class="stream-protocol-badge">MJPEG / RTSP</div>
+        </div>
+
+        <div class="video-container">
+          <img id="live-stream-img" src="/api/cameras/cam_corridor/mjpeg" alt="Live Camera Stream">
+          <div class="stream-overlay-tag" id="active-cam-tag">LIVE: Main Store Corridor</div>
+        </div>
+
+        <div class="threat-meter-container">
+          <div class="meter-header">
+            <span>Live Threat Score</span>
+            <span class="meter-score" id="meter-score-text">0 / 100</span>
+          </div>
+          <div class="meter-bar-track">
+            <div class="meter-bar-fill" id="meter-bar-fill" style="width: 0%;"></div>
+          </div>
+          <div class="meter-legend">
+            <span>0 Safe</span>
+            <span class="text-amber">70 Alert Threshold</span>
+            <span class="text-red">100 Intrusion</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Column: Incident Feed & Event Triage -->
+      <div class="events-panel">
+        <div class="panel-header">
+          <h2>High-Signal Incident Feed</h2>
+          <button class="btn-secondary" id="btn-refresh-events">Refresh</button>
+        </div>
+
+        <div class="events-scroll-list" id="events-list">
+          <div class="empty-state">Loading recent incident events...</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Video Playback Modal -->
+  <div class="modal-backdrop" id="video-modal" style="display: none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-title">Incident Clip Replay</h3>
+        <button class="btn-close" id="btn-close-modal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <video id="modal-video" controls autoplay loop playsinline>
+          <source src="" type="video/mp4">
+          Your browser does not support HTML5 video.
+        </video>
+        <div class="modal-meta" id="modal-meta"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-star" id="btn-modal-star">⭐ Star (Protect from Reaper)</button>
+        <button class="btn-secondary" id="btn-modal-close-action">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

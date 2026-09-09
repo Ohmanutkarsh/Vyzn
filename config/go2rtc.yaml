@@ -1,0 +1,19 @@
+# go2rtc stream gateway configuration
+# Converts RTSP camera streams into low-latency WebRTC and MSE streams for browser playback
+
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+streams:
+  cam_corridor:
+    - rtsp://localhost:8554/cam_corridor
+    - ffmpeg:http://localhost:8000/api/cameras/cam_corridor/mjpeg#video=h264
+  cam_cash_counter:
+    - rtsp://localhost:8554/cam_cash_counter
+    - ffmpeg:http://localhost:8000/api/cameras/cam_cash_counter/mjpeg#video=h264
+  cam_shutter_night:
+    - rtsp://localhost:8554/cam_shutter_night
+    - ffmpeg:http://localhost:8000/api/cameras/cam_shutter_night/mjpeg#video=h264

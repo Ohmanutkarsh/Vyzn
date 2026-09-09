@@ -1,0 +1,27 @@
+# VYZN Netra Production Edge Node Configuration
+
+site:
+  site_id: "site_nagpur_kirana_01"
+  site_name: "Nagpur Central Commercial Hub"
+  data_dir: "./data/clips"
+  db_path: "./data/clips/index.db"
+
+scoring:
+  alert_score_threshold: 70
+  motion_gate_threshold: 0.005      # 0.5% frame change
+  day_conf_min: 0.35
+  night_conf_min: 0.25
+
+storage:
+  raw_retention_hours: 72
+  disk_safety_threshold_pct: 85.0
+  reaper_sweep_interval_sec: 300
+
+telemetry:
+  enabled: true
+  interval_sec: 60
+  cloud_webhook_url: null
+
+alerts:
+  telegram_bot_token: null
+  telegram_chat_id: null

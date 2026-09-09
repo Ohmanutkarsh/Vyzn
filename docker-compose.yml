@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: vyzn-go2rtc-gateway
+    restart: unless-stopped
+    ports:
+      - "8554:8554"   # RTSP Stream Gateway
+      - "1984:1984"   # WebRTC / HTTP API
+    volumes:
+      - ./config/go2rtc.yaml:/config/go2rtc.yaml:ro
+    networks:
+      - vyzn-network
+
+  vyzn-edge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vyzn-edge-node
+    restart: unless-stopped
+    ports:
+      - "8000:8000"   # Web Dashboard & REST API
+    volumes:
+      - ./data/clips:/data/clips
+      - ./config:/app/config:ro
+    environment:
+      - VYZN_SITE_ID=site_docker_deploy
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - go2rtc
+    networks:
+      - vyzn-network
+
+networks:
+  vyzn-network:
+    driver: bridge
