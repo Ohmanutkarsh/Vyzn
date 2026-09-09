@@ -35,6 +35,8 @@
 | Phase 2: Commercial Pilot (Indian SMBs)                                                         |
 | - Alerts: Meta WhatsApp Cloud API (Interactive Message Templates + Quick Replies)              |
 | - Configuration: FastAPI + HTMX / Tailwind (polygon zone editor + business hours)               |
+| - Remote Telemetry: 60s JSON Heartbeat to cloud webhook + Telegram site-down alert               |
+| - Remote Management: Cloudflare Tunnel / Tailscale for zero-port-forwarding secure SSH           |
 | - Cloud Sync: Cloudflare R2 (S3-compatible, zero-egress fees) via aioboto3                      |
 | - Metadata Sync: SQLite edge-to-cloud batch sync                                                |
 +-------------------------------------------------------------------------------------------------+
@@ -139,6 +141,54 @@
 ### 3.8 Cloud Object Storage
 - **Provider:** Cloudflare R2 (S3-compatible API).
 - **Reasoning:** Zero-egress charges. At 50–100 clips per camera/month, standard AWS S3 egress bills become unpredictable; Cloudflare R2 guarantees that reviewing clips from the mobile app incurs \$0 in egress costs.
+
+### 3.9 Inference Scaling Limits & Queue Saturation Math
+A single sequential CPU inference worker has a deterministic capacity ceiling. Below is the capacity model:
+- **Frame Input Rate:** 4 fps decimated stream per camera.
+- **Retail Motion Duty Cycle:** ~25%–35% during business hours, $< 5\%$ after-hours.
+- **Load Calculation (4 Cameras):**  
+  $$4 \text{ cameras} \times 4 \text{ fps} \times 0.30 \text{ motion} = 4.8 \text{ frames/sec entering queue}$$
+- **Inference Latency:** YOLOv8n / RF-DETR Nano on a modern quad-core x86 CPU (Intel N100, Core i5, Ryzen 5) takes **$38\text{--}48\text{ ms}$ per frame** ($\approx 21\text{--}26\text{ fps}$ throughput).
+- **Hard Ceiling Limit:**  
+  A single sequential worker safely sustains up to **6 to 8 active-motion cameras** before queue backlog accumulates.
+- **Scale Path (Beyond 8 Cameras):**
+  1. Micro-batching (`batch_size = 4`) via ONNX Runtime / OpenVINO.
+  2. Offload to low-cost edge NPU (Hailo-8 M.2, \$70) achieving 100+ fps.
+  3. Spin a secondary parallel worker thread mapped to distinct CPU cores.
+
+### 3.10 Remote Observability & Telemetry Architecture
+Edge boxes deployed across retail shops cannot be serviced in person daily. The system includes an automated telemetry engine:
+- **60-Second Telemetry Heartbeat:** Edge daemon transmits a compact JSON ping to the cloud endpoint (`POST /api/v1/telemetry/heartbeat`).
+  ```json
+  {
+    "site_id": "site_nagpur_kirana_01",
+    "firmware_version": "1.0.0",
+    "timestamp": "2026-09-09T14:45:00Z",
+    "system": {
+      "uptime_sec": 172800,
+      "cpu_temp_c": 53.5,
+      "cpu_usage_pct": 34.2,
+      "ram_used_mb": 1180,
+      "disk_free_pct": 71.4
+    },
+    "cameras": [
+      {"id": "cam_01", "status": "ACTIVE", "fps": 4.0, "lag_sec": 0.1},
+      {"id": "cam_02", "status": "ACTIVE", "fps": 3.9, "lag_sec": 0.2}
+    ],
+    "queue_depth": 1
+  }
+  ```
+- **Automated Cloud Dead-Man Alert:** If 3 consecutive heartbeats are missed ($> 180\text{ seconds}$ of silence), the cloud service dispatches an emergency notification to the engineering Telegram channel:  
+  `🚨 ALERT: Site Offline — site_nagpur_kirana_01 has ceased heartbeats.`
+
+### 3.11 Remote OTA Configuration & Secure Tunnel
+- **Remote Config Synchronization:**
+  - On every 60s heartbeat response, the cloud webhook returns the active `config_hash`.
+  - If the hash differs from local, the edge pulls `GET /api/v1/sites/{site_id}/config` and dynamically hot-reloads camera zones, business schedules, and detection thresholds without restarting RTSP capture threads.
+  - A fallback copy is cached locally at `/data/config.json` ensuring full offline operation during ISP outages.
+- **Encrypted Remote Shell Access:**
+  - Every edge box pre-installs **Cloudflare Tunnel (`cloudflared`)** or **Tailscale**.
+  - Provides instant, secure reverse SSH and HTTPS administration directly to the edge machine with **zero router port forwarding**, zero firewall modifications, and zero dependency on static public IP addresses.
 
 ---
 

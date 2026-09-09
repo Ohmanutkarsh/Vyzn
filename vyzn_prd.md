@@ -1,6 +1,6 @@
 # VYZN (Netra) — Product Requirements Document (PRD)
 
-> **Companion Documents:** [ROADMAP.md](file:///c:/Vyzn%20Ai/ROADMAP.md), [vyzn_tech_stack.md](file:///c:/Vyzn%20Ai/vyzn_tech_stack.md), [vyzn_style_guide.md](file:///c:/Vyzn%20Ai/vyzn_style_guide.md), [SCORING_SPEC.md](file:///c:/Vyzn%20Ai/SCORING_SPEC.md).
+> **Companion Documents:** [ROADMAP.md](file:///c:/Vyzn%20Ai/ROADMAP.md), [vyzn_plan.md](file:///c:/Vyzn%20Ai/vyzn_plan.md), [vyzn_tech_stack.md](file:///c:/Vyzn%20Ai/vyzn_tech_stack.md), [SCORING_SPEC.md](file:///c:/Vyzn%20Ai/SCORING_SPEC.md).
 
 ---
 
@@ -74,18 +74,21 @@ AI video analytics falls explicitly under the scope of India's **Digital Persona
 ### Phase 1: Technical MVP (Single Edge Box, Multi-Camera, Local Only)
 - **FR-1.1:** Concurrently ingest 2–5 RTSP streams over TCP with zero blocking on `.read()`.
 - **FR-1.2:** Downscaled MOG2 motion pre-filter running at 360p/480p to drop non-motion frames instantly.
-- **FR-1.3:** Centralized FIFO inference queue processed sequentially by a single YOLOv8n / RF-DETR ONNX instance.
+- **FR-1.3:** Centralized FIFO inference queue processed sequentially by a single YOLOv8n / RF-DETR ONNX instance (calibrated up to 6–8 active streams).
 - **FR-1.4:** 5-layer calibrated scoring engine with persistence tracking and hard confidence floors.
 - **FR-1.5:** FFmpeg native circular buffer capturing pre-roll ($10\text{s}$) and grace period ($30\text{--}60\text{s}$) directly to fragmented MP4 (`fMP4`).
 - **FR-1.6:** Local SQLite index in WAL mode recording event timestamps, object classes, confidence, and file paths.
 - **FR-1.7:** Background reaper running every 10 minutes enforcing 72h tiered retention and 85% disk safety margin.
 - **FR-1.8:** Instant Telegram bot alerts with attached 8-second MP4 clip and triage buttons ("Important", "False Alarm").
 
-### Phase 2: Commercial Pilot (WhatsApp Alerts & Light Cloud)
+### Phase 2: Commercial Pilot (WhatsApp Alerts & Remote Observability)
 - **FR-2.1:** WhatsApp Cloud API integration delivering rich media alert cards to owner phone numbers.
-- **FR-2.2:** Web-based zone and schedule editor (FastAPI + HTMX) allowing owners to draw polygon zones on camera stills and define business hours.
+- **FR-2.2:** Web-based zone and schedule editor (FastAPI + HTMX) allowing owners/technicians to draw polygon zones on camera stills and define business hours.
 - **FR-2.3:** Async cloud synchronization uploading confirmed incident clips ($\text{Score} \ge 70$) to Cloudflare R2.
 - **FR-2.4:** Sub-minute alert latency from physical trigger to WhatsApp delivery.
+- **FR-2.5:** Remote Telemetry & Health Monitoring: 60-second JSON heartbeat to cloud webhook reporting CPU temperature, RAM, disk % free, per-camera FPS, and inference queue depth.
+- **FR-2.6:** Cloud Dead-Man Alert: Cloud watchdog fires automated team alert if an edge box fails to ping for $> 3\text{ minutes}$.
+- **FR-2.7:** Dynamic Remote Configuration: Edge box polls versioned polygon zones and schedules on heartbeat without requiring SSH or physical site visits.
 
 ### Phase 3: Paid Beta (Multi-Tenant SaaS)
 - **FR-3.1:** Multi-tenant architecture with per-site data isolation (Supabase / PostgreSQL).
@@ -99,6 +102,7 @@ AI video analytics falls explicitly under the scope of India's **Digital Persona
 - **Reliability & Resilience:** System must auto-recover from camera disconnects, WiFi loss, and system reboots within 15 seconds without manual intervention.
 - **Power Loss Safety:** All recorded video clips must use fragmented MP4 (`fMP4`) so that mid-recording power cuts do not corrupt the file.
 - **Compute Efficiency:** Multi-camera edge pipeline (up to 5 streams) must consume $\le 4\text{ GB RAM}$ and run under $65^\circ\text{C}$ on typical quad-core laptop/mini-PC hardware.
+- **Remote Diagnostics & Zero-Port-Forwarding:** Secure remote maintenance via Cloudflare Tunnel or Tailscale, requiring zero router port forwarding or static public IPs.
 - **Low Latency:** High-confidence alert notification must reach the owner's phone in $< 30\text{ seconds}$ on standard 4G/fiber connections.
 - **Night/IR Robustness:** Dedicated IR grayscale confidence calibration to maintain $> 90\%$ recall on monochrome night footage without headlight false positives.
 
