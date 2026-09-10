@@ -184,6 +184,150 @@ btnModalStar.addEventListener("click", () => {
 
 document.getElementById("btn-refresh-events").addEventListener("click", fetchEvents);
 
+// ---------------------------------------------------------------------------
+// Interactive Polygon Zone Drawer
+// ---------------------------------------------------------------------------
+const zoneModal = document.getElementById("zone-modal");
+const zoneCanvas = document.getElementById("zone-canvas");
+const ctx = zoneCanvas.getContext("2d");
+const btnOpenZoneDrawer = document.getElementById("btn-open-zone-drawer");
+const btnCloseZoneModal = document.getElementById("btn-close-zone-modal");
+const btnClearZone = document.getElementById("btn-clear-zone");
+const btnSaveZone = document.getElementById("btn-save-zone");
+const zoneNameInput = document.getElementById("zone-name-input");
+const zoneWeightInput = document.getElementById("zone-weight-input");
+const zoneScheduleSelect = document.getElementById("zone-schedule-select");
+const zoneModalTitle = document.getElementById("zone-modal-title");
+
+let zonePoints = [];
+let baseSnapshot = new Image();
+
+btnOpenZoneDrawer.addEventListener("click", () => {
+  zoneModalTitle.textContent = `Interactive Zone Polygon Drawer — [${activeCamera}]`;
+  zoneNameInput.value = `${activeCamera}_restricted_zone`;
+  zonePoints = [];
+  
+  // Load current camera snapshot onto canvas
+  baseSnapshot = new Image();
+  baseSnapshot.crossOrigin = "anonymous";
+  baseSnapshot.src = `/api/cameras/${activeCamera}/snapshot.jpg?t=${Date.now()}`;
+  baseSnapshot.onload = () => {
+    redrawCanvas();
+    zoneModal.style.display = "flex";
+  };
+  baseSnapshot.onerror = () => {
+    redrawCanvas();
+    zoneModal.style.display = "flex";
+  };
+});
+
+function redrawCanvas() {
+  ctx.clearRect(0, 0, zoneCanvas.width, zoneCanvas.height);
+  
+  // 1. Draw base snapshot if available
+  if (baseSnapshot.complete && baseSnapshot.naturalWidth > 0) {
+    ctx.drawImage(baseSnapshot, 0, 0, zoneCanvas.width, zoneCanvas.height);
+  } else {
+    ctx.fillStyle = "#222220";
+    ctx.fillRect(0, 0, zoneCanvas.width, zoneCanvas.height);
+  }
+
+  if (zonePoints.length === 0) return;
+
+  // 2. Draw polygon lines and filled area
+  ctx.beginPath();
+  ctx.moveTo(zonePoints[0].x, zonePoints[0].y);
+  for (let i = 1; i < zonePoints.length; i++) {
+    ctx.lineTo(zonePoints[i].x, zonePoints[i].y);
+  }
+
+  if (zonePoints.length >= 3) {
+    ctx.closePath();
+    ctx.fillStyle = "rgba(15, 110, 86, 0.35)"; // Translucent deep teal
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = "#5DCAA5"; // Mint accent border
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // 3. Draw vertices
+  zonePoints.forEach((pt, idx) => {
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+    ctx.fillStyle = idx === 0 ? "#BA7517" : "#5DCAA5"; // First point amber, others mint
+    ctx.fill();
+    ctx.strokeStyle = "#FFFFFF";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+}
+
+zoneCanvas.addEventListener("click", (e) => {
+  const rect = zoneCanvas.getBoundingClientRect();
+  const scaleX = zoneCanvas.width / rect.width;
+  const scaleY = zoneCanvas.height / rect.height;
+
+  const x = (e.clientX - rect.left) * scaleX;
+  const y = (e.clientY - rect.top) * scaleY;
+
+  zonePoints.push({ x, y });
+  redrawCanvas();
+});
+
+btnClearZone.addEventListener("click", () => {
+  zonePoints = [];
+  redrawCanvas();
+});
+
+function closeZoneModal() {
+  zoneModal.style.display = "none";
+  zonePoints = [];
+}
+
+btnCloseZoneModal.addEventListener("click", closeZoneModal);
+zoneModal.addEventListener("click", (e) => {
+  if (e.target === zoneModal) closeZoneModal();
+});
+
+btnSaveZone.addEventListener("click", async () => {
+  if (zonePoints.length < 3) {
+    alert("Please click at least 3 points to form a polygon zone.");
+    return;
+  }
+
+  const normPoints = zonePoints.map(p => [
+    Number((p.x / zoneCanvas.width).toFixed(3)),
+    Number((p.y / zoneCanvas.height).toFixed(3))
+  ]);
+
+  const payload = {
+    name: zoneNameInput.value.trim() || `${activeCamera}_zone`,
+    points: normPoints,
+    weight: parseInt(zoneWeightInput.value, 10) || 20,
+    schedule_mode: zoneScheduleSelect.value,
+    description: `User defined polygon on ${activeCamera}`
+  };
+
+  try {
+    const res = await fetch(`/api/cameras/${activeCamera}/zones`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      alert(`✅ Restricted zone [${payload.name}] successfully saved and hot-reloaded into edge pipeline!`);
+      closeZoneModal();
+    } else {
+      const err = await res.json();
+      alert(`Error saving zone: ${err.detail || 'Failed'}`);
+    }
+  } catch (err) {
+    alert(`Network error saving zone: ${err.message}`);
+  }
+});
+
 // Poll intervals
 setInterval(fetchStatus, 3000);
 setInterval(fetchEvents, 4000);

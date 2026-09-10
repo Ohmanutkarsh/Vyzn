@@ -1,36 +1,58 @@
-# Normalized spatial zones and threat weight configuration
-# All polygon coordinates are normalized between 0.0 and 1.0 (resolution-agnostic)
-
 zones:
   cash_counter:
-    camera_id: "cam_cash_counter"
+    camera_id: cam_cash_counter
+    description: Cash drawer zone - generates immediate alert on loitering > 15s
     polygon:
-      - [0.60, 0.40]
-      - [0.85, 0.40]
-      - [0.85, 0.70]
-      - [0.60, 0.70]
+    - - 0.6
+      - 0.4
+    - - 0.85
+      - 0.4
+    - - 0.85
+      - 0.7
+    - - 0.6
+      - 0.7
+    schedule_mode: restricted_all_times
     weight: 20
-    schedule_mode: "restricted_all_times"
-    description: "Cash drawer zone - generates immediate alert on loitering > 15s"
-
-  entrance_shutter:
-    camera_id: "cam_shutter_night"
+  cash_drawer_box_test:
+    camera_id: cam_cash_counter
+    description: Test cash counter zone
     polygon:
-      - [0.05, 0.20]
-      - [0.40, 0.20]
-      - [0.40, 0.85]
-      - [0.05, 0.85]
-    weight: 15
-    schedule_mode: "after_hours_only"
-    description: "Main shutter perimeter - alerts active strictly between 21:00 and 08:30"
-
-  inventory_backroom:
-    camera_id: "cam_corridor"
-    polygon:
-      - [0.70, 0.10]
-      - [0.95, 0.10]
-      - [0.95, 0.60]
-      - [0.70, 0.60]
+    - - 0.6
+      - 0.4
+    - - 0.85
+      - 0.4
+    - - 0.85
+      - 0.7
+    - - 0.6
+      - 0.7
+    schedule_mode: restricted_all_times
     weight: 25
-    schedule_mode: "restricted_all_times"
-    description: "Restricted inventory vault - high security zone"
+  entrance_shutter:
+    camera_id: cam_shutter_night
+    description: Main shutter perimeter - alerts active strictly between 21:00 and
+      08:30
+    polygon:
+    - - 0.05
+      - 0.2
+    - - 0.4
+      - 0.2
+    - - 0.4
+      - 0.85
+    - - 0.05
+      - 0.85
+    schedule_mode: after_hours_only
+    weight: 15
+  inventory_backroom:
+    camera_id: cam_corridor
+    description: Restricted inventory vault - high security zone
+    polygon:
+    - - 0.7
+      - 0.1
+    - - 0.95
+      - 0.1
+    - - 0.95
+      - 0.6
+    - - 0.7
+      - 0.6
+    schedule_mode: restricted_all_times
+    weight: 25

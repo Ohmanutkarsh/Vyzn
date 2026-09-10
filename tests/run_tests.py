@@ -30,6 +30,16 @@ from tests.test_database import (
 )
 from tests.test_pipeline_smoke import test_pipeline_synthetic_smoke
 from tests.test_api import test_api_endpoints_and_dashboard_serving
+from tests.test_whatsapp import (
+    test_whatsapp_simulation_delivery,
+    test_whatsapp_interactive_payload_structure
+)
+from tests.test_cloud_sync import test_cloud_sync_worker_marks_synced
+from tests.test_zones_api import test_zones_and_snapshot_api
+from tests.test_cloud_backend import (
+    test_dead_man_watchdog_detects_silence,
+    test_cloud_webhook_heartbeat_and_triage
+)
 
 
 def run_all():
@@ -47,6 +57,12 @@ def run_all():
         ("test_concurrent_multi_thread_writes", lambda: with_tmp_path(test_concurrent_multi_thread_writes)),
         ("test_pipeline_synthetic_smoke", lambda: with_tmp_path(test_pipeline_synthetic_smoke)),
         ("test_api_endpoints_and_dashboard_serving", lambda: with_tmp_path(test_api_endpoints_and_dashboard_serving)),
+        ("test_whatsapp_simulation_delivery", lambda: test_whatsapp_simulation_delivery()),
+        ("test_whatsapp_interactive_payload_structure", lambda: test_whatsapp_interactive_payload_structure()),
+        ("test_cloud_sync_worker_marks_synced", lambda: with_tmp_path(test_cloud_sync_worker_marks_synced)),
+        ("test_zones_and_snapshot_api", lambda: with_tmp_path(test_zones_and_snapshot_api)),
+        ("test_dead_man_watchdog_detects_silence", lambda: test_dead_man_watchdog_detects_silence()),
+        ("test_cloud_webhook_heartbeat_and_triage", lambda: test_cloud_webhook_heartbeat_and_triage()),
     ]
 
     passed = 0

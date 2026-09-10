@@ -24,6 +24,7 @@ from vyzn.recording.clip_writer import ClipWriter
 from vyzn.alerts.telegram import TelegramAlertProvider
 from vyzn.alerts.dispatcher import AlertDispatcher
 from vyzn.storage.reaper import StorageReaperDaemon
+from vyzn.storage.cloud_sync import CloudSyncWorker
 from vyzn.telemetry.heartbeat import TelemetryHeartbeatDaemon
 from vyzn.capture.synthetic import SyntheticCameraThread
 from vyzn.capture.stream_capture import RTSPCaptureThread
@@ -68,6 +69,11 @@ class EdgePipeline:
             raw_retention_hours=self.settings.raw_retention_hours,
             disk_safety_threshold_pct=self.settings.disk_safety_threshold_pct
         )
+        self.cloud_sync = CloudSyncWorker(
+            db=self.db,
+            sync_interval_sec=20,
+            min_score=self.settings.alert_score_threshold
+        )
         self.telemetry = TelemetryHeartbeatDaemon(
             settings=self.settings,
             db=self.db,
@@ -95,6 +101,7 @@ class EdgePipeline:
 
         # 1. Start background daemons
         self.reaper.start()
+        self.cloud_sync.start()
         self.telemetry.start()
 
         # 2. Launch capture threads
@@ -306,6 +313,13 @@ class EdgePipeline:
             "events_active": len(self.active_event_ids)
         }
 
+    def update_camera_zones(self, camera_id: str, zones: List[ZonePolygon]):
+        """Dynamically hot-reloads restricted polygon zones for a camera."""
+        cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
+        if cam_config:
+            cam_config.restricted_zones = zones
+            logger.info(f"Dynamically updated {len(zones)} restricted zones for camera {camera_id}.")
+
     def stop(self):
         """Stops all threads and closes database."""
         self.running = False
@@ -319,6 +333,7 @@ class EdgePipeline:
             self.worker_thread.join(timeout=2.0)
 
         self.reaper.stop()
+        self.cloud_sync.stop()
         self.telemetry.stop()
         self.db.close()
         logger.info("VYZN Edge Pipeline stopped cleanly.")

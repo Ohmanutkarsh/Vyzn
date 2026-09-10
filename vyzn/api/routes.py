@@ -223,6 +223,105 @@ def stream_camera_mjpeg(camera_id: str):
     )
 
 
+class ZoneCreateRequest(BaseModel):
+    name: str
+    points: List[List[float]]  # Normalized [[x1, y1], [x2, y2], ...]
+    weight: int = 20
+    schedule_mode: str = "restricted_all_times"
+    description: str = ""
+
+
+@app.get("/api/cameras/{camera_id}/snapshot.jpg")
+def get_camera_snapshot(camera_id: str):
+    """Returns an uncompressed JPEG still frame for visual zone polygon drawing."""
+    frame = None
+    if _pipeline_instance and camera_id in _pipeline_instance.ring_buffers:
+        buf = _pipeline_instance.ring_buffers[camera_id]
+        if buf:
+            frame = buf[-1]
+
+    if frame is None:
+        frame = np.full((360, 640, 3), 45, dtype=np.uint8)
+        cv2.putText(
+            frame,
+            f"Snapshot: {camera_id}",
+            (180, 180),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (255, 255, 255),
+            2
+        )
+
+    ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    from fastapi.responses import Response
+    return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+
+
+@app.get("/api/cameras/{camera_id}/zones")
+def get_camera_zones(camera_id: str):
+    """Retrieves all active restricted polygon zones for a specific camera."""
+    settings = get_settings()
+    cam = next((c for c in settings.cameras if c.camera_id == camera_id), None)
+    if not cam:
+        return []
+    return [z.dict() for z in cam.restricted_zones]
+
+
+@app.post("/api/cameras/{camera_id}/zones")
+def create_camera_zone(camera_id: str, zone_req: ZoneCreateRequest):
+    """
+    Saves a new visual polygon zone for a camera, writes to config/zones.yaml,
+    and dynamically hot-reloads the active edge pipeline without dropping capture threads.
+    """
+    settings = get_settings()
+    cam = next((c for c in settings.cameras if c.camera_id == camera_id), None)
+    if not cam:
+        raise HTTPException(status_code=404, detail=f"Camera {camera_id} not found")
+
+    from vyzn.core.config import ZonePolygon
+    import yaml
+
+    new_zone = ZonePolygon(name=zone_req.name, points=zone_req.points)
+    # Filter out existing zone with same name if replacing
+    cam.restricted_zones = [z for z in cam.restricted_zones if z.name != zone_req.name]
+    cam.restricted_zones.append(new_zone)
+
+    # Hot-reload in pipeline
+    if _pipeline_instance and hasattr(_pipeline_instance, "update_camera_zones"):
+        _pipeline_instance.update_camera_zones(camera_id, cam.restricted_zones)
+
+    # Persist to config/zones.yaml
+    zones_file = Path("./config/zones.yaml")
+    zones_file.parent.mkdir(parents=True, exist_ok=True)
+    existing_data = {"zones": {}}
+    if zones_file.exists():
+        try:
+            with open(zones_file, "r") as f:
+                loaded = yaml.safe_load(f)
+                if loaded and "zones" in loaded:
+                    existing_data = loaded
+        except Exception:
+            pass
+
+    existing_data["zones"][zone_req.name] = {
+        "camera_id": camera_id,
+        "polygon": zone_req.points,
+        "weight": zone_req.weight,
+        "schedule_mode": zone_req.schedule_mode,
+        "description": zone_req.description or f"Zone on {camera_id}"
+    }
+
+    with open(zones_file, "w") as f:
+        yaml.safe_dump(existing_data, f, default_flow_style=False)
+
+    return {
+        "status": "success",
+        "camera_id": camera_id,
+        "zone_name": zone_req.name,
+        "vertex_count": len(zone_req.points)
+    }
+
+
 # ---------------------------------------------------------------------------
 # Dashboard Static Web Serving
 # ---------------------------------------------------------------------------
