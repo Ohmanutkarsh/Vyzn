@@ -29,6 +29,8 @@ from vyzn.telemetry.heartbeat import TelemetryHeartbeatDaemon
 from vyzn.capture.synthetic import SyntheticCameraThread
 from vyzn.capture.stream_capture import RTSPCaptureThread
 from vyzn.privacy.dpdp import PrivacyMasker
+from vyzn.scoring.calibrator import AdaptiveCalibrator
+from vyzn.telemetry.ota_sync import OTASyncWorker
 
 logger = logging.getLogger("vyzn.pipeline")
 
@@ -83,6 +85,14 @@ class EdgePipeline:
             pipeline_status_getter=self.get_telemetry_status
         )
 
+        self.calibrator = AdaptiveCalibrator(db=self.db)
+        self.ota_sync = OTASyncWorker(
+            settings=self.settings,
+            pipeline=self,
+            db=self.db,
+            sync_interval_sec=30.0
+        )
+
         # Queues & Capture Threads
         self.frame_queue: queue.Queue = queue.Queue(maxsize=40)
         self.capture_threads: List[threading.Thread] = []
@@ -109,6 +119,7 @@ class EdgePipeline:
         self.reaper.start()
         self.cloud_sync.start()
         self.telemetry.start()
+        self.ota_sync.start()
 
         # 2. Launch capture threads
         for cam in self.settings.cameras:
@@ -212,7 +223,8 @@ class EdgePipeline:
                         timestamp=now_dt
                     )
 
-                    score, alert, breakdown = self.scoring_engine.evaluate(candidate)
+                    cam_bias = self.calibrator.get_camera_bias(camera_id)
+                    score, alert, breakdown = self.scoring_engine.evaluate(candidate, camera_bias=cam_bias)
                     if score > highest_score:
                         highest_score = score
                         should_alert_flag = alert
@@ -231,7 +243,8 @@ class EdgePipeline:
                     is_night_ir=is_night_ir,
                     timestamp=now_dt
                 )
-                score, alert, _ = self.scoring_engine.evaluate(candidate)
+                cam_bias = self.calibrator.get_camera_bias(camera_id)
+                score, alert, _ = self.scoring_engine.evaluate(candidate, camera_bias=cam_bias)
                 highest_score = score
                 best_candidate = candidate
 
@@ -330,15 +343,32 @@ class EdgePipeline:
         return {
             "active_cameras": len([t for t in self.capture_threads if getattr(t, "is_connected", False)]),
             "queue_depth": self.frame_queue.qsize(),
-            "events_active": len(self.active_event_ids)
+            "events_active": len(self.active_event_ids),
+            "config_hash": getattr(self.ota_sync, "current_config_hash", "")
         }
 
     def update_camera_zones(self, camera_id: str, zones: List[ZonePolygon]):
-        """Dynamically hot-reloads restricted polygon zones for a camera."""
-        cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
-        if cam_config:
-            cam_config.restricted_zones = zones
-            logger.info(f"Dynamically updated {len(zones)} restricted zones for camera {camera_id}.")
+        """Dynamically hot-reloads restricted polygon zones for a camera via atomic replacement."""
+        for idx, cam in enumerate(self.settings.cameras):
+            if cam.camera_id == camera_id:
+                new_cam = CameraConfig(
+                    camera_id=cam.camera_id,
+                    name=cam.name,
+                    rtsp_url=cam.rtsp_url,
+                    substream_url=cam.substream_url,
+                    target_fps=cam.target_fps,
+                    input_resolution=cam.input_resolution,
+                    enabled=cam.enabled,
+                    is_night_ir=cam.is_night_ir,
+                    restricted_zones=list(zones),
+                    privacy_masks=list(cam.privacy_masks),
+                    business_hours=cam.business_hours
+                )
+                new_cameras = list(self.settings.cameras)
+                new_cameras[idx] = new_cam
+                self.settings.cameras = new_cameras
+                logger.info(f"Dynamically updated {len(zones)} restricted zones for camera {camera_id} (atomic swap).")
+                break
 
     def stop(self):
         """Stops all threads and closes database."""
@@ -360,6 +390,7 @@ class EdgePipeline:
         if self.worker_thread:
             self.worker_thread.join(timeout=2.0)
 
+        self.ota_sync.stop()
         self.reaper.stop()
         self.cloud_sync.stop()
         self.telemetry.stop()

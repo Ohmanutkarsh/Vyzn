@@ -54,6 +54,22 @@ from tests.test_privacy_and_dpdp import (
 )
 from tests.test_benchmark_suite import test_benchmark_execution
 from tests.test_triage_and_metrics_api import test_triage_and_metrics_endpoints
+from tests.test_adaptive_calibrator import (
+    test_calibrator_sample_gating_and_bayesian_estimation,
+    test_anti_gaming_slew_rate_limiter,
+    test_rolling_window_decays_old_nuisance,
+    test_hard_floor_inviolability_under_severe_camera_bias
+)
+from tests.test_ota_sync import (
+    test_canonical_hash_and_hmac_tamper_detection,
+    test_semantic_geometry_validation,
+    test_wholesale_atomic_zone_swap_and_rollback
+)
+from tests.test_fleet_portal import (
+    test_fleet_portal_authentication_enforcement,
+    test_fleet_tenant_scoping_and_remote_config_dispatch,
+    test_fleet_portal_html_rendering
+)
 
 
 def run_all():
@@ -86,6 +102,16 @@ def run_all():
         ("test_dpdp_notice_generator", lambda: test_dpdp_notice_generator()),
         ("test_benchmark_execution", lambda: test_benchmark_execution()),
         ("test_triage_and_metrics_endpoints", lambda: test_triage_and_metrics_endpoints()),
+        ("test_calibrator_sample_gating_and_bayesian_estimation", lambda: with_tmp_path(test_calibrator_sample_gating_and_bayesian_estimation)),
+        ("test_anti_gaming_slew_rate_limiter", lambda: test_anti_gaming_slew_rate_limiter()),
+        ("test_rolling_window_decays_old_nuisance", lambda: with_tmp_path(test_rolling_window_decays_old_nuisance)),
+        ("test_hard_floor_inviolability_under_severe_camera_bias", lambda: test_hard_floor_inviolability_under_severe_camera_bias()),
+        ("test_canonical_hash_and_hmac_tamper_detection", lambda: test_canonical_hash_and_hmac_tamper_detection()),
+        ("test_semantic_geometry_validation", lambda: test_semantic_geometry_validation()),
+        ("test_wholesale_atomic_zone_swap_and_rollback", lambda: with_tmp_path(test_wholesale_atomic_zone_swap_and_rollback)),
+        ("test_fleet_portal_authentication_enforcement", lambda: test_fleet_portal_authentication_enforcement()),
+        ("test_fleet_tenant_scoping_and_remote_config_dispatch", lambda: test_fleet_tenant_scoping_and_remote_config_dispatch()),
+        ("test_fleet_portal_html_rendering", lambda: test_fleet_portal_html_rendering()),
     ]
 
 

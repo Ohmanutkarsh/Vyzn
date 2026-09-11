@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Request, Response, Query
 from pydantic import BaseModel
 
 from vyzn_cloud.watchdog import DeadManWatchdog
+from vyzn_cloud.fleet_routes import fleet_router, set_watchdog, MANAGED_CONFIGS
 
 logger = logging.getLogger("vyzn_cloud.app")
 
@@ -19,6 +20,8 @@ cloud_app = FastAPI(
 )
 
 watchdog = DeadManWatchdog(silence_threshold_sec=180.0)
+set_watchdog(watchdog)
+cloud_app.include_router(fleet_router)
 
 # In-memory store for WhatsApp triage actions received
 triage_log: list[Dict[str, Any]] = []
@@ -29,6 +32,7 @@ class TelemetryHeartbeatPayload(BaseModel):
     timestamp: str
     system: Dict[str, Any]
     pipeline: Optional[Dict[str, Any]] = None
+    config_hash: Optional[str] = None
 
 
 @cloud_app.get("/health")
@@ -38,12 +42,23 @@ def cloud_health():
 
 @cloud_app.post("/api/v1/telemetry/heartbeat")
 def receive_edge_heartbeat(payload: TelemetryHeartbeatPayload):
-    """Ingests 60-second JSON heartbeat from an active edge box."""
+    """Ingests 60-second JSON heartbeat from an active edge box and signals OTA updates."""
     watchdog.record_heartbeat(payload.site_id, payload.dict())
+
+    managed = MANAGED_CONFIGS.get(payload.site_id)
+    new_config_available = False
+    latest_version = 1
+    if managed and payload.config_hash:
+        cloud_hash = managed.get("config_hash")
+        latest_version = managed.get("config_version", 1)
+        if cloud_hash and cloud_hash != payload.config_hash:
+            new_config_available = True
+
     return {
         "status": "acknowledged",
         "site_id": payload.site_id,
-        "config_version": "1.0.0"
+        "config_version": latest_version,
+        "new_config_available": new_config_available
     }
 
 

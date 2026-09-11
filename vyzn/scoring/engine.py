@@ -88,10 +88,12 @@ class ScoringEngine:
 
     def evaluate(
         self,
-        candidate: DetectionCandidate
+        candidate: DetectionCandidate,
+        camera_bias: int = 0
     ) -> Tuple[int, bool, Dict[str, Any]]:
         """
         Computes the 5-layer score and returns (score, should_alert, breakdown).
+        Accepts dynamic camera_bias (<= 0) to dampen unclassified nuisance triggers.
         """
         # Layer 0: Schedule & Zone Hard Gate
         gate_l0_passed = candidate.is_after_hours or candidate.is_in_restricted_zone
@@ -115,15 +117,16 @@ class ScoringEngine:
 
         subtotal_123 = l1 + l2 + l3
 
-        # Layer 4: Nuisance Penalty vs Hard Floor
+        # Layer 4: Nuisance Penalty vs Hard Floor + Adaptive Camera Bias
         if is_valid_detection:
             # Any confirmed valid object detection cannot score below 50
             subtotal_1234 = max(50, subtotal_123)
             l4_adjustment = subtotal_1234 - subtotal_123
         else:
-            # Unclassified motion penalty
-            subtotal_1234 = max(0, subtotal_123 - 35)
-            l4_adjustment = -35
+            # Unclassified motion penalty plus camera-specific adaptive bias (<= 0)
+            effective_penalty = -35 + min(0, camera_bias)
+            subtotal_1234 = max(0, subtotal_123 + effective_penalty)
+            l4_adjustment = effective_penalty
 
         # Layer 5: Persistence Bonus (0-15 pts, +3 pts per tracked second)
         l5 = min(15, round(candidate.track_duration_sec * 3))
@@ -139,6 +142,7 @@ class ScoringEngine:
             "l2_confidence": l2,
             "l3_object_weight": l3,
             "l4_adjustment": l4_adjustment,
+            "camera_bias": camera_bias,
             "l5_persistence": l5,
             "subtotal": subtotal_1234 + l5,
             "final_score": final_score,

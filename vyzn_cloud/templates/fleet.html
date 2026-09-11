@@ -1,0 +1,503 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VYZN Netra — Multi-Tenant Fleet Observability Portal</title>
+    <style>
+        :root {
+            --bg-base: #0a0c10;
+            --bg-card: #12151c;
+            --bg-surface: #181d26;
+            --border-subtle: #232a38;
+            --border-focus: #3b82f6;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --cyan: #06b6d4;
+            --purple: #8b5cf6;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 20px;
+            margin-bottom: 24px;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo-badge {
+            background: linear-gradient(135deg, var(--primary), var(--purple));
+            color: white;
+            font-weight: 800;
+            font-size: 18px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            letter-spacing: 1px;
+        }
+
+        .auth-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            padding: 6px 14px;
+            border-radius: 8px;
+        }
+
+        .auth-input {
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            font-size: 13px;
+            outline: none;
+            width: 250px;
+        }
+
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-subtle);
+        }
+
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .site-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 14px;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+
+        .site-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        .site-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .site-name {
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-online {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-offline {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .stat-value {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .incident-item {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 10px;
+        }
+
+        .incident-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+
+        .form-control {
+            width: 100%;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-main);
+            font-size: 13px;
+        }
+
+        .form-control:focus {
+            border-color: var(--border-focus);
+            outline: none;
+        }
+
+        .notice-box {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            color: #93c5fd;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="header">
+        <div class="logo-group">
+            <div class="logo-badge">VYZN NETRA</div>
+            <div>
+                <h1 style="font-size: 18px; font-weight: 700;">Multi-Tenant Fleet Observability</h1>
+                <p style="font-size: 12px; color: var(--text-muted);">Commercial Edge Surveillance Cloud Operations (Port 9000)</p>
+            </div>
+        </div>
+
+        <div class="auth-bar">
+            <span style="font-size: 12px; color: var(--text-muted);">🔑 Installer Key:</span>
+            <input type="password" id="installerKeyInput" class="auth-input" value="installer_key_delhi_netra_01" placeholder="Enter X-Installer-Key">
+            <button class="btn btn-secondary" onclick="loginPreset('installer_key_delhi_netra_01')">Delhi Installer</button>
+            <button class="btn btn-secondary" onclick="loginPreset('installer_key_master_admin_99')">Master Admin</button>
+            <button class="btn" onclick="refreshFleetData()">Connect</button>
+        </div>
+    </header>
+
+    <div class="notice-box">
+        🔒 <strong>Enterprise Security Active:</strong> All endpoints enforce tenant scoping and installer authentication. OTA configuration pushes are cryptographically signed with site-specific HMAC-SHA256 tokens and backed by an atomic rollback-to-last-known-good mechanism on the edge box.
+    </div>
+
+    <div class="grid-layout">
+        <!-- Main Column: Monitored Edge Sites -->
+        <div>
+            <div class="card">
+                <div class="card-title">
+                    <span>🏬 Monitored Retail Stores & Edge Nodes</span>
+                    <span id="siteCountBadge" class="badge" style="background: var(--bg-surface);">3 Sites Scoped</span>
+                </div>
+
+                <div id="sitesContainer">
+                    <p style="color: var(--text-muted); font-size: 13px;">Loading fleet telemetry...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar: Incidents & Remote OTA Dispatcher -->
+        <div>
+            <!-- Remote OTA Config Push -->
+            <div class="card">
+                <div class="card-title">
+                    <span>🚀 Remote OTA Config Dispatcher</span>
+                </div>
+                <div class="form-group">
+                    <label>Target Site</label>
+                    <select id="otaSiteSelect" class="form-control">
+                        <option value="site_local_default">Edge Node (Local Deployment)</option>
+                        <option value="site_sharma_kirana">Sharma Kirana Store (South Delhi)</option>
+                        <option value="site_verma_retail">Verma Hardware Depot (Noida)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Alert Score Threshold (40 - 90)</label>
+                    <input type="number" id="otaThreshold" class="form-control" value="70" min="40" max="90">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" class="form-group">
+                    <div>
+                        <label>Business Hours Start</label>
+                        <input type="text" id="otaStart" class="form-control" value="09:00">
+                    </div>
+                    <div>
+                        <label>Business Hours End</label>
+                        <input type="text" id="otaEnd" class="form-control" value="21:00">
+                    </div>
+                </div>
+                <button class="btn" style="width: 100%;" onclick="dispatchOtaConfig()">Deploy Signed OTA Config</button>
+                <div id="otaResultMsg" style="margin-top: 12px; font-size: 12px; color: var(--success);"></div>
+            </div>
+
+            <!-- Fleet Incidents -->
+            <div class="card">
+                <div class="card-title">
+                    <span>🚨 Verified Cross-Store Incidents</span>
+                </div>
+                <div id="incidentsContainer">
+                    <p style="color: var(--text-muted); font-size: 13px;">Loading incidents...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function getHeaders() {
+            const key = document.getElementById('installerKeyInput').value.trim();
+            return {
+                'Content-Type': 'application/json',
+                'X-Installer-Key': key
+            };
+        }
+
+        function loginPreset(key) {
+            document.getElementById('installerKeyInput').value = key;
+            refreshFleetData();
+        }
+
+        async function refreshFleetData() {
+            const headers = getHeaders();
+            try {
+                // Fetch Authorized Sites
+                const res = await fetch('/api/v1/fleet/sites', { headers });
+                if (!res.ok) {
+                    if (res.status === 401) {
+                        document.getElementById('sitesContainer').innerHTML = '<p style="color: var(--danger);">❌ Authentication Failed: Invalid or missing X-Installer-Key.</p>';
+                        return;
+                    }
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                const sites = await res.json();
+                renderSites(sites);
+
+                // Fetch Incidents
+                const incRes = await fetch('/api/v1/fleet/incidents', { headers });
+                if (incRes.ok) {
+                    const incidents = await incRes.json();
+                    renderIncidents(incidents);
+                }
+            } catch (err) {
+                console.error("Fleet sync error:", err);
+            }
+        }
+
+        function renderSites(sites) {
+            document.getElementById('siteCountBadge').textContent = `${sites.length} Sites Scoped`;
+            const container = document.getElementById('sitesContainer');
+            if (sites.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-muted);">No sites assigned to this installer credentials.</p>';
+                return;
+            }
+
+            container.innerHTML = sites.map(site => {
+                const isOnline = site.status === 'ONLINE';
+                const badgeClass = isOnline ? 'badge-online' : 'badge-offline';
+                const sys = site.system || {};
+                const pipe = site.pipeline || {};
+
+                return `
+                    <div class="site-card">
+                        <div class="site-header">
+                            <div>
+                                <div class="site-name">${site.name || site.site_id}</div>
+                                <div style="font-size: 12px; color: var(--text-muted);">ID: ${site.site_id} · OTA Config: v${site.config_version || 1} (${site.config_hash || 'init'})</div>
+                            </div>
+                            <span class="badge ${badgeClass}">${site.status}</span>
+                        </div>
+
+                        <div class="stats-row">
+                            <div class="stat-item">
+                                <span class="stat-label">CPU Load</span>
+                                <span class="stat-value">${sys.cpu_usage_pct || 0}%</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">RAM In-Use</span>
+                                <span class="stat-value">${sys.ram_used_mb ? Math.round(sys.ram_used_mb) + ' MB' : '--'}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Disk Free</span>
+                                <span class="stat-value">${sys.disk_free_pct || 0}%</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Active Cameras</span>
+                                <span class="stat-value" style="color: var(--cyan);">${pipe.active_cameras || 3} RTSP</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderIncidents(incidents) {
+            const container = document.getElementById('incidentsContainer');
+            if (!incidents || incidents.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-muted); font-size: 12px;">No active high-threat incidents.</p>';
+                return;
+            }
+
+            container.innerHTML = incidents.map(inc => `
+                <div class="incident-item">
+                    <div class="incident-header">
+                        <span>${inc.site_name || inc.site_id}</span>
+                        <span style="color: var(--danger);">Score: ${inc.score}/100</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted);">
+                        Trigger: <strong>${inc.object_type.toUpperCase()}</strong> on ${inc.camera_id}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function dispatchOtaConfig() {
+            const siteId = document.getElementById('otaSiteSelect').value;
+            const threshold = parseInt(document.getElementById('otaThreshold').value, 10);
+            const start = document.getElementById('otaStart').value.trim();
+            const end = document.getElementById('otaEnd').value.trim();
+            const msgEl = document.getElementById('otaResultMsg');
+
+            msgEl.textContent = "Validating and dispatching signed OTA config...";
+            msgEl.style.color = "var(--cyan)";
+
+            const payload = {
+                alert_score_threshold: threshold,
+                business_hours_start: start,
+                business_hours_end: end,
+                cameras: {
+                    "cam_front_counter": {
+                        "restricted_zones": [
+                            {
+                                "name": "safe_vault_area",
+                                "points": [[0.6, 0.6], [0.95, 0.6], [0.95, 0.95], [0.6, 0.95]]
+                            }
+                        ]
+                    }
+                }
+            };
+
+            try {
+                const res = await fetch(`/api/v1/fleet/sites/${siteId}/config`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    msgEl.style.color = "var(--success)";
+                    msgEl.innerHTML = `✅ <strong>Deployed v${data.config_version}</strong><br>HMAC: ${data.signature.substring(0, 12)}...<br>Canonical Hash: ${data.config_hash.substring(0, 10)}...`;
+                    refreshFleetData();
+                } else {
+                    msgEl.style.color = "var(--danger)";
+                    msgEl.textContent = `❌ Error (${res.status}): ${data.detail || 'Failed'}`;
+                }
+            } catch (e) {
+                msgEl.style.color = "var(--danger)";
+                msgEl.textContent = `❌ Network failure: ${e.message}`;
+            }
+        }
+
+        // Initial Load
+        refreshFleetData();
+        setInterval(refreshFleetData, 10000);
+    </script>
+</body>
+</html>

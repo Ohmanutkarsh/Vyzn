@@ -92,7 +92,8 @@ class TelemetryHeartbeatDaemon(threading.Thread):
                 "ram_used_mb": round(ram_used_mb, 1),
                 "disk_free_pct": round(disk_free_pct, 1)
             },
-            "pipeline": pipeline_info
+            "pipeline": pipeline_info,
+            "config_hash": pipeline_info.get("config_hash", "")
         }
         return payload
 

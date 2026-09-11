@@ -190,6 +190,77 @@ class EventDatabase:
         finally:
             conn.close()
 
+    def get_camera_triage_statistics(
+        self,
+        camera_id: str,
+        window_days: Optional[int] = 30
+    ) -> Dict[str, Any]:
+        """Returns triage metrics and empirical false positive rate for a camera within a rolling window."""
+        from datetime import timedelta
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            if window_days and window_days > 0:
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
+                cursor.execute(
+                    "SELECT user_triage, COUNT(*) FROM events WHERE camera_id = ? AND start_time >= ? GROUP BY user_triage",
+                    (camera_id, cutoff)
+                )
+            else:
+                cursor.execute(
+                    "SELECT user_triage, COUNT(*) FROM events WHERE camera_id = ? GROUP BY user_triage",
+                    (camera_id,)
+                )
+            rows = cursor.fetchall()
+            stats = {"unreviewed": 0, "confirmed_threat": 0, "false_positive": 0, "total": 0}
+            for status, count in rows:
+                if status in stats:
+                    stats[status] = count
+                stats["total"] += count
+            reviewed = stats["confirmed_threat"] + stats["false_positive"]
+            stats["reviewed"] = reviewed
+            stats["false_positive_rate"] = round((stats["false_positive"] / float(reviewed)) * 100.0, 1) if reviewed > 0 else 0.0
+            stats["fpr_fraction"] = (stats["false_positive"] / float(reviewed)) if reviewed > 0 else 0.0
+            return stats
+        finally:
+            conn.close()
+
+    def get_all_camera_triage_statistics(
+        self,
+        window_days: Optional[int] = 30
+    ) -> Dict[str, Dict[str, Any]]:
+        """Returns triage metrics grouped by camera_id within a rolling window."""
+        from datetime import timedelta
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            if window_days and window_days > 0:
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
+                cursor.execute(
+                    "SELECT camera_id, user_triage, COUNT(*) FROM events WHERE start_time >= ? GROUP BY camera_id, user_triage",
+                    (cutoff,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT camera_id, user_triage, COUNT(*) FROM events GROUP BY camera_id, user_triage"
+                )
+            rows = cursor.fetchall()
+            result: Dict[str, Dict[str, Any]] = {}
+            for cam_id, status, count in rows:
+                if cam_id not in result:
+                    result[cam_id] = {"unreviewed": 0, "confirmed_threat": 0, "false_positive": 0, "total": 0}
+                if status in result[cam_id]:
+                    result[cam_id][status] = count
+                result[cam_id]["total"] += count
+            for cam_id, stats in result.items():
+                reviewed = stats["confirmed_threat"] + stats["false_positive"]
+                stats["reviewed"] = reviewed
+                stats["false_positive_rate"] = round((stats["false_positive"] / float(reviewed)) * 100.0, 1) if reviewed > 0 else 0.0
+                stats["fpr_fraction"] = (stats["false_positive"] / float(reviewed)) if reviewed > 0 else 0.0
+            return result
+        finally:
+            conn.close()
+
     def mark_event_synced(self, event_group_id: str):
         sql = "UPDATE events SET synced = 1 WHERE event_group_id = ?"
         self.writer.queue.put((sql, (event_group_id,), None))

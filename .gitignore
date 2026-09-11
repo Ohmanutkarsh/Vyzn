@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.py[cod]
 *.class
 data/
@@ -9,3 +9,4 @@ data/
 .venv/
 env/
 venv/
+*.last_known_good.yaml
