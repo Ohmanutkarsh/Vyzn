@@ -31,6 +31,7 @@ from vyzn.capture.stream_capture import RTSPCaptureThread
 from vyzn.privacy.dpdp import PrivacyMasker
 from vyzn.scoring.calibrator import AdaptiveCalibrator
 from vyzn.telemetry.ota_sync import OTASyncWorker
+from vyzn.core.resource_governor import ResourceGovernor
 
 logger = logging.getLogger("vyzn.pipeline")
 
@@ -92,6 +93,7 @@ class EdgePipeline:
             db=self.db,
             sync_interval_sec=30.0
         )
+        self.resource_governor = ResourceGovernor()
 
         # Queues & Capture Threads
         self.frame_queue: queue.Queue = queue.Queue(maxsize=40)
@@ -344,7 +346,8 @@ class EdgePipeline:
             "active_cameras": len([t for t in self.capture_threads if getattr(t, "is_connected", False)]),
             "queue_depth": self.frame_queue.qsize(),
             "events_active": len(self.active_event_ids),
-            "config_hash": getattr(self.ota_sync, "current_config_hash", "")
+            "config_hash": getattr(self.ota_sync, "current_config_hash", ""),
+            "resource_governance": self.resource_governor.get_state()
         }
 
     def update_camera_zones(self, camera_id: str, zones: List[ZonePolygon]):

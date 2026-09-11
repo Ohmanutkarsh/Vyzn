@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from vyzn_cloud.watchdog import DeadManWatchdog
 from vyzn_cloud.fleet_routes import fleet_router, set_watchdog, MANAGED_CONFIGS
+from vyzn_cloud.cloud_ingest import cloud_ingest_router
 
 logger = logging.getLogger("vyzn_cloud.app")
 
@@ -22,6 +23,7 @@ cloud_app = FastAPI(
 watchdog = DeadManWatchdog(silence_threshold_sec=180.0)
 set_watchdog(watchdog)
 cloud_app.include_router(fleet_router)
+cloud_app.include_router(cloud_ingest_router)
 
 # In-memory store for WhatsApp triage actions received
 triage_log: list[Dict[str, Any]] = []

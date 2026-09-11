@@ -405,6 +405,76 @@ def create_camera_zone(camera_id: str, zone_req: ZoneCreateRequest):
 
 
 # ---------------------------------------------------------------------------
+# Zero-Touch Camera Discovery & Adoption Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/v1/cameras/discover")
+def discover_network_cameras(
+    timeout: float = Query(1.5, ge=0.5, le=5.0),
+    target_ips: Optional[str] = Query(None)
+):
+    """
+    Scans local network for ONVIF and RTSP IP cameras (CP Plus, Hikvision, Dahua).
+    Enables zero-touch 1-click camera adoption without manual IP typing.
+    """
+    from vyzn.capture.discovery import CameraDiscoveryService
+    discovery = CameraDiscoveryService(timeout_sec=timeout)
+    ip_list = [ip.strip() for ip in target_ips.split(",")] if target_ips else None
+    cameras = discovery.discover_all(target_ips=ip_list)
+    return {
+        "status": "success",
+        "count": len(cameras),
+        "cameras": cameras
+    }
+
+
+class CameraAdoptRequest(BaseModel):
+    camera_id: str
+    name: str
+    rtsp_url: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+    target_fps: float = 4.0
+
+
+@app.post("/api/v1/cameras/adopt")
+def adopt_discovered_camera(req: CameraAdoptRequest):
+    """Adopts a discovered camera and registers it in the active edge configuration."""
+    from vyzn.core.config import CameraConfig
+    settings = get_settings()
+
+    final_url = req.rtsp_url
+    if req.username and req.password and "@" not in final_url:
+        # Inject credentials into RTSP URL: rtsp://user:pass@host...
+        parts = final_url.split("://", 1)
+        if len(parts) == 2:
+            final_url = f"{parts[0]}://{req.username}:{req.password}@{parts[1]}"
+
+    new_cam = CameraConfig(
+        camera_id=req.camera_id,
+        name=req.name,
+        rtsp_url=final_url,
+        enabled=True,
+        target_fps=req.target_fps
+    )
+
+    # Check if camera already exists; update or append
+    existing_idx = next((i for i, c in enumerate(settings.cameras) if c.camera_id == req.camera_id), None)
+    if existing_idx is not None:
+        settings.cameras[existing_idx] = new_cam
+    else:
+        settings.cameras.append(new_cam)
+
+    return {
+        "status": "adopted",
+        "camera_id": req.camera_id,
+        "name": req.name,
+        "rtsp_url_masked": final_url.split("@")[-1] if "@" in final_url else final_url,
+        "total_active_cameras": len(settings.cameras)
+    }
+
+
+# ---------------------------------------------------------------------------
 # Dashboard Static Web Serving
 # ---------------------------------------------------------------------------
 

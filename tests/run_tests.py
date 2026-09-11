@@ -76,6 +76,19 @@ from tests.test_fleet_portal import (
     test_fleet_portal_html_rendering
 )
 from tests.test_e2e_fleet_sync import test_end_to_end_fleet_observability_and_ota_closed_loop
+from tests.test_cloud_ingest import (
+    test_cloud_ingest_authentication_enforcement,
+    test_cloud_ingest_snapshot_processing_and_threat_scoring,
+    test_cloud_ingest_json_webhook
+)
+from tests.test_discovery import (
+    test_discovery_service_model_and_probing,
+    test_camera_discovery_and_adoption_endpoints
+)
+from tests.test_resource_governor import (
+    test_resource_governor_day_night_transition,
+    test_resource_governor_priority_api_stability
+)
 
 
 def run_all():
@@ -124,6 +137,13 @@ def run_all():
         ("test_site_key_reissuance_and_staged_config_resigning", lambda: test_site_key_reissuance_and_staged_config_resigning()),
         ("test_fleet_portal_html_rendering", lambda: test_fleet_portal_html_rendering()),
         ("test_end_to_end_fleet_observability_and_ota_closed_loop", lambda: with_tmp_path(test_end_to_end_fleet_observability_and_ota_closed_loop)),
+        ("test_cloud_ingest_authentication_enforcement", lambda: test_cloud_ingest_authentication_enforcement()),
+        ("test_cloud_ingest_snapshot_processing_and_threat_scoring", lambda: test_cloud_ingest_snapshot_processing_and_threat_scoring()),
+        ("test_cloud_ingest_json_webhook", lambda: test_cloud_ingest_json_webhook()),
+        ("test_discovery_service_model_and_probing", lambda: test_discovery_service_model_and_probing()),
+        ("test_camera_discovery_and_adoption_endpoints", lambda: with_tmp_path(test_camera_discovery_and_adoption_endpoints)),
+        ("test_resource_governor_day_night_transition", lambda: test_resource_governor_day_night_transition()),
+        ("test_resource_governor_priority_api_stability", lambda: test_resource_governor_priority_api_stability()),
     ]
 
 

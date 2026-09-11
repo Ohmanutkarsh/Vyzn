@@ -138,3 +138,10 @@ class WhatsAppCloudProvider(AlertProvider):
             return resp.json().get("id")
         logger.error(f"WhatsApp media upload failed: {resp.text}")
         return None
+
+
+def send_interactive_threat_alert(event: EventRecord, video_path: str = "", thumb_path: str = "") -> bool:
+    """Convenience helper to dispatch interactive WhatsApp alert via default provider."""
+    provider = WhatsAppCloudProvider()
+    return provider.send_alert(event, video_path, thumb_path)
+
