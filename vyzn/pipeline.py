@@ -130,7 +130,7 @@ class EdgePipeline:
 
             self.ring_buffers[cam.camera_id] = deque(maxlen=int(cam.target_fps * 10))
 
-            if self.use_synthetic:
+            if self.use_synthetic and str(cam.rtsp_url).startswith("sim://"):
                 profile = "night_intruder" if cam.is_night_ir else "walking_person"
                 thread = SyntheticCameraThread(
                     config=cam,
@@ -154,6 +154,29 @@ class EdgePipeline:
         )
         self.worker_thread.start()
         logger.info(f"Pipeline started with {len(self.capture_threads)} capture streams.")
+
+    def add_camera_stream(self, cam: CameraConfig):
+        """Dynamically launches a live capture thread for an adopted camera without pipeline restart."""
+        if cam.camera_id not in self.ring_buffers:
+            self.ring_buffers[cam.camera_id] = deque(maxlen=int(cam.target_fps * 10))
+
+        if self.use_synthetic and str(cam.rtsp_url).startswith("sim://"):
+            profile = "night_intruder" if cam.is_night_ir else "walking_person"
+            thread = SyntheticCameraThread(
+                config=cam,
+                output_queue=self.frame_queue,
+                motion_profile=profile
+            )
+        else:
+            thread = RTSPCaptureThread(
+                config=cam,
+                output_queue=self.frame_queue
+            )
+
+        self.capture_threads.append(thread)
+        if self.running:
+            thread.start()
+            logger.info(f"Dynamically launched live capture thread for camera [{cam.camera_id}].")
 
     def _inference_worker_loop(self):
         """Sequential inference worker pulling decimated frames from shared queue."""
@@ -319,6 +342,28 @@ class EdgePipeline:
         obj_type = candidate.object_type if candidate else "unclassified"
         conf = candidate.confidence if candidate else 0.0
 
+        # Extract dominant color and zone attributes
+        dom_color = "unspecified"
+        zone_n = "general"
+        if candidate and frames:
+            mid_idx = len(frames) // 2
+            mid_frame = frames[mid_idx] if mid_idx < len(frames) else frames[0]
+            try:
+                from vyzn.ai.attributes import extract_appearance_attributes
+                attr = extract_appearance_attributes(mid_frame, candidate.bounding_box, candidate.object_type)
+                dom_color = attr.get("dominant_color", "unspecified")
+            except Exception:
+                pass
+
+            if getattr(candidate, "is_in_restricted_zone", False):
+                zone_n = "restricted_vault"
+            elif "counter" in camera_id:
+                zone_n = "cash_counter"
+            elif "shutter" in camera_id:
+                zone_n = "rear_shutter"
+            else:
+                zone_n = "main_corridor"
+
         record = EventRecord(
             event_group_id=event_id,
             camera_id=camera_id,
@@ -329,12 +374,14 @@ class EdgePipeline:
             score=score,
             status="raw",
             file_path=clip_path,
-            thumb_path=thumb_path
+            thumb_path=thumb_path,
+            dominant_color=dom_color,
+            zone_name=zone_n
         )
 
         # Save to SQLite index
         self.db.insert_event(record)
-        self.db.log_audit("EVENT_RECORDED", event_id, f"Score: {score}, Obj: {obj_type}")
+        self.db.log_audit("EVENT_RECORDED", event_id, f"Score: {score}, Obj: {obj_type}, Color: {dom_color}, Zone: {zone_n}")
 
         # Dispatch alert if score qualifies
         if alert_sent or score >= self.settings.alert_score_threshold:

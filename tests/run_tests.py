@@ -94,6 +94,20 @@ from tests.test_telegram_alerts import (
     test_telegram_alert_simulation_dispatch,
     test_telegram_webhook_triage_and_commands
 )
+from tests.test_supabase_auth import (
+    test_supabase_auth_login_valid,
+    test_supabase_auth_login_invalid,
+    test_supabase_auth_register_and_profile,
+    test_supabase_auth_protected_me_rejects_unauthorized,
+    test_camera_list_masks_credentials
+)
+from tests.test_appearance_and_forensics import (
+    test_hsv_pixel_classification,
+    test_appearance_attribute_extraction_on_crops,
+    test_database_attribute_query_filtering,
+    test_forensic_pack_generation_and_manifest,
+    test_bandwidth_settings_api
+)
 
 
 def run_all():
@@ -152,6 +166,16 @@ def run_all():
         ("test_telegram_alert_payload_structure", lambda: test_telegram_alert_payload_structure()),
         ("test_telegram_alert_simulation_dispatch", lambda: test_telegram_alert_simulation_dispatch()),
         ("test_telegram_webhook_triage_and_commands", lambda: test_telegram_webhook_triage_and_commands()),
+        ("test_supabase_auth_login_valid", lambda: with_tmp_path(test_supabase_auth_login_valid)),
+        ("test_supabase_auth_login_invalid", lambda: with_tmp_path(test_supabase_auth_login_invalid)),
+        ("test_supabase_auth_register_and_profile", lambda: with_tmp_path(test_supabase_auth_register_and_profile)),
+        ("test_supabase_auth_protected_me_rejects_unauthorized", lambda: with_tmp_path(test_supabase_auth_protected_me_rejects_unauthorized)),
+        ("test_camera_list_masks_credentials", lambda: with_tmp_path(test_camera_list_masks_credentials)),
+        ("test_hsv_pixel_classification", lambda: test_hsv_pixel_classification()),
+        ("test_appearance_attribute_extraction_on_crops", lambda: test_appearance_attribute_extraction_on_crops()),
+        ("test_database_attribute_query_filtering", lambda: test_database_attribute_query_filtering()),
+        ("test_forensic_pack_generation_and_manifest", lambda: test_forensic_pack_generation_and_manifest()),
+        ("test_bandwidth_settings_api", lambda: test_bandwidth_settings_api()),
     ]
 
 

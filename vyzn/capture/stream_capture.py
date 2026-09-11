@@ -49,8 +49,21 @@ class RTSPCaptureThread(threading.Thread):
         max_backoff = 30.0
 
         while self.running:
-            logger.info(f"[{self.config.camera_id}] Opening stream: {self.config.rtsp_url}")
-            cap = cv2.VideoCapture(self.config.rtsp_url, cv2.CAP_FFMPEG)
+            url_str = str(self.config.rtsp_url).strip()
+            logger.info(f"[{self.config.camera_id}] Opening stream: {url_str}")
+            
+            if url_str.isdigit():
+                cap = cv2.VideoCapture(int(url_str), cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+            elif url_str.startswith("webcam://"):
+                try:
+                    dev_idx = int(url_str.split("://")[1])
+                except Exception:
+                    dev_idx = 0
+                cap = cv2.VideoCapture(dev_idx, cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+            elif url_str.startswith("http://") or url_str.startswith("https://") or url_str.endswith(".mp4") or os.path.exists(url_str):
+                cap = cv2.VideoCapture(url_str)
+            else:
+                cap = cv2.VideoCapture(url_str, cv2.CAP_FFMPEG)
 
             if not cap.isOpened():
                 logger.warning(

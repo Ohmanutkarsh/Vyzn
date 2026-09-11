@@ -23,6 +23,8 @@ class EventRecord:
     user_triage: str = "unreviewed"     # 'unreviewed' | 'confirmed_threat' | 'false_positive'
     file_path: str = ""                 # Path to .mp4
     thumb_path: str = ""                # Path to .jpg
+    dominant_color: str = "unspecified" # 'red' | 'blue' | 'black' | 'white' | etc.
+    zone_name: str = "general"          # Intersected zone or 'general'
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -39,6 +41,8 @@ class EventRecord:
             "user_triage": self.user_triage,
             "file_path": self.file_path,
             "thumb_path": self.thumb_path,
+            "dominant_color": self.dominant_color,
+            "zone_name": self.zone_name,
         }
 
 

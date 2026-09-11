@@ -89,7 +89,9 @@ class DatabaseWriterWorker(threading.Thread):
             synced INTEGER DEFAULT 0,          -- 0 or 1 (updated by Cloud Sync)
             user_triage TEXT DEFAULT 'unreviewed', -- 'unreviewed' | 'confirmed_threat' | 'false_positive'
             file_path TEXT NOT NULL,           -- Path to .mp4
-            thumb_path TEXT NOT NULL           -- Path to .jpg
+            thumb_path TEXT NOT NULL,          -- Path to .jpg
+            dominant_color TEXT DEFAULT 'unspecified',
+            zone_name TEXT DEFAULT 'general'
         );
 
         CREATE INDEX IF NOT EXISTS idx_events_camera_time ON events(camera_id, start_time);
@@ -117,6 +119,14 @@ class DatabaseWriterWorker(threading.Thread):
             conn.execute("ALTER TABLE events ADD COLUMN user_triage TEXT DEFAULT 'unreviewed';")
         except sqlite3.OperationalError:
             pass  # Already present
+        try:
+            conn.execute("ALTER TABLE events ADD COLUMN dominant_color TEXT DEFAULT 'unspecified';")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE events ADD COLUMN zone_name TEXT DEFAULT 'general';")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 
@@ -152,14 +162,17 @@ class EventDatabase:
         INSERT OR REPLACE INTO events (
             event_group_id, camera_id, start_time, end_time,
             object_type, confidence, score, status,
-            starred, synced, user_triage, file_path, thumb_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            starred, synced, user_triage, file_path, thumb_path,
+            dominant_color, zone_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             event.event_group_id, event.camera_id, event.start_time, event.end_time,
             event.object_type, event.confidence, event.score, event.status,
             event.starred, event.synced, getattr(event, "user_triage", "unreviewed"),
-            event.file_path, event.thumb_path
+            event.file_path, event.thumb_path,
+            getattr(event, "dominant_color", "unspecified"),
+            getattr(event, "zone_name", "general")
         )
         self.writer.queue.put((sql, params, callback))
 
@@ -303,7 +316,10 @@ class EventDatabase:
             row = cursor.fetchone()
             if not row:
                 return None
-            return EventRecord(**dict(row))
+            d = dict(row)
+            d.setdefault("dominant_color", "unspecified")
+            d.setdefault("zone_name", "general")
+            return EventRecord(**d)
         finally:
             conn.close()
 
@@ -312,15 +328,35 @@ class EventDatabase:
         self,
         camera_id: Optional[str] = None,
         min_score: int = 0,
+        color: Optional[str] = None,
+        zone: Optional[str] = None,
+        object_type: Optional[str] = None,
+        user_triage: Optional[str] = None,
         limit: int = 50
     ) -> List[EventRecord]:
-        """Queries events matching criteria."""
+        """Queries events matching criteria including appearance attributes."""
         query = "SELECT * FROM events WHERE score >= ?"
         params: List[Any] = [min_score]
 
-        if camera_id:
+        if camera_id and camera_id.lower() != "all":
             query += " AND camera_id = ?"
             params.append(camera_id)
+
+        if color and color.lower() != "all":
+            query += " AND LOWER(dominant_color) = ?"
+            params.append(color.lower())
+
+        if zone and zone.lower() != "all":
+            query += " AND LOWER(zone_name) = ?"
+            params.append(zone.lower())
+
+        if object_type and object_type.lower() != "all":
+            query += " AND LOWER(object_type) = ?"
+            params.append(object_type.lower())
+
+        if user_triage and user_triage.lower() != "all":
+            query += " AND user_triage = ?"
+            params.append(user_triage)
 
         query += " ORDER BY start_time DESC LIMIT ?"
         params.append(limit)
@@ -330,7 +366,13 @@ class EventDatabase:
             cursor = conn.cursor()
             cursor.execute(query, params)
             rows = cursor.fetchall()
-            return [EventRecord(**dict(r)) for r in rows]
+            results = []
+            for r in rows:
+                d = dict(r)
+                d.setdefault("dominant_color", "unspecified")
+                d.setdefault("zone_name", "general")
+                results.append(EventRecord(**d))
+            return results
         finally:
             conn.close()
 

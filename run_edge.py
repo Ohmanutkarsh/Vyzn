@@ -36,16 +36,39 @@ def build_synthetic_settings(num_cameras: int, data_dir: Path, demo_mode: bool =
         raw_retention_hours=0.02 if demo_mode else 72  # ~1 minute in demo mode
     )
 
+    import cv2, os
+    webcam_available = False
+    try:
+        test_cap = cv2.VideoCapture(0, cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+        if test_cap.isOpened():
+            ret, _ = test_cap.read()
+            if ret:
+                webcam_available = True
+        test_cap.release()
+    except Exception:
+        webcam_available = False
+
     cameras = []
-    # Camera 1: Corridor (Daylight)
-    cameras.append(CameraConfig(
-        camera_id="cam_corridor",
-        name="Main Store Corridor",
-        rtsp_url="sim://corridor",
-        target_fps=4.0,
-        is_night_ir=False,
-        business_hours=BusinessHours(enabled=False)  # All hours alert
-    ))
+    # Camera 1: Physical Camera if available, otherwise synthetic
+    if webcam_available:
+        cameras.append(CameraConfig(
+            camera_id="cam_corridor",
+            name="Main Entrance (Live Webcam 0)",
+            rtsp_url="0",
+            target_fps=4.0,
+            is_night_ir=False,
+            business_hours=BusinessHours(enabled=False)
+        ))
+        logger.info("[LIVE] Auto-detected physical Webcam 0. Configured as Camera 1 live feed.")
+    else:
+        cameras.append(CameraConfig(
+            camera_id="cam_corridor",
+            name="Main Store Corridor",
+            rtsp_url="sim://corridor",
+            target_fps=4.0,
+            is_night_ir=False,
+            business_hours=BusinessHours(enabled=False)
+        ))
 
     # Camera 2: Cash Counter with Restricted Polygon Zone
     if num_cameras >= 2:

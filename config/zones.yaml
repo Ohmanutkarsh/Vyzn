@@ -1,4 +1,17 @@
 zones:
+  cam_corridor_restricted_vault:
+    camera_id: cam_corridor
+    description: restricted_zone geofence created via UI studio
+    polygon:
+    - - 0.844
+      - 0.447
+    - - 0.234
+      - 0.389
+    - - 0.277
+      - 0.697
+    schedule_mode: restricted_all_times
+    weight: 25
+    zone_type: restricted_zone
   cash_counter:
     camera_id: cam_cash_counter
     description: Cash drawer zone - generates immediate alert on loitering > 15s

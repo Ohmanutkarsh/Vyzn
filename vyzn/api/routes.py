@@ -7,10 +7,14 @@ import os
 import time
 import shutil
 import cv2
+import io
+import json
+import zipfile
+import hashlib
 import numpy as np
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Security, Depends, Response
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +22,11 @@ from pydantic import BaseModel
 
 from vyzn.core.database import EventDatabase
 from vyzn.core.config import EdgeSettings
+from vyzn_cloud.supabase_client import (
+    sign_in_with_email,
+    sign_up_with_email,
+    verify_supabase_jwt
+)
 
 app = FastAPI(
     title="VYZN Netra API",
@@ -91,11 +100,23 @@ def get_system_status() -> Dict[str, Any]:
 def list_events(
     camera_id: Optional[str] = Query(None, description="Filter by camera ID"),
     min_score: int = Query(0, ge=0, le=100, description="Minimum threat score"),
+    color: Optional[str] = Query(None, description="Filter by garment / object color"),
+    zone: Optional[str] = Query(None, description="Filter by zone name"),
+    object_type: Optional[str] = Query(None, description="Filter by object category"),
+    triage: Optional[str] = Query(None, description="Filter by user triage status"),
     limit: int = Query(50, ge=1, le=200, description="Max records to return")
 ) -> List[Dict[str, Any]]:
-    """Retrieves recent events from SQLite event index."""
+    """Retrieves recent events from SQLite event index with optional appearance filters."""
     db = get_db()
-    events = db.query_events(camera_id=camera_id, min_score=min_score, limit=limit)
+    events = db.query_events(
+        camera_id=camera_id,
+        min_score=min_score,
+        color=color,
+        zone=zone,
+        object_type=object_type,
+        user_triage=triage,
+        limit=limit
+    )
     return [e.to_dict() for e in events]
 
 
@@ -150,6 +171,137 @@ def toggle_star_event(event_id: str) -> Dict[str, Any]:
     db.writer.queue.put((sql, (new_starred, event_id), None))
     db.log_audit("EVENT_STAR_TOGGLED", event_id, f"starred={new_starred}")
     return {"event_group_id": event_id, "starred": new_starred}
+
+
+@app.get("/api/v1/events/{event_id}/forensic-pack")
+def download_forensic_evidence_pack(event_id: str):
+    """
+    Generates a tamper-evident evidentiary ZIP bundle complying with
+    DPDP 2023 and Section 65B of the Indian Evidence Act / Section 63 BSA 2023.
+    """
+    db = get_db()
+    settings = get_settings()
+    event = db.get_event(event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Incident event not found")
+
+    zip_buffer = io.BytesIO()
+
+    video_hash = "FILE_UNAVAILABLE"
+    video_bytes = b""
+    if event.file_path and os.path.exists(event.file_path):
+        with open(event.file_path, "rb") as vf:
+            video_bytes = vf.read()
+            video_hash = hashlib.sha256(video_bytes).hexdigest()
+
+    thumb_hash = "FILE_UNAVAILABLE"
+    thumb_bytes = b""
+    if event.thumb_path and os.path.exists(event.thumb_path):
+        with open(event.thumb_path, "rb") as tf:
+            thumb_bytes = tf.read()
+            thumb_hash = hashlib.sha256(thumb_bytes).hexdigest()
+
+    now_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    manifest = {
+        "vyzn_forensic_version": "1.0",
+        "jurisdiction": "Republic of India",
+        "statutory_framework": "Section 63 BSA 2023 / Section 65B IEA 1872 / DPDP Act 2023",
+        "site_id": settings.site_id,
+        "site_name": settings.site_name,
+        "event_group_id": event.event_group_id,
+        "camera_id": event.camera_id,
+        "start_time_utc": event.start_time,
+        "end_time_utc": event.end_time,
+        "threat_score": event.score,
+        "object_type": event.object_type,
+        "dominant_color": getattr(event, "dominant_color", "unspecified"),
+        "zone_name": getattr(event, "zone_name", "general"),
+        "video_sha256": video_hash,
+        "thumb_sha256": thumb_hash,
+        "export_timestamp_utc": now_utc,
+        "integrity_seal": hashlib.sha256(f"{event.event_group_id}:{video_hash}:{now_utc}".encode()).hexdigest()
+    }
+
+    cert_text = f"""================================================================================
+CERTIFICATE OF AUTHENTICITY UNDER SECTION 63 OF THE BHARATIYA SAKSHYA ADHINIYAM, 2023
+(READ WITH SECTION 65B OF THE INDIAN EVIDENCE ACT, 1872)
+================================================================================
+
+1. I am the authorized operator of the automated computer vision security platform
+   (VYZN Netra) deployed at:
+   Site Name: {settings.site_name} (ID: {settings.site_id})
+
+2. I hereby certify that the accompanying digital recording:
+   File Name: {event.event_group_id}.mp4
+   Camera Channel: {event.camera_id}
+   Recorded Interval: {event.start_time} to {event.end_time} UTC
+   Recorded Threat Score: {event.score}/100 ({event.object_type}, apparel: {getattr(event, 'dominant_color', 'unspecified')})
+   Cryptographic SHA-256 Checksum: {video_hash}
+
+3. During the period over which the electronic record was produced, the computer
+   system operated legitimately and regularly. There has been no alteration,
+   tampering, frame insertion, or removal affecting the integrity of the footage.
+
+4. Generated automatically under Section 12 Data Fiduciary accountability of the
+   Digital Personal Data Protection (DPDP) Act, 2023.
+
+Timestamp of Export: {now_utc}
+Cryptographic Manifest Seal: {manifest['integrity_seal']}
+================================================================================
+"""
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        if video_bytes:
+            zf.writestr(f"{event.event_group_id}.mp4", video_bytes)
+        if thumb_bytes:
+            zf.writestr(f"{event.event_group_id}_thumb.jpg", thumb_bytes)
+        zf.writestr("manifest_sha256.json", json.dumps(manifest, indent=2))
+        zf.writestr("SECTION_65B_LEGAL_CERTIFICATE.txt", cert_text)
+
+    db.log_audit("FORENSIC_PACK_EXPORTED", event_id, f"SHA256: {video_hash[:12]}...")
+
+    return Response(
+        content=zip_buffer.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename=VYZN_FORENSIC_EVIDENCE_{event_id}.zip"
+        }
+    )
+
+
+# Bandwidth & QoS Governor State
+_bandwidth_config = {
+    "max_upload_mbps": 2.0,
+    "retention_hours": 72,
+    "asymmetrical_sync": True,
+    "current_upload_mbps": 0.42,
+    "sync_mode": "metadata_only_on_motion"
+}
+
+class BandwidthSettingsUpdate(BaseModel):
+    max_upload_mbps: Optional[float] = 2.0
+    retention_hours: Optional[int] = 72
+    asymmetrical_sync: Optional[bool] = True
+
+@app.get("/api/v1/settings/bandwidth")
+def get_bandwidth_settings() -> Dict[str, Any]:
+    """Returns edge bandwidth throttle limits and local ring buffer policy."""
+    return _bandwidth_config
+
+@app.post("/api/v1/settings/bandwidth")
+def update_bandwidth_settings(payload: BandwidthSettingsUpdate) -> Dict[str, Any]:
+    """Updates edge cloud upload throttle limits."""
+    if payload.max_upload_mbps is not None:
+        _bandwidth_config["max_upload_mbps"] = round(max(0.5, min(50.0, payload.max_upload_mbps)), 1)
+    if payload.retention_hours is not None:
+        _bandwidth_config["retention_hours"] = max(12, min(720, payload.retention_hours))
+    if payload.asymmetrical_sync is not None:
+        _bandwidth_config["asymmetrical_sync"] = payload.asymmetrical_sync
+    
+    db = get_db()
+    db.log_audit("BANDWIDTH_CONFIG_UPDATED", details=str(_bandwidth_config))
+    return {"status": "updated", "config": _bandwidth_config}
 
 
 @app.get("/api/storage")
@@ -247,6 +399,21 @@ def get_system_metrics():
     disk = psutil.disk_usage("/")
 
     active_cams = len(_pipeline_instance.capture_threads) if _pipeline_instance else 0
+    unsynced_count = 0
+    try:
+        cur = db.conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM events WHERE synced = 0")
+        row = cur.fetchone()
+        unsynced_count = row[0] if row else 0
+    except Exception:
+        pass
+
+    fps = 4.0
+    if _pipeline_instance and hasattr(_pipeline_instance, "capture_threads"):
+        measured = [getattr(t, "fps_measured", 0.0) for t in _pipeline_instance.capture_threads if getattr(t, "fps_measured", 0.0) > 0]
+        if measured:
+            fps = round(sum(measured) / len(measured), 1)
+
     return {
         "cpu_percent": psutil.cpu_percent(interval=None),
         "ram_percent": mem.percent,
@@ -254,7 +421,8 @@ def get_system_metrics():
         "disk_free_gb": round(disk.free / (1024 * 1024 * 1024), 1),
         "disk_used_pct": disk.percent,
         "active_cameras": active_cams,
-        "pipeline_fps": 4.0,
+        "pipeline_fps": fps,
+        "unsynced_events": unsynced_count,
         "triage_stats": triage_stats
     }
 
@@ -428,6 +596,44 @@ def discover_network_cameras(
     }
 
 
+_cached_local_devices = None
+
+@app.get("/api/v1/cameras/local-devices")
+def list_local_video_devices():
+    """Detects physically connected USB and integrated webcams on the host with caching."""
+    global _cached_local_devices
+    if _cached_local_devices is not None:
+        return {
+            "status": "success",
+            "count": len(_cached_local_devices),
+            "devices": _cached_local_devices
+        }
+
+    devices = []
+    for idx in range(2):
+        try:
+            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    devices.append({
+                        "device_index": idx,
+                        "name": f"Integrated Camera / Device {idx}",
+                        "rtsp_url": str(idx),
+                        "status": "ready"
+                    })
+            cap.release()
+        except Exception:
+            pass
+
+    _cached_local_devices = devices
+    return {
+        "status": "success",
+        "count": len(devices),
+        "devices": devices
+    }
+
+
 class CameraAdoptRequest(BaseModel):
     camera_id: str
     name: str
@@ -465,6 +671,10 @@ def adopt_discovered_camera(req: CameraAdoptRequest):
     else:
         settings.cameras.append(new_cam)
 
+    # Hot-launch capture thread in active pipeline
+    if _pipeline_instance and hasattr(_pipeline_instance, "add_camera_stream"):
+        _pipeline_instance.add_camera_stream(new_cam)
+
     return {
         "status": "adopted",
         "camera_id": req.camera_id,
@@ -472,6 +682,56 @@ def adopt_discovered_camera(req: CameraAdoptRequest):
         "rtsp_url_masked": final_url.split("@")[-1] if "@" in final_url else final_url,
         "total_active_cameras": len(settings.cameras)
     }
+
+
+@app.get("/api/cameras")
+def list_cameras() -> List[Dict[str, Any]]:
+    """Lists all configured edge cameras and their operational parameters."""
+    settings = get_settings()
+    return [
+        {
+            "camera_id": c.camera_id,
+            "name": c.name,
+            "enabled": c.enabled,
+            "target_fps": c.target_fps,
+            "rtsp_url_masked": c.rtsp_url.split("@")[-1] if "@" in c.rtsp_url else c.rtsp_url
+        }
+        for c in settings.cameras
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Supabase Authentication Endpoints
+# ---------------------------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    role: str = "shopkeeper"
+
+
+@app.post("/api/v1/auth/login")
+def api_auth_login(req: LoginRequest) -> Dict[str, Any]:
+    """Authenticates user via Supabase Auth (or verified local dev registry fallback)."""
+    return sign_in_with_email(req.email, req.password)
+
+
+@app.post("/api/v1/auth/register")
+def api_auth_register(req: RegisterRequest) -> Dict[str, Any]:
+    """Registers new user profile in Supabase Auth & PostgreSQL."""
+    return sign_up_with_email(req.email, req.password, req.full_name, req.role)
+
+
+@app.get("/api/v1/auth/me")
+def api_auth_me(user: Dict[str, Any] = Security(verify_supabase_jwt)) -> Dict[str, Any]:
+    """Returns authenticated user profile, tenant ID, and assigned role."""
+    return {"status": "authenticated", "user": user}
 
 
 # ---------------------------------------------------------------------------

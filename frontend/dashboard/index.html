@@ -3,190 +3,814 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VYZN Netra — Zero-Fatigue Intelligent Edge Surveillance</title>
+  <title>VYZN Surveillance Console — Enterprise Cloud VMS Cockpit</title>
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
-<body>
-  <!-- Top Navigation Header -->
-  <header class="app-header">
-    <div class="header-container">
-      <div class="brand-group">
-        <div class="logo-badge">NETRA</div>
-        <div class="brand-titles">
-          <h1>VYZN Surveillance Console</h1>
-          <span class="sub-caption">Edge Intelligence Layer • Nagpur Hub</span>
+<body class="vms-body">
+  <!-- Top App Navigation Bar -->
+  <header class="vms-header">
+    <div class="header-left">
+      <div class="logo-mark">
+        <span class="logo-accent">VYZN</span>
+        <span class="logo-product">Surveillance Console</span>
+      </div>
+      <div class="site-selector-dropdown-wrap">
+        <button class="site-selector-btn" id="btn-site-toggle" type="button" title="Switch Store / Branch">
+          <span class="site-icon">📍</span>
+          <span class="site-name" id="site-name-display">Nagpur Hub • Main Store</span>
+          <span class="site-badge">Edge Online</span>
+          <span class="dropdown-chevron">▾</span>
+        </button>
+        <div class="site-dropdown-menu" id="site-dropdown-menu" style="display: none;">
+          <div class="site-dropdown-header">MULTI-STORE ENTERPRISE FLEET</div>
+          <div class="site-option active" data-site-id="site_nagpur_hub" data-site-name="Nagpur Hub • Main Store">
+            <span class="site-opt-dot"></span>
+            <div class="site-opt-info">
+              <span class="site-opt-name">Nagpur Hub • Main Store</span>
+              <span class="site-opt-meta">Active Gateway • 3 Cameras Online</span>
+            </div>
+            <span class="site-opt-check">✓</span>
+          </div>
+          <div class="site-option" data-site-id="site_sadar_branch" data-site-name="Sadar Retail Branch">
+            <span class="site-opt-dot standby"></span>
+            <div class="site-opt-info">
+              <span class="site-opt-name">Sadar Retail Branch</span>
+              <span class="site-opt-meta">Secondary Gateway • 4 Cameras Online</span>
+            </div>
+          </div>
+          <div class="site-option" data-site-id="site_midc_warehouse" data-site-name="MIDC Warehouse #2">
+            <span class="site-opt-dot standby"></span>
+            <div class="site-opt-info">
+              <span class="site-opt-name">MIDC Warehouse #2</span>
+              <span class="site-opt-meta">Industrial NVR Bridge • 2 Cameras Online</span>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="header-right">
-        <div class="status-indicator">
-          <span class="status-dot"></span>
-          <span id="system-status-text">SYSTEM ONLINE</span>
+    </div>
+
+    <!-- Live Telemetry Strip -->
+    <div class="header-center">
+      <div class="telemetry-bar">
+        <div class="telem-item" title="Host CPU utilization">
+          <span class="telem-label">CPU</span>
+          <span class="telem-val" id="telem-cpu">--%</span>
         </div>
-        <div class="clock-display" id="clock">--:--:-- UTC</div>
+        <div class="telem-item" title="RAM utilization">
+          <span class="telem-label">RAM</span>
+          <span class="telem-val" id="telem-ram">-- MB</span>
+        </div>
+        <div class="telem-item" title="Local NVMe/SSD Storage Free">
+          <span class="telem-label">DISK FREE</span>
+          <span class="telem-val text-amber" id="telem-disk">-- GB</span>
+        </div>
+        <div class="telem-item" title="ONNX Inference Pipeline Frame Rate">
+          <span class="telem-label">AI FPS</span>
+          <span class="telem-val text-emerald" id="telem-fps">4.0</span>
+        </div>
+        <div class="telem-item" title="Empirical False Alarm Rate (FAR)">
+          <span class="telem-label">FAR</span>
+          <span class="telem-val text-cyan" id="telem-far">0.0%</span>
+        </div>
+        <div class="telem-item" title="Offline Event Cache Buffer">
+          <span class="telem-label">OFFLINE BUFFER</span>
+          <span class="telem-val" id="telem-buffer">0 cached</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="clock-chip" id="vms-clock">--:--:-- UTC</div>
+      
+      <!-- Supabase Auth User Capsule -->
+      <div class="user-capsule" id="user-capsule">
+        <div class="user-info" id="user-info-display">
+          <span class="user-status-dot" id="user-status-dot"></span>
+          <span class="user-email" id="user-email">Guest Mode</span>
+          <span class="user-role-badge" id="user-role-badge">NOT SIGNED IN</span>
+        </div>
+        <button class="btn-auth-action" id="btn-auth-modal-open">Sign In / Register</button>
       </div>
     </div>
   </header>
 
-  <!-- Live Edge Hardware & Pipeline Telemetry Strip -->
-  <div style="max-width: 1440px; margin: 12px auto 0; padding: 0 2rem;">
-    <div class="telemetry-strip">
-      <div class="telemetry-chip">CPU: <span id="telemetry-cpu">--%</span></div>
-      <div class="telemetry-chip">RAM: <span id="telemetry-ram">-- MB</span></div>
-      <div class="telemetry-chip">Disk Free: <span id="telemetry-disk">-- GB</span></div>
-      <div class="telemetry-chip">Inference FPS: <span id="telemetry-fps">4.0</span></div>
-      <div class="telemetry-chip">Empirical FAR: <span id="telemetry-far" class="text-teal">0.0%</span></div>
-      <div style="margin-left: auto; display: flex; gap: 0.5rem;">
-        <a href="/api/dpdp/notice" target="_blank" class="btn-zone btn-dpdp" style="text-decoration:none; font-size:0.75rem; padding:0.35rem 0.65rem;">📄 DPDP 2023 Notice</a>
+  <!-- Core 4-Pane Workspace Shell -->
+  <div class="vms-shell">
+    
+    <!-- Left Fixed Navigation Sidebar (64px wide) -->
+    <aside class="vms-sidebar">
+      <div class="sidebar-nav">
+        <button class="nav-btn active" id="nav-cockpit" title="Live Video Cockpit">
+          <span class="nav-icon">📹</span>
+          <span class="nav-label">Live</span>
+        </button>
+        <button class="nav-btn" id="nav-map" title="2D Retail Floorplan & Camera FOV Cones">
+          <span class="nav-icon">🗺️</span>
+          <span class="nav-label">Map</span>
+        </button>
+        <button class="nav-btn" id="nav-zones" title="Interactive Geofence & Privacy Mask Studio">
+          <span class="nav-icon">📐</span>
+          <span class="nav-label">Zones</span>
+        </button>
+        <button class="nav-btn" id="nav-discovery" title="Zero-Touch ONVIF Camera Discovery">
+          <span class="nav-icon">🔍</span>
+          <span class="nav-label">Discover</span>
+        </button>
+        <button class="nav-btn" id="nav-dpdp" title="DPDP 2023 Statutory Signage & Compliance">
+          <span class="nav-icon">🛡️</span>
+          <span class="nav-label">DPDP</span>
+        </button>
+        <a href="http://127.0.0.1:9000/fleet" target="_blank" class="nav-btn" id="nav-fleet" title="Multi-Tenant Cloud Fleet Portal">
+          <span class="nav-icon">☁️</span>
+          <span class="nav-label">Fleet</span>
+        </a>
+      </div>
+      <div class="sidebar-footer">
+        <div class="health-pulse-ring" title="Edge Bridge Heartbeat Active"></div>
+      </div>
+    </aside>
+
+    <!-- Main Stage: Center Flexible Video Viewport & Controls -->
+    <main class="vms-main">
+      <div class="cockpit-stage" id="cockpit-stage">
+        <!-- Cockpit Toolbar -->
+        <div class="cockpit-toolbar">
+          <div class="toolbar-left">
+            <span class="section-title">SURVEILLANCE COCKPIT</span>
+            <div class="bandwidth-badge" id="btn-bandwidth-modal-open" title="Click to configure Edge Bandwidth & QoS Governor">
+              <span class="pulse-dot"></span>
+              <span id="bandwidth-badge-text">Edge AI Upload Cap: <strong>2.0 Mbps</strong> (Zero Cloud Choke)</span>
+            </div>
+          </div>
+
+          <div class="toolbar-center">
+            <div class="grid-switcher">
+              <button class="grid-btn" data-grid="1" title="1x1 Deep Focus Patrol">1×1</button>
+              <button class="grid-btn active" data-grid="2" title="2x2 Quad Multi-View">2×2</button>
+              <button class="grid-btn" data-grid="3" title="3x3 High-Density Matrix">3×3</button>
+            </div>
+          </div>
+
+          <div class="toolbar-right">
+            <button class="btn-tool" id="btn-quick-discover">➕ Add Camera</button>
+            <button class="btn-tool btn-tool-accent" id="btn-quick-zone">✏️ Draw Geofence</button>
+          </div>
+        </div>
+
+        <!-- Video Tiles Container (Responsive CSS Grid) -->
+        <div class="video-grid grid-2x2" id="video-grid">
+          <!-- Camera Tile 1 -->
+          <div class="camera-tile" id="tile-cam_corridor" data-cam="cam_corridor">
+            <div class="tile-media">
+              <img class="tile-stream" src="/api/cameras/cam_corridor/mjpeg" alt="Corridor Camera">
+              <canvas class="tile-overlay-canvas"></canvas>
+            </div>
+            <div class="tile-hud-top">
+              <div class="tile-cam-info">
+                <span class="stream-dot"></span>
+                <span class="tile-cam-name">Corridor (Day Main)</span>
+                <span class="stream-profile-badge" id="badge-stream-cam_corridor">SUB 480p</span>
+              </div>
+              <div class="tile-stats">
+                <span class="fps-pill">4.0 FPS</span>
+                <span class="protocol-pill">RTSP</span>
+              </div>
+            </div>
+            <div class="tile-hud-bottom">
+              <button class="hud-btn btn-stream-toggle" data-cam="cam_corridor" title="Toggle Main (HD) / Sub (SD) Stream">HD/SD</button>
+              <button class="hud-btn btn-tile-snapshot" data-cam="cam_corridor" title="Capture Still Snapshot">📷 Snapshot</button>
+              <button class="hud-btn btn-tile-zone" data-cam="cam_corridor" title="Draw Threat Zone on this camera">✏️ Zone</button>
+              <button class="hud-btn btn-tile-expand" data-cam="cam_corridor" title="Maximize View">⛶</button>
+            </div>
+          </div>
+
+          <!-- Camera Tile 2 -->
+          <div class="camera-tile" id="tile-cam_cash_counter" data-cam="cam_cash_counter">
+            <div class="tile-media">
+              <img class="tile-stream" src="/api/cameras/cam_cash_counter/mjpeg" alt="Cash Counter">
+              <canvas class="tile-overlay-canvas"></canvas>
+            </div>
+            <div class="tile-hud-top">
+              <div class="tile-cam-info">
+                <span class="stream-dot"></span>
+                <span class="tile-cam-name">Cash Counter (Safe Vault)</span>
+                <span class="stream-profile-badge" id="badge-stream-cam_cash_counter">SUB 480p</span>
+              </div>
+              <div class="tile-stats">
+                <span class="fps-pill">4.0 FPS</span>
+                <span class="protocol-pill">RTSP</span>
+              </div>
+            </div>
+            <div class="tile-hud-bottom">
+              <button class="hud-btn btn-stream-toggle" data-cam="cam_cash_counter" title="Toggle Main (HD) / Sub (SD) Stream">HD/SD</button>
+              <button class="hud-btn btn-tile-snapshot" data-cam="cam_cash_counter" title="Capture Still Snapshot">📷 Snapshot</button>
+              <button class="hud-btn btn-tile-zone" data-cam="cam_cash_counter" title="Draw Threat Zone on this camera">✏️ Zone</button>
+              <button class="hud-btn btn-tile-expand" data-cam="cam_cash_counter" title="Maximize View">⛶</button>
+            </div>
+          </div>
+
+          <!-- Camera Tile 3 -->
+          <div class="camera-tile" id="tile-cam_shutter_night" data-cam="cam_shutter_night">
+            <div class="tile-media">
+              <img class="tile-stream" src="/api/cameras/cam_shutter_night/mjpeg" alt="Rear Shutter">
+              <canvas class="tile-overlay-canvas"></canvas>
+            </div>
+            <div class="tile-hud-top">
+              <div class="tile-cam-info">
+                <span class="stream-dot"></span>
+                <span class="tile-cam-name">Rear Shutter (Night IR)</span>
+                <span class="stream-profile-badge" id="badge-stream-cam_shutter_night">SUB 480p</span>
+              </div>
+              <div class="tile-stats">
+                <span class="fps-pill">4.0 FPS</span>
+                <span class="protocol-pill">RTSP</span>
+              </div>
+            </div>
+            <div class="tile-hud-bottom">
+              <button class="hud-btn btn-stream-toggle" data-cam="cam_shutter_night" title="Toggle Main (HD) / Sub (SD) Stream">HD/SD</button>
+              <button class="hud-btn btn-tile-snapshot" data-cam="cam_shutter_night" title="Capture Still Snapshot">📷 Snapshot</button>
+              <button class="hud-btn btn-tile-zone" data-cam="cam_shutter_night" title="Draw Threat Zone on this camera">✏️ Zone</button>
+              <button class="hud-btn btn-tile-expand" data-cam="cam_shutter_night" title="Maximize View">⛶</button>
+            </div>
+          </div>
+
+          <!-- Camera Tile 4 (Virtual Standby Slot for Discovered Camera) -->
+          <div class="camera-tile standby-tile" id="tile-cam_standby">
+            <div class="standby-content">
+              <div class="standby-icon">➕</div>
+              <div class="standby-title">Slot 4: Empty Camera Bay</div>
+              <div class="standby-sub">Adopt ONVIF / RTSP camera from local LAN</div>
+              <button class="btn-tool" id="btn-empty-bay-adopt">Scan & Connect Camera</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Stage: Synchronized 24-Hour Timeline Scrubber (80px high) -->
+        <footer class="vms-timeline-stage">
+          <div class="timeline-controls-bar">
+            <div class="playback-buttons">
+              <button class="btn-time-ctrl" id="btn-time-rewind" title="Rewind 10s">⏪ 10s</button>
+              <button class="btn-time-ctrl btn-play-pause" id="btn-time-play" title="Play/Pause Synchronized Playback">▶ Play</button>
+              <button class="btn-time-ctrl" id="btn-time-forward" title="Fast Forward 10s">10s ⏩</button>
+              <button class="btn-time-ctrl btn-threat-skip" id="btn-skip-threat" title="Jump to Next Threat Spike">🚨 Jump Threat</button>
+            </div>
+
+            <div class="scrub-time-readout">
+              <span class="scrub-date">Today</span>
+              <span class="scrub-clock" id="scrub-clock-val">12:00:00 UTC</span>
+              <span class="scrub-mode-pill" id="scrub-mode-pill">HISTORICAL SCRUB</span>
+            </div>
+
+            <div class="speed-selector">
+              <span class="speed-label">Speed:</span>
+              <button class="speed-btn active" data-speed="1">1×</button>
+              <button class="speed-btn" data-speed="2">2×</button>
+              <button class="speed-btn" data-speed="4">4×</button>
+              <button class="speed-btn" data-speed="8">8×</button>
+            </div>
+          </div>
+
+          <!-- Interactive Timeline Track with Colored Tick Marks -->
+          <div class="timeline-track-container" id="timeline-track-container">
+            <div class="timeline-hour-markers">
+              <span>00:00</span><span>03:00</span><span>06:00</span><span>09:00</span>
+              <span>12:00</span><span>15:00</span><span>18:00</span><span>21:00</span><span>24:00</span>
+            </div>
+            <div class="timeline-rail" id="timeline-rail">
+              <!-- Normal Motion Ticks (Green) & Threat Breaches (Red) rendered dynamically -->
+              <div class="timeline-tick-band" id="timeline-tick-band"></div>
+              <!-- Draggable Playhead Scrubber Cursor -->
+              <div class="timeline-playhead" id="timeline-playhead" style="left: 50%;">
+                <div class="playhead-handle"></div>
+                <div class="playhead-line"></div>
+              </div>
+            </div>
+          </div>
+        </footer>
+      </div>
+
+      <!-- 2D Retail Floorplan Stage (Toggled via Nav-Map) -->
+      <div class="floorplan-stage" id="floorplan-stage" style="display: none;">
+        <div class="floorplan-toolbar">
+          <div class="floorplan-title-box">
+            <span class="floorplan-title">2D RETAIL ARCHITECTURAL MAP & FOV RADAR</span>
+            <span class="floorplan-subtitle">Interactive 70° Field of View projection with real-time motion & intrusion pulse</span>
+          </div>
+          <div class="floorplan-legend">
+            <div class="f-legend-item"><span class="f-legend-dot dot-idle"></span> Live Monitoring</div>
+            <div class="f-legend-item"><span class="f-legend-dot dot-threat"></span> Threat / Motion Pulse</div>
+            <div class="f-legend-item"><span class="f-legend-box box-vault"></span> Restricted Vault Zone</div>
+            <div class="f-legend-item"><span class="f-legend-box box-counter"></span> Cash Counter Zone</div>
+          </div>
+        </div>
+
+        <div class="floorplan-viewport">
+          <svg class="floorplan-svg" id="floorplan-svg" viewBox="0 0 1000 620">
+            <defs>
+              <pattern id="grid-pattern" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1F2937" stroke-width="0.75" />
+              </pattern>
+              <radialGradient id="fov-green" cx="0%" cy="50%" r="100%">
+                <stop offset="0%" stop-color="#10B981" stop-opacity="0.45" />
+                <stop offset="70%" stop-color="#10B981" stop-opacity="0.12" />
+                <stop offset="100%" stop-color="#10B981" stop-opacity="0.0" />
+              </radialGradient>
+              <radialGradient id="fov-red" cx="0%" cy="50%" r="100%">
+                <stop offset="0%" stop-color="#EF4444" stop-opacity="0.65" />
+                <stop offset="70%" stop-color="#EF4444" stop-opacity="0.22" />
+                <stop offset="100%" stop-color="#EF4444" stop-opacity="0.0" />
+              </radialGradient>
+            </defs>
+
+            <!-- Blueprint Background Grid -->
+            <rect width="1000" height="620" fill="#0B0F19" />
+            <rect width="1000" height="620" fill="url(#grid-pattern)" />
+
+            <!-- Store Perimeter Outer Walls -->
+            <rect x="50" y="40" width="900" height="540" fill="#111827" stroke="#374151" stroke-width="4" rx="8" />
+
+            <!-- Restricted Safe Vault (Top Right) -->
+            <rect x="740" y="50" width="200" height="180" fill="rgba(239, 68, 68, 0.12)" stroke="#EF4444" stroke-width="2" stroke-dasharray="6,4" />
+            <text x="840" y="145" fill="#EF4444" font-size="13" font-weight="700" text-anchor="middle" letter-spacing="1">RESTRICTED VAULT</text>
+            <text x="840" y="165" fill="#9CA3AF" font-size="10" text-anchor="middle">24/7 Geofenced Zone</text>
+
+            <!-- Cash Counter & Billing Desk (Middle Right) -->
+            <rect x="680" y="270" width="260" height="130" fill="rgba(245, 158, 11, 0.10)" stroke="#F59E0B" stroke-width="2" />
+            <text x="810" y="340" fill="#F59E0B" font-size="13" font-weight="700" text-anchor="middle">CASH COUNTER & POS</text>
+
+            <!-- Rear Loading Bay / Shutter (Top Left) -->
+            <rect x="60" y="50" width="220" height="160" fill="rgba(14, 165, 233, 0.10)" stroke="#0EA5E9" stroke-width="2" />
+            <line x1="60" y1="50" x2="280" y2="50" stroke="#EF4444" stroke-width="8" stroke-dasharray="12,6" />
+            <text x="170" y="135" fill="#0EA5E9" font-size="13" font-weight="700" text-anchor="middle">REAR SHUTTER BAY</text>
+            <text x="170" y="155" fill="#9CA3AF" font-size="10" text-anchor="middle">Night IR Monitored</text>
+
+            <!-- Retail Display Aisles (Center) -->
+            <rect x="330" y="120" width="80" height="340" fill="#1F2937" stroke="#4B5563" stroke-width="1.5" rx="4" />
+            <text x="370" y="295" fill="#9CA3AF" font-size="11" font-weight="600" text-anchor="middle" transform="rotate(-90, 370, 295)">AISLE 1: FMCG</text>
+
+            <rect x="470" y="120" width="80" height="340" fill="#1F2937" stroke="#4B5563" stroke-width="1.5" rx="4" />
+            <text x="510" y="295" fill="#9CA3AF" font-size="11" font-weight="600" text-anchor="middle" transform="rotate(-90, 510, 295)">AISLE 2: PROVISIONS</text>
+
+            <!-- Main Entrance Glass Doors (Bottom Center-Left) -->
+            <rect x="150" y="570" width="160" height="10" fill="#10B981" />
+            <text x="230" y="555" fill="#10B981" font-size="12" font-weight="700" text-anchor="middle">MAIN GLASS ENTRANCE</text>
+
+            <!-- CAMERA 1: cam_corridor / Webcam 0 at Entrance -->
+            <g class="map-cam-group" id="map-cam-cam_corridor" data-cam="cam_corridor" transform="translate(160, 550)" style="cursor: pointer;">
+              <!-- 70 deg FOV Cone pointing northeast (-55 deg) -->
+              <path class="fov-cone fov-cam_corridor" d="M 0 0 L 160 -240 A 280 280 0 0 0 -60 -270 Z" fill="url(#fov-green)" />
+              <circle class="cam-pulse-ring" r="18" fill="none" stroke="#10B981" stroke-width="2" opacity="0.6" />
+              <circle class="cam-pin-body" r="10" fill="#10B981" stroke="#FFFFFF" stroke-width="2" />
+              <text x="0" y="4" fill="#000000" font-size="9" font-weight="800" text-anchor="middle">1</text>
+              <rect x="-60" y="15" width="120" height="22" rx="4" fill="#111827" stroke="#374151" />
+              <text x="0" y="30" fill="#E5E7EB" font-size="10" font-weight="600" text-anchor="middle">Entrance (Cam 1)</text>
+            </g>
+
+            <!-- CAMERA 2: cam_cash_counter -->
+            <g class="map-cam-group" id="map-cam-cam_cash_counter" data-cam="cam_cash_counter" transform="translate(730, 260)" style="cursor: pointer;">
+              <!-- FOV Cone pointing southwest into Cash & Vault (-145 deg) -->
+              <path class="fov-cone fov-cam_cash_counter" d="M 0 0 L -240 60 A 250 250 0 0 0 -180 180 Z" fill="url(#fov-green)" />
+              <circle class="cam-pulse-ring" r="18" fill="none" stroke="#10B981" stroke-width="2" opacity="0.6" />
+              <circle class="cam-pin-body" r="10" fill="#10B981" stroke="#FFFFFF" stroke-width="2" />
+              <text x="0" y="4" fill="#000000" font-size="9" font-weight="800" text-anchor="middle">2</text>
+              <rect x="-60" y="15" width="120" height="22" rx="4" fill="#111827" stroke="#374151" />
+              <text x="0" y="30" fill="#E5E7EB" font-size="10" font-weight="600" text-anchor="middle">Cash Counter (Cam 2)</text>
+            </g>
+
+            <!-- CAMERA 3: cam_shutter_night -->
+            <g class="map-cam-group" id="map-cam-cam_shutter_night" data-cam="cam_shutter_night" transform="translate(100, 70)" style="cursor: pointer;">
+              <!-- FOV Cone pointing southeast across rear loading bay -->
+              <path class="fov-cone fov-cam_shutter_night" d="M 0 0 L 220 50 A 230 230 0 0 1 120 190 Z" fill="url(#fov-green)" />
+              <circle class="cam-pulse-ring" r="18" fill="none" stroke="#10B981" stroke-width="2" opacity="0.6" />
+              <circle class="cam-pin-body" r="10" fill="#10B981" stroke="#FFFFFF" stroke-width="2" />
+              <text x="0" y="4" fill="#000000" font-size="9" font-weight="800" text-anchor="middle">3</text>
+              <rect x="-60" y="15" width="120" height="22" rx="4" fill="#111827" stroke="#374151" />
+              <text x="0" y="30" fill="#E5E7EB" font-size="10" font-weight="600" text-anchor="middle">Rear Shutter (Cam 3)</text>
+            </g>
+          </svg>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Fixed Panel: High-Signal Live Incident Feed (320px wide) -->
+    <aside class="vms-incident-panel">
+      <div class="panel-top-bar">
+        <div class="panel-header-title">
+          <span class="panel-icon">🚨</span>
+          <h3>Threat Incident Stream</h3>
+        </div>
+        <button class="btn-panel-refresh" id="btn-refresh-feed" title="Refresh Feed">↻</button>
+      </div>
+
+      <!-- Threat Meter Widget -->
+      <div class="threat-gauge-card">
+        <div class="gauge-header">
+          <span class="gauge-title">Live Threat Index</span>
+          <span class="gauge-number" id="threat-gauge-number">0 / 100</span>
+        </div>
+        <div class="gauge-bar-track">
+          <div class="gauge-bar-fill" id="threat-gauge-fill" style="width: 0%;"></div>
+        </div>
+        <div class="gauge-threshold-flag">
+          <span>0 Safe</span>
+          <span class="flag-threshold">70 Alert Floor</span>
+          <span class="flag-high">100 Intrusion</span>
+        </div>
+      </div>
+
+      <!-- Feed Filter Tabs -->
+      <div class="feed-filter-bar">
+        <button class="filter-tab active" data-filter="all">All</button>
+        <button class="filter-tab" data-filter="threats">Threats (≥70)</button>
+        <button class="filter-tab" data-filter="unreviewed">Unreviewed</button>
+        <button class="filter-tab" data-filter="starred">Protected ⭐</button>
+      </div>
+
+      <!-- Appearance Attribute Search Bar (The "Red Shirt" Filter) -->
+      <div class="appearance-search-box">
+        <div class="appearance-search-title">
+          <span>🔍 Appearance & Zone Filter</span>
+          <button class="btn-clear-appearance" id="btn-clear-appearance" title="Reset Filters">Reset</button>
+        </div>
+        <div class="appearance-controls-grid">
+          <select id="filter-obj-type" class="filter-select" title="Filter by Object">
+            <option value="all">All Objects</option>
+            <option value="person">👤 Person</option>
+            <option value="vehicle">🚗 Vehicle</option>
+            <option value="animal">🐾 Animal</option>
+          </select>
+          <select id="filter-color" class="filter-select" title="Filter by Garment Color">
+            <option value="all">All Colors</option>
+            <option value="red">🔴 Red Garment</option>
+            <option value="blue">🔵 Blue Garment</option>
+            <option value="green">🟢 Green</option>
+            <option value="yellow">🟡 Yellow</option>
+            <option value="black">⚫ Black / Dark</option>
+            <option value="white">⚪ White / Light</option>
+          </select>
+          <select id="filter-zone" class="filter-select" title="Filter by Zone">
+            <option value="all">All Zones</option>
+            <option value="restricted_vault">🚨 Restricted Vault</option>
+            <option value="cash_counter">💵 Cash Counter</option>
+            <option value="rear_shutter">🚪 Rear Shutter</option>
+            <option value="main_corridor">🚶 Main Corridor</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Vertical Scrollable Incident List -->
+      <div class="incident-scroll-feed" id="incident-scroll-feed">
+        <div class="empty-feed-placeholder">
+          <span class="spinner"></span>
+          <span>Loading verified threat incidents...</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 1: Supabase Email Authentication & Session Manager                  -->
+  <!-- ========================================================================= -->
+  <div class="modal-scrim" id="auth-modal" style="display: none;">
+    <div class="modal-card auth-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">🔐</div>
+          <div>
+            <h3>Supabase Cloud Authentication</h3>
+            <p class="modal-subtitle">Multi-Tenant JWT Security & Role Authorization</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-auth-modal">&times;</button>
+      </div>
+
+      <div class="modal-tabs">
+        <button class="modal-tab active" id="tab-login">Sign In</button>
+        <button class="modal-tab" id="tab-register">Create Tenant Account</button>
+      </div>
+
+      <div class="quick-login-strip">
+        <div class="quick-label">⚡ 1-Click Demo Profiles:</div>
+        <div class="quick-chips-row">
+          <button type="button" class="btn-quick-chip" data-email="shopkeeper@kirana.in" data-pass="kirana123">👤 Shopkeeper</button>
+          <button type="button" class="btn-quick-chip" data-email="installer@safenet.in" data-pass="safenet123">🔧 Installer</button>
+          <button type="button" class="btn-quick-chip" data-email="admin@vyzn.ai" data-pass="admin123">👑 Fleet Admin</button>
+        </div>
+      </div>
+
+      <!-- Login Form -->
+      <form id="form-login" class="auth-form">
+        <div class="input-group">
+          <label for="login-email">Email Address</label>
+          <input type="email" id="login-email" placeholder="owner@kirana.in" value="shopkeeper@kirana.in" required>
+        </div>
+        <div class="input-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" value="kirana123" required>
+        </div>
+        <button type="submit" class="btn-auth-primary" id="btn-submit-login">Sign In with Supabase</button>
+      </form>
+
+      <!-- Registration Form -->
+      <form id="form-register" class="auth-form" style="display: none;">
+        <div class="input-group">
+          <label for="reg-fullname">Full Name</label>
+          <input type="text" id="reg-fullname" placeholder="Rajesh Sharma" required>
+        </div>
+        <div class="input-group">
+          <label for="reg-email">Business Email</label>
+          <input type="email" id="reg-email" placeholder="rajesh@supermart.in" required>
+        </div>
+        <div class="input-group">
+          <label for="reg-password">Password</label>
+          <input type="password" id="reg-password" placeholder="••••••••••••" required>
+        </div>
+        <div class="input-group">
+          <label for="reg-role">Role Scope</label>
+          <select id="reg-role">
+            <option value="shopkeeper">Shopkeeper / Store Owner</option>
+            <option value="installer">Certified SafeNet Installer</option>
+            <option value="admin">Central Fleet Admin</option>
+          </select>
+        </div>
+        <button type="submit" class="btn-auth-primary" id="btn-submit-register">Create Account</button>
+      </form>
+
+      <div class="auth-footer-note">
+        <span>🛡️ Offline Failover Active • Automatically verifies against local SQLite buffer if internet drops.</span>
       </div>
     </div>
   </div>
 
-  <main class="dashboard-content">
-    <!-- Key Metric Counters (The Metrics That Matter) -->
-    <section class="metrics-grid">
-      <div class="metric-card">
-        <div class="metric-label">Verified Alerts (This Week)</div>
-        <div class="metric-value text-teal" id="verified-alerts-count">4</div>
-        <div class="metric-subtext">Delivered to WhatsApp / Telegram</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">False Motions Filtered</div>
-        <div class="metric-value" id="filtered-motions-count">142</div>
-        <div class="metric-subtext">Ceiling fans, shadows, traffic</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Active Camera Streams</div>
-        <div class="metric-value" id="active-cameras-count">3 / 3</div>
-        <div class="metric-subtext">RTSP Decimated at 4 FPS</div>
-      </div>
-      <div class="metric-card">
-        <div class="metric-label">Disk Storage Safety</div>
-        <div class="metric-value text-amber" id="disk-free-display">--%</div>
-        <div class="metric-subtext" id="reaper-status-text">72h Reaper Guard Active</div>
-      </div>
-    </section>
-
-    <!-- Central Operational Viewport -->
-    <section class="main-workspace">
-      <!-- Left Column: Live Camera & Stream Controls -->
-      <div class="live-panel">
-        <div class="panel-header">
-          <div class="camera-tabs" id="camera-tabs">
-            <button class="cam-tab active" data-cam="cam_corridor">Corridor (Day)</button>
-            <button class="cam-tab" data-cam="cam_cash_counter">Cash Counter (Zone)</button>
-            <button class="cam-tab" data-cam="cam_shutter_night">Rear Shutter (Night IR)</button>
-          </div>
-          <div class="header-actions">
-            <button class="btn-zone" id="btn-open-zone-drawer">✏️ Draw Threat Zone</button>
-            <button class="btn-zone btn-privacy" id="btn-open-privacy-drawer">🛡️ Draw Privacy Mask</button>
-            <div class="stream-protocol-badge">MJPEG / RTSP</div>
-          </div>
-        </div>
-
-
-        <div class="video-container">
-          <img id="live-stream-img" src="/api/cameras/cam_corridor/mjpeg" alt="Live Camera Stream">
-          <div class="stream-overlay-tag" id="active-cam-tag">LIVE: Main Store Corridor</div>
-        </div>
-
-        <div class="threat-meter-container">
-          <div class="meter-header">
-            <span>Live Threat Score</span>
-            <span class="meter-score" id="meter-score-text">0 / 100</span>
-          </div>
-          <div class="meter-bar-track">
-            <div class="meter-bar-fill" id="meter-bar-fill" style="width: 0%;"></div>
-          </div>
-          <div class="meter-legend">
-            <span>0 Safe</span>
-            <span class="text-amber">70 Alert Threshold</span>
-            <span class="text-red">100 Intrusion</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right Column: Incident Feed & Event Triage -->
-      <div class="events-panel">
-        <div class="panel-header">
-          <h2>High-Signal Incident Feed</h2>
-          <button class="btn-secondary" id="btn-refresh-events">Refresh</button>
-        </div>
-
-        <div class="events-scroll-list" id="events-list">
-          <div class="empty-state">Loading recent incident events...</div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <!-- Video Playback Modal -->
-  <div class="modal-backdrop" id="video-modal" style="display: none;">
-    <div class="modal-box">
+  <!-- ========================================================================= -->
+  <!-- MODAL 2: Interactive HTML5 Canvas Geofence & DPDP Privacy Mask Studio      -->
+  <!-- ========================================================================= -->
+  <div class="modal-scrim" id="zone-modal" style="display: none;">
+    <div class="modal-card zone-modal-card">
       <div class="modal-header">
-        <h3 id="modal-title">Incident Clip Replay</h3>
-        <button class="btn-close" id="btn-close-modal">&times;</button>
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">📐</div>
+          <div>
+            <h3 id="zone-modal-title">Interactive Visual Geofence Studio</h3>
+            <p class="modal-subtitle">Click points directly on camera frame to form normalized polygons</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-zone-modal">&times;</button>
       </div>
-      <div class="modal-body">
-        <video id="modal-video" controls autoplay loop playsinline>
-          <source src="" type="video/mp4">
-          Your browser does not support HTML5 video.
-        </video>
-        <div class="modal-meta" id="modal-meta"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-star" id="btn-modal-star">⭐ Star (Protect from Reaper)</button>
-        <button class="btn-secondary" id="btn-modal-close-action">Close</button>
-      </div>
-    </div>
-  </div>
 
-  <!-- Interactive Polygon Zone Drawing Modal -->
-  <div class="modal-backdrop" id="zone-modal" style="display: none;">
-    <div class="modal-box modal-lg">
-      <div class="modal-header">
-        <h3 id="zone-modal-title">Interactive Zone Polygon Drawer</h3>
-        <button class="btn-close" id="btn-close-zone-modal">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p class="zone-instruction" id="zone-instruction-text">Click 3 or more points on the camera frame to outline a security zone or privacy mask.</p>
-        <div class="canvas-wrapper">
+      <div class="zone-studio-layout">
+        <!-- Canvas Viewport -->
+        <div class="canvas-viewport">
           <canvas id="zone-canvas" width="640" height="360"></canvas>
+          <div class="canvas-coords-hud" id="canvas-coords-hud">X: 0.000, Y: 0.000</div>
         </div>
-        <div class="zone-form-grid">
-          <div class="form-group">
-            <label>Zone Mode</label>
-            <select id="zone-type-select">
-              <option value="restricted_zone">Security Threat Zone</option>
-              <option value="privacy_mask">DPDP 2023 Privacy Mask (Blur)</option>
+
+        <!-- Zone Configuration Controls -->
+        <div class="zone-controls-pane">
+          <div class="input-group">
+            <label>Target Camera</label>
+            <select id="zone-cam-select">
+              <option value="cam_corridor">Corridor (Day Main)</option>
+              <option value="cam_cash_counter">Cash Counter (Safe Vault)</option>
+              <option value="cam_shutter_night">Rear Shutter (Night IR)</option>
             </select>
           </div>
-          <div class="form-group">
+
+          <div class="input-group">
+            <label>Zone Purpose</label>
+            <select id="zone-type-select">
+              <option value="restricted_zone">🚨 Security Threat Zone (Vault / Cash Drawer)</option>
+              <option value="privacy_mask">🛡️ DPDP 2023 Statutory Privacy Mask (Blur/Blackout)</option>
+            </select>
+          </div>
+
+          <div class="input-group">
             <label>Zone Identifier</label>
-            <input type="text" id="zone-name-input" placeholder="e.g. cash_counter_zone" value="cash_counter_zone">
+            <input type="text" id="zone-name-input" value="safe_vault_zone">
           </div>
-          <div class="form-group">
-            <label>Threat Weight</label>
-            <input type="number" id="zone-weight-input" value="20" min="5" max="40">
+
+          <div class="input-group">
+            <label>Threat Weight (+ Score)</label>
+            <input type="number" id="zone-weight-input" value="25" min="5" max="50">
           </div>
-          <div class="form-group">
+
+          <div class="input-group">
             <label>Schedule Mode</label>
             <select id="zone-schedule-select">
               <option value="restricted_all_times">Restricted 24/7 (Always Alerts)</option>
-              <option value="after_hours_only">After Hours Only (Suppress during Day)</option>
+              <option value="after_hours_only">After-Hours Only (Suppress in Business Hours)</option>
             </select>
           </div>
+
+          <div class="polygon-points-display">
+            <div class="points-header">
+              <span>Vertex Count: <strong id="vertex-count-badge">0</strong></span>
+              <button class="btn-inline-clear" id="btn-clear-canvas-points">Clear Points</button>
+            </div>
+            <div class="points-list-scroll" id="points-list-scroll">
+              <span class="points-empty">Click 3 or more points on the video frame...</span>
+            </div>
+          </div>
+
+          <div class="zone-actions">
+            <button class="btn-zone-save" id="btn-save-zone-config">💾 Commit Zone to Pipeline</button>
+          </div>
         </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-secondary" id="btn-clear-zone">Clear Points</button>
-        <button class="btn-star" id="btn-save-zone">💾 Save Zone to Pipeline</button>
       </div>
     </div>
   </div>
 
+  <!-- ========================================================================= -->
+  <!-- ========================================================================= -->
+  <!-- MODAL 3: Camera Connection & Management Studio                            -->
+  <!-- ========================================================================= -->
+  <div class="modal-scrim" id="discovery-modal" style="display: none;">
+    <div class="modal-card discovery-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">📹</div>
+          <div>
+            <h3>Connect & Adopt Camera</h3>
+            <p class="modal-subtitle">Direct Physical Webcams, RTSP IP Streams, and ONVIF Auto-Discovery</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-discovery-modal">&times;</button>
+      </div>
+
+      <div class="modal-tabs">
+        <button class="modal-tab active" id="tab-cam-webcam">📷 Local Physical Camera</button>
+        <button class="modal-tab" id="tab-cam-rtsp">🌐 Network RTSP Stream</button>
+        <button class="modal-tab" id="tab-cam-onvif">🔍 ONVIF LAN Discovery</button>
+      </div>
+
+      <!-- Tab A: Local Physical Webcam -->
+      <div id="pane-cam-webcam" class="discovery-body">
+        <p class="discovery-hint">Connect your laptop's integrated camera or any USB webcam directly to the AI surveillance pipeline.</p>
+        <div class="input-group">
+          <label for="select-local-device">Available Physical Devices</label>
+          <select id="select-local-device">
+            <option value="0">Device 0: Primary Integrated Webcam [READY]</option>
+            <option value="1">Device 1: External USB Camera</option>
+            <option value="2">Device 2: Auxiliary Video Capture</option>
+          </select>
+        </div>
+        <div class="input-group">
+          <label for="input-webcam-name">Camera Name</label>
+          <input type="text" id="input-webcam-name" value="Physical Camera (Webcam 0)">
+        </div>
+        <button class="btn-scan-action" id="btn-adopt-physical-webcam" style="margin-top:0.5rem;">
+          ⚡ Connect Physical Camera to Cockpit
+        </button>
+      </div>
+
+      <!-- Tab B: Network RTSP / IP Camera -->
+      <div id="pane-cam-rtsp" class="discovery-body" style="display: none;">
+        <p class="discovery-hint">Connect any CP Plus, Hikvision, Dahua, or generic RTSP/H.264 camera feed.</p>
+        <div class="input-group">
+          <label for="input-rtsp-id">Camera Identifier</label>
+          <input type="text" id="input-rtsp-id" placeholder="e.g. cam_front_gate" value="cam_custom_rtsp">
+        </div>
+        <div class="input-group">
+          <label for="input-rtsp-name">Display Name</label>
+          <input type="text" id="input-rtsp-name" placeholder="Front Gate Dahua" value="Front Gate Surveillance">
+        </div>
+        <div class="input-group">
+          <label for="input-rtsp-url">RTSP Stream URL</label>
+          <input type="text" id="input-rtsp-url" placeholder="rtsp://admin:pass@192.168.1.100:554/ch01" value="rtsp://192.168.1.100:554/live">
+        </div>
+        <div class="input-group">
+          <label for="select-rtsp-fps">Decimated Inference FPS</label>
+          <select id="select-rtsp-fps">
+            <option value="4.0">4.0 FPS (Recommended - Ultra-Low Bandwidth)</option>
+            <option value="8.0">8.0 FPS (Standard Commercial)</option>
+            <option value="15.0">15.0 FPS (High Motion)</option>
+          </select>
+        </div>
+        <button class="btn-scan-action" id="btn-adopt-manual-rtsp" style="margin-top:0.5rem;">
+          🌐 Connect Network RTSP Stream
+        </button>
+      </div>
+
+      <!-- Tab C: ONVIF LAN Auto-Discovery -->
+      <div id="pane-cam-onvif" class="discovery-body" style="display: none;">
+        <div class="discovery-scan-bar">
+          <input type="text" id="scan-subnet-input" placeholder="Subnet / IPs (optional, e.g. 192.168.1.100)">
+          <button class="btn-scan-action" id="btn-trigger-scan">🔍 Scan Local Network</button>
+        </div>
+        <div class="discovery-results-box" id="discovery-results-box">
+          <div class="empty-discovery">Click "Scan Local Network" to probe CP Plus, Hikvision, Dahua on LAN.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 4: Synchronized Incident Video Replay & Forensics                   -->
+  <!-- ========================================================================= -->
+  <div class="modal-scrim" id="replay-modal" style="display: none;">
+    <div class="modal-card replay-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">📼</div>
+          <div>
+            <h3 id="replay-modal-title">Incident Evidence Playback</h3>
+            <p class="modal-subtitle" id="replay-modal-subtitle">Tamper-evident H.264 fragment</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-replay-modal">&times;</button>
+      </div>
+
+      <div class="replay-body">
+        <video id="replay-video-elem" controls autoplay loop playsinline></video>
+        <div class="replay-metadata-grid" id="replay-metadata-grid"></div>
+      </div>
+
+      <div class="replay-footer">
+        <button class="btn-replay-action btn-star-action" id="btn-replay-star">⭐ Protect from 72h Reaper</button>
+        <button class="btn-replay-action btn-forensic-action" id="btn-replay-forensic">📦 Download Forensic Pack (BSA 2023)</button>
+        <button class="btn-replay-action btn-telegram-action" id="btn-replay-telegram">✈️ Dispatch to Telegram</button>
+        <button class="btn-replay-action btn-false-alarm-action" id="btn-replay-false-alarm">❌ Mark False Alarm (Calibrate)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 5: Edge Bandwidth & Local Storage QoS Manager                       -->
+  <!-- ========================================================================= -->
+  <div class="modal-scrim" id="bandwidth-modal" style="display: none;">
+    <div class="modal-card bandwidth-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">⚡</div>
+          <div>
+            <h3>Edge Bandwidth & Local Storage QoS</h3>
+            <p class="modal-subtitle">Asymmetrical Indian SMB Bandwidth Protection & Zero Cloud Choke</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-bandwidth-modal">&times;</button>
+      </div>
+
+      <div class="bandwidth-body">
+        <div class="qos-metric-row">
+          <div class="qos-card">
+            <span class="qos-label">Current Cloud Upload</span>
+            <span class="qos-val text-emerald" id="qos-cur-upload">0.42 Mbps</span>
+            <span class="qos-sub">Under 2.0 Mbps budget</span>
+          </div>
+          <div class="qos-card">
+            <span class="qos-label">Local NVMe Retention</span>
+            <span class="qos-val text-cyan" id="qos-cur-retention">72 Hours</span>
+            <span class="qos-sub">Local Ring Buffer</span>
+          </div>
+          <div class="qos-card">
+            <span class="qos-label">Broadband Protection</span>
+            <span class="qos-val text-amber">ACTIVE</span>
+            <span class="qos-sub">UPI & Billing Protected</span>
+          </div>
+        </div>
+
+        <div class="qos-config-section">
+          <div class="input-group">
+            <label for="input-upload-cap">
+              Max Cloud Upload Cap: <strong id="val-upload-cap">2.0 Mbps</strong>
+            </label>
+            <input type="range" id="input-upload-cap" min="0.5" max="10.0" step="0.5" value="2.0" class="qos-slider">
+            <div class="slider-ticks">
+              <span>0.5M</span><span>2.0M (Recommended)</span><span>5.0M</span><span>10.0M</span>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label for="select-ring-retention">Local NVMe Ring Buffer Retention</label>
+            <select id="select-ring-retention">
+              <option value="24">24 Hours (Fast Rotation / Low SSD Space)</option>
+              <option value="48">48 Hours (Weekend Coverage)</option>
+              <option value="72" selected>72 Hours (Standard Commercial Guarantee)</option>
+              <option value="168">7 Days (Extended Archival)</option>
+            </select>
+          </div>
+
+          <div class="qos-toggle-row">
+            <label class="toggle-switch">
+              <input type="checkbox" id="check-asym-sync" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="toggle-label-group">
+              <span class="toggle-title">Asymmetrical Metadata Sync (Indian SMB Mode)</span>
+              <span class="toggle-desc">Streams only 15KB JSON metadata + 100KB thumbnails to cloud. 1080p clips remain on local NVMe disk and are fetched only on user demand.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="qos-actions">
+          <button class="btn-qos-save" id="btn-save-qos-settings">💾 Apply QoS Bandwidth Policy</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>
