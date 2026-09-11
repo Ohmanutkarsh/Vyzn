@@ -351,19 +351,19 @@ class EdgePipeline:
         """Dynamically hot-reloads restricted polygon zones for a camera via atomic replacement."""
         for idx, cam in enumerate(self.settings.cameras):
             if cam.camera_id == camera_id:
-                new_cam = CameraConfig(
-                    camera_id=cam.camera_id,
-                    name=cam.name,
-                    rtsp_url=cam.rtsp_url,
-                    substream_url=cam.substream_url,
-                    target_fps=cam.target_fps,
-                    input_resolution=cam.input_resolution,
-                    enabled=cam.enabled,
-                    is_night_ir=cam.is_night_ir,
-                    restricted_zones=list(zones),
-                    privacy_masks=list(cam.privacy_masks),
-                    business_hours=cam.business_hours
-                )
+                copy_fn = getattr(cam, "model_copy", getattr(cam, "copy", None))
+                if copy_fn:
+                    new_cam = copy_fn(update={"restricted_zones": list(zones)})
+                else:
+                    new_cam = CameraConfig(
+                        camera_id=cam.camera_id,
+                        name=cam.name,
+                        rtsp_url=cam.rtsp_url,
+                        enabled=cam.enabled,
+                        target_fps=cam.target_fps,
+                        is_night_ir=cam.is_night_ir,
+                        restricted_zones=list(zones)
+                    )
                 new_cameras = list(self.settings.cameras)
                 new_cameras[idx] = new_cam
                 self.settings.cameras = new_cameras

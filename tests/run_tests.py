@@ -72,6 +72,7 @@ from tests.test_fleet_portal import (
     test_installer_key_revocation,
     test_fleet_portal_html_rendering
 )
+from tests.test_e2e_fleet_sync import test_end_to_end_fleet_observability_and_ota_closed_loop
 
 
 def run_all():
@@ -116,6 +117,7 @@ def run_all():
         ("test_stolen_device_site_key_revocation", lambda: test_stolen_device_site_key_revocation()),
         ("test_installer_key_revocation", lambda: test_installer_key_revocation()),
         ("test_fleet_portal_html_rendering", lambda: test_fleet_portal_html_rendering()),
+        ("test_end_to_end_fleet_observability_and_ota_closed_loop", lambda: with_tmp_path(test_end_to_end_fleet_observability_and_ota_closed_loop)),
     ]
 
 

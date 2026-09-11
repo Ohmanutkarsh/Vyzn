@@ -104,11 +104,17 @@ def main():
     parser.add_argument("--no-api", dest="api", action="store_false", help="Disable Web Dashboard")
     parser.add_argument("--port", type=int, default=8000, help="Web dashboard port (default: 8000)")
     parser.add_argument("--demo", action="store_true", help="Enable demo mode (1-min accelerated retention)")
+    parser.add_argument("--cloud-url", type=str, default=None, help="VYZN Cloud Fleet Manager URL (e.g. http://localhost:9000)")
+    parser.add_argument("--site-key", type=str, default="vyzn_edge_secret_local_default_2026", help="Site shared secret for cloud telemetry auth and OTA verification")
 
     args = parser.parse_args()
 
     data_path = Path(args.data_dir).resolve()
     settings = build_synthetic_settings(args.simulate, data_path, demo_mode=args.demo)
+    if args.cloud_url:
+        settings.cloud_webhook_url = args.cloud_url
+        settings.cloud_auth_token = args.site_key
+        logger.info(f"Cloud Observability linked: {args.cloud_url} (Site ID: {settings.site_id})")
 
     detector = YOLOv8Detector() if args.use_yolo else MockDetector(fixed_confidence=0.88)
     pipeline = EdgePipeline(settings=settings, detector=detector, use_synthetic=True)
