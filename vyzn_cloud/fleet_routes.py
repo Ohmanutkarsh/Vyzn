@@ -19,6 +19,8 @@ from vyzn_cloud.security import (
     authenticate_edge_box,
     compute_config_hash,
     generate_config_hmac,
+    revoke_site_key,
+    revoke_installer_key,
     INSTALLERS,
     SITE_SECRETS
 )
@@ -102,7 +104,7 @@ class CameraConfigModel(BaseModel):
 
 
 class FleetConfigPayload(BaseModel):
-    alert_score_threshold: int = Field(70, ge=40, le=90)
+    alert_score_threshold: int = Field(70, ge=50, le=80)
     business_hours_start: str = Field("09:00", pattern=r"^\d{2}:\d{2}$")
     business_hours_end: str = Field("21:00", pattern=r"^\d{2}:\d{2}$")
     cameras: Dict[str, CameraConfigModel] = {}
@@ -256,6 +258,21 @@ def edge_pull_ota_config(site_id: str, request: Request):
         raise HTTPException(status_code=404, detail=f"No staged config for site '{site_id}'")
 
     return MANAGED_CONFIGS[site_id]
+
+
+@fleet_router.post("/api/v1/fleet/sites/{site_id}/revoke-key")
+def revoke_site_credentials(
+    site_id: str,
+    installer: Dict[str, Any] = Depends(authenticate_installer)
+):
+    """
+    Emergency revocation endpoint when an edge box is physically stolen or compromised.
+    Instantly invalidates the shared secret on the cloud and disconnects the device.
+    """
+    authorize_site_access(installer, site_id)
+    result = revoke_site_key(site_id, reason="physical_theft_reported")
+    logger.critical(f"🚨 Physical theft reported by installer [{installer.get('name')}]! Revoked key for site [{site_id}].")
+    return result
 
 
 @fleet_router.get("/api/v1/fleet/incidents")

@@ -68,6 +68,8 @@ from tests.test_ota_sync import (
 from tests.test_fleet_portal import (
     test_fleet_portal_authentication_enforcement,
     test_fleet_tenant_scoping_and_remote_config_dispatch,
+    test_stolen_device_site_key_revocation,
+    test_installer_key_revocation,
     test_fleet_portal_html_rendering
 )
 
@@ -111,6 +113,8 @@ def run_all():
         ("test_wholesale_atomic_zone_swap_and_rollback", lambda: with_tmp_path(test_wholesale_atomic_zone_swap_and_rollback)),
         ("test_fleet_portal_authentication_enforcement", lambda: test_fleet_portal_authentication_enforcement()),
         ("test_fleet_tenant_scoping_and_remote_config_dispatch", lambda: test_fleet_tenant_scoping_and_remote_config_dispatch()),
+        ("test_stolen_device_site_key_revocation", lambda: test_stolen_device_site_key_revocation()),
+        ("test_installer_key_revocation", lambda: test_installer_key_revocation()),
         ("test_fleet_portal_html_rendering", lambda: test_fleet_portal_html_rendering()),
     ]
 

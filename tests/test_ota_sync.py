@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for OTA Configuration Synchronization:
 Verifies HMAC signature tamper detection, semantic geometry validation,
 wholesale atomic list swap, and automatic rollback to last-known-good on failure.
@@ -89,11 +89,18 @@ def test_semantic_geometry_validation():
     except ValueError as e:
         assert "near-zero area" in str(e)
 
-    # 4. Reject dangerous threshold
-    bad_thresh = {"alert_score_threshold": 20, "cameras": {}}
+    # 4. Reject dangerous threshold (< 50 or > 80)
+    bad_thresh_low = {"alert_score_threshold": 20, "cameras": {}}
     try:
-        validate_semantic_config(bad_thresh)
+        validate_semantic_config(bad_thresh_low)
         assert False, "Should have rejected low threshold"
+    except ValueError as e:
+        assert "outside safe operating bounds" in str(e)
+
+    bad_thresh_high = {"alert_score_threshold": 95, "cameras": {}}
+    try:
+        validate_semantic_config(bad_thresh_high)
+        assert False, "Should have rejected high threshold"
     except ValueError as e:
         assert "outside safe operating bounds" in str(e)
 
@@ -190,7 +197,7 @@ def test_wholesale_atomic_zone_swap_and_rollback(tmp_path):
     fail_payload = {
         "config_version": 3,
         "config": {
-            "alert_score_threshold": 85,
+            "alert_score_threshold": 78,
             "cameras": {
                 "cam_01": {
                     "restricted_zones": [{"name": "crash_zone", "points": new_zones}]

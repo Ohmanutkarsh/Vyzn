@@ -41,6 +41,35 @@ SITE_SECRETS: Dict[str, str] = {
     "site_verma_retail": "vyzn_edge_secret_verma_retail_1184"
 }
 
+# Blacklist sets for stolen edge boxes and revoked installer sessions
+REVOKED_SITE_KEYS: Set[str] = set()
+REVOKED_INSTALLER_KEYS: Set[str] = set()
+
+
+def revoke_site_key(site_id: str, reason: str = "device_stolen") -> Dict[str, Any]:
+    """
+    Emergency invalidation of credential for a stolen or compromised edge box.
+    Immediately blocks all heartbeats, config pulls, and API calls using that key.
+    """
+    old_secret = SITE_SECRETS.get(site_id)
+    if old_secret:
+        REVOKED_SITE_KEYS.add(old_secret)
+        SITE_SECRETS[site_id] = "REVOKED"
+    return {
+        "site_id": site_id,
+        "status": "revoked",
+        "reason": reason,
+        "revoked_secret_prefix": (old_secret[:6] + "...") if old_secret else "none"
+    }
+
+
+def revoke_installer_key(key: str) -> bool:
+    """Revokes a specific installer's API key without affecting others."""
+    if key in INSTALLERS:
+        REVOKED_INSTALLER_KEYS.add(key)
+        return True
+    return False
+
 
 def canonicalize_json(data: Dict[str, Any]) -> bytes:
     """Produces deterministic, canonical JSON bytes for hashing and HMAC signing."""
@@ -82,6 +111,13 @@ def authenticate_installer(
         # Check query param or cookie for web browser dashboard access
         token = request.query_params.get("key") or request.cookies.get("vyzn_installer_token")
 
+    if token in REVOKED_INSTALLER_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized: Installer credentials have been revoked.",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
     if not token or token not in INSTALLERS:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -122,10 +158,16 @@ def authenticate_edge_box(
             if auth_hdr.startswith("Bearer "):
                 token = auth_hdr[7:].strip()
 
+    if token in REVOKED_SITE_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized: Edge site credential revoked (device reported stolen or compromised)."
+        )
+
     # Look up matching site_id
     matched_site = None
     for site_id, secret in SITE_SECRETS.items():
-        if token == secret:
+        if token == secret and secret != "REVOKED":
             matched_site = site_id
             break
 

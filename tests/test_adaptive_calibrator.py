@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for AdaptiveCalibrator:
 Verifies Bayesian Beta-Binomial estimator, sample-size gating, anti-gaming slew rate limiting,
 rolling 30-day window decay, and hard-floor preservation for confirmed detections.
@@ -122,13 +122,13 @@ def test_hard_floor_inviolability_under_severe_camera_bias():
     """
     engine = ScoringEngine(alert_threshold=70)
 
-    # Candidate: Valid human intruder detection
-    valid_candidate = DetectionCandidate(
+    # 1. Candidate: Valid creeping intruder with minimal motion and confidence near threshold
+    creeping_burglar = DetectionCandidate(
         camera_id="cam_vault",
         object_type="person",
-        confidence=0.85,
-        motion_ratio=0.08,
-        track_duration_sec=3.0,
+        confidence=0.36,               # Barely above 0.35 daylight threshold
+        motion_ratio=0.005,            # Minimal creeping motion -> L1 = 1
+        track_duration_sec=0.0,        # 0s persistence -> L5 = 0
         bounding_box=[0.4, 0.4, 0.6, 0.8],
         is_after_hours=True,
         is_in_restricted_zone=True,
@@ -136,12 +136,32 @@ def test_hard_floor_inviolability_under_severe_camera_bias():
         timestamp=datetime.now(timezone.utc)
     )
 
-    # Evaluate with maximum adversarial camera bias
-    score, should_alert, breakdown = engine.evaluate(valid_candidate, camera_bias=-25)
-
+    # Evaluate under severe negative camera bias (-25) with default threshold 70
+    score, should_alert, breakdown = engine.evaluate(creeping_burglar, camera_bias=-25)
     assert breakdown["is_valid_detection"] is True
-    # Invariant: Valid detections cannot score below 50
-    assert score >= 50, f"CRITICAL FAILURE: Valid detection fell below hard floor: {score}"
-    assert breakdown["camera_bias"] == -25
-    # Since confidence is high and track is 3s, person scores 40 + confidence (26) + motion (16) = 82 >= 70 alert!
-    assert should_alert is True, "Valid intruder alert must not be suppressed by camera bias"
+    # Invariant: Threat floor is anchored to alert_threshold (70)
+    assert score >= 70, f"CRITICAL FAILURE: Creeping intruder score {score} fell below alert threshold 70"
+    assert should_alert is True, "Creeping intruder alert must not be suppressed by camera bias"
+
+    # 2. Re-evaluate under elevated threshold 80 (Option 1: floor anchored relative to threshold)
+    high_threshold_engine = ScoringEngine(alert_threshold=80)
+    ht_score, ht_alert, ht_breakdown = high_threshold_engine.evaluate(creeping_burglar, camera_bias=-25)
+    assert ht_score >= 80, f"CRITICAL FAILURE: Creeping intruder score {ht_score} fell below elevated threshold 80"
+    assert ht_alert is True, "Creeping intruder MUST alert even under elevated threshold"
+
+    # 3. Stray animal after hours receives standard floor (50), NOT elevated threat floor
+    stray_animal = DetectionCandidate(
+        camera_id="cam_vault",
+        object_type="animal",
+        confidence=0.70,
+        motion_ratio=0.02,
+        track_duration_sec=0.5,
+        bounding_box=[0.1, 0.1, 0.3, 0.3],
+        is_after_hours=True,
+        is_in_restricted_zone=False,
+        is_night_ir=False,
+        timestamp=datetime.now(timezone.utc)
+    )
+    anim_score, anim_alert, anim_breakdown = engine.evaluate(stray_animal, camera_bias=-10)
+    assert anim_score <= 55, f"Animal score {anim_score} should remain below alert threshold"
+    assert anim_alert is False, "Stray animal after hours must NOT fire false alarm"

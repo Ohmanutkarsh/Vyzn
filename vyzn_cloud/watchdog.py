@@ -45,11 +45,12 @@ class DeadManWatchdog:
             age = now - site["last_seen_monotonic"]
             if age > self.silence_threshold_sec:
                 if site["status"] == "ONLINE":
-                    site["status"] = "OFFLINE"
+                    elapsed_str = f"{int(age)}s" if age >= 60 else f"{age:.1f}s"
+                    thresh_str = f"{int(self.silence_threshold_sec)}s"
                     offline_alerts.append({
                         "site_id": site_id,
                         "silence_duration_sec": round(age, 1),
-                        "message": f"🚨 SITE DOWN ALERT: [{site_id}] has missed heartbeats for > {int(age)} seconds!"
+                        "message": f"🚨 SITE DOWN ALERT: [{site_id}] has missed heartbeats for {elapsed_str} (configured threshold: {thresh_str})!"
                     })
                     logger.critical(offline_alerts[-1]["message"])
             else:

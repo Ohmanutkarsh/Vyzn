@@ -117,12 +117,19 @@ class ScoringEngine:
 
         subtotal_123 = l1 + l2 + l3
 
-        # Layer 4: Nuisance Penalty vs Hard Floor + Adaptive Camera Bias
+        # Layer 4: Nuisance Penalty vs Inviolable Threat Floor + Adaptive Camera Bias
         if is_valid_detection:
-            # Any confirmed valid object detection cannot score below 50
-            subtotal_1234 = max(50, subtotal_123)
+            # Confirmed human/vehicle threat in restricted zone or after hours
+            # MUST NEVER be suppressed below the dispatch threshold regardless of camera dampening.
+            if candidate.object_type in ["person", "vehicle"] and gate_l0_passed:
+                threat_floor = max(50, self.alert_threshold)
+            else:
+                threat_floor = 50
+
+            subtotal_1234 = max(threat_floor, subtotal_123)
             l4_adjustment = subtotal_1234 - subtotal_123
         else:
+            threat_floor = 0
             # Unclassified motion penalty plus camera-specific adaptive bias (<= 0)
             effective_penalty = -35 + min(0, camera_bias)
             subtotal_1234 = max(0, subtotal_123 + effective_penalty)
@@ -143,6 +150,7 @@ class ScoringEngine:
             "l3_object_weight": l3,
             "l4_adjustment": l4_adjustment,
             "camera_bias": camera_bias,
+            "threat_floor": threat_floor,
             "l5_persistence": l5,
             "subtotal": subtotal_1234 + l5,
             "final_score": final_score,

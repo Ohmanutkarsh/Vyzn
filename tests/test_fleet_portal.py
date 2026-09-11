@@ -1,4 +1,4 @@
-﻿"""
+"""
 Integration tests for VYZN Cloud Multi-Tenant Fleet Observability Portal:
 Verifies installer authentication, tenant scoping, HMAC-signed remote config push,
 edge node site-key verification, and portal HTML rendering.
@@ -90,6 +90,62 @@ def test_fleet_tenant_scoping_and_remote_config_dispatch():
         headers={"X-Site-Key": "wrong_secret_key"}
     )
     assert bad_edge.status_code == 401
+
+
+def test_stolen_device_site_key_revocation():
+    """
+    CRITICAL PHYSICAL SECURITY TEST:
+    Burglary scenario: If an edge box is physically stolen, installer revokes its key.
+    The stolen box attempting subsequent communication with the cloud is immediately rejected.
+    """
+    client = TestClient(cloud_app)
+    installer_headers = {"X-Installer-Key": "installer_key_delhi_netra_01"}
+    stolen_site_id = "site_verma_retail"
+    stolen_key = "vyzn_edge_secret_verma_retail_1184"
+
+    # 1. Before theft, edge device authenticates successfully
+    pre_theft_res = client.get(
+        f"/api/v1/edge/sites/{stolen_site_id}/config",
+        headers={"X-Site-Key": stolen_key}
+    )
+    # Site may not have managed config yet or returns 200/404, but auth passes (not 401)
+    assert pre_theft_res.status_code != 401
+
+    # 2. Installer reports device stolen and revokes key from fleet portal
+    revoke_res = client.post(
+        f"/api/v1/fleet/sites/{stolen_site_id}/revoke-key",
+        headers=installer_headers
+    )
+    assert revoke_res.status_code == 200
+    assert revoke_res.json()["status"] == "revoked"
+
+    # 3. Thief with stolen box attempts to pull config or send heartbeat using stolen key
+    post_theft_res = client.get(
+        f"/api/v1/edge/sites/{stolen_site_id}/config",
+        headers={"X-Site-Key": stolen_key}
+    )
+    # MUST BE REJECTED WITH 401
+    assert post_theft_res.status_code == 401
+    assert "revoked" in post_theft_res.json()["detail"].lower()
+
+
+def test_installer_key_revocation():
+    """Verifies that an individual installer credential can be immediately invalidated."""
+    from vyzn_cloud.security import revoke_installer_key
+    client = TestClient(cloud_app)
+    token = "installer_key_master_admin_99"
+
+    # 1. Valid before revocation
+    res = client.get("/api/v1/fleet/sites", headers={"X-Installer-Key": token})
+    assert res.status_code == 200
+
+    # 2. Revoke key
+    assert revoke_installer_key(token) is True
+
+    # 3. Subsequent call MUST fail with 401
+    res_revoked = client.get("/api/v1/fleet/sites", headers={"X-Installer-Key": token})
+    assert res_revoked.status_code == 401
+    assert "revoked" in res_revoked.json()["detail"].lower()
 
 
 def test_fleet_portal_html_rendering():
