@@ -1,10 +1,19 @@
-﻿"""
-DPDP Act 2023 Compliance & Privacy-Preserving Surveillance Subsystem.
-Implements:
-1. Real-time polygon privacy masking (blur/blackout of sensitive zones).
-2. Tamper-evident cryptographic SAR (Subject Access Request) erasure audit trail.
-3. Bilingual (English + Hindi) statutory shop entrance notice generator.
 """
+India DPDP Act 2023 Technical Controls Subsystem.
+Engineered ahead of the May 2027 statutory enforcement deadline (notified Nov 2025).
+
+Provides software-level privacy-by-design capabilities:
+1. Real-time polygon privacy masking (blur/blackout of non-commercial/sensitive zones).
+2. Tamper-evident cryptographic SHA-256 SAR (Subject Access Request) erasure audit trail.
+3. Bilingual (English + Hindi) statutory shop entrance notice generator with QR verification.
+
+Note on Compliance Scope:
+These modules provide data fiduciaries with the technical mechanisms for data minimization,
+automated retention expiry, and verifiable erasure. Full legal compliance also requires
+operational processes outside of software (documented consent flows, breach notification protocols,
+and registered DPO oversight where applicable).
+"""
+
 
 from __future__ import annotations
 import os

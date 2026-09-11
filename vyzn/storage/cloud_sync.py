@@ -29,8 +29,9 @@ class CloudSyncWorker(threading.Thread):
         access_key_id: Optional[str] = None,
         secret_access_key: Optional[str] = None,
         sync_interval_sec: int = 15,
-        min_score: int = 70
+        min_score: int = 50  # Lowered from 70 to 50 to capture early intrusion evidence before hardware can be severed
     ):
+
         super().__init__(name="Cloud-Sync-Worker", daemon=True)
         self.db = db
         self.endpoint_url = endpoint_url

@@ -48,8 +48,9 @@ def test_database_crud_operations(tmp_path: Path):
 
 
 def test_concurrent_multi_thread_writes(tmp_path: Path):
-    """Stress test: 5 concurrent threads inserting 30 records each to test queue concurrency."""
+    """Stress test: 5 concurrent capture threads enqueueing 30 records each to verify serialized FIFO queue write absorption without database lock errors."""
     db_file = tmp_path / "concurrent_index.db"
+
     db = EventDatabase(db_file)
 
     num_threads = 5

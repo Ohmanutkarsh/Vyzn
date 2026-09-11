@@ -1,4 +1,4 @@
-﻿"""
+"""
 ONNX Runtime & OpenCV DNN Detector.
 Commercially compliant (Apache 2.0 / MIT) edge inference engine.
 Completely eliminates AGPL-3.0 copyleft liability and heavy PyTorch runtime bloat.
@@ -17,9 +17,19 @@ logger = logging.getLogger("vyzn.ai.onnx")
 
 class ONNXDetector(BaseDetector):
     """
-    High-performance, AGPL-free ONNX detector using OpenCV DNN C++ engine
+    High-performance, commercially unencumbered ONNX detector using OpenCV DNN C++ engine
     or ONNX Runtime with hardware acceleration (DirectML / CPU / TensorRT).
+
+    Model Architecture & Weight Provenance Policy:
+    To completely eliminate viral copyleft, VYZN does not use Ultralytics-trained weights.
+    Approved Architectures & Checkpoint Provenance:
+    1. NanoDet-Plus (m-416): Apache 2.0 license by RangiLyu (https://github.com/RangiLyu/nanodet).
+       Specifically engineered for low-power edge CPU/ARM cores (0.98M params, 2.07 GFLOPs).
+    2. YOLOX-Nano / YOLOX-Tiny: Apache 2.0 license by Megvii (https://github.com/Megvii-BaseDetection/YOLOX).
+       Pre-trained on COCO under Apache 2.0 open-source terms.
+    3. MobileNetV2-SSD: Apache 2.0 license by Google.
     """
+
 
     COCO_MAP = {
         0: ("person", "person"),
