@@ -125,7 +125,7 @@ def main():
         init_api(pipeline.db, settings, pipeline)
         server = start_uvicorn_thread("0.0.0.0", args.port)
         print("\n" + "=" * 70)
-        print(f"🚀 VYZN NETRA WEB DASHBOARD LIVE AT: http://localhost:{args.port}")
+        print(f"[LIVE] VYZN NETRA WEB DASHBOARD LIVE AT: http://localhost:{args.port}")
         print("=" * 70 + "\n")
 
     def handle_signal(sig, frame):

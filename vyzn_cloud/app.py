@@ -120,6 +120,65 @@ async def receive_whatsapp_interactive_reply(request: Request):
     return {"status": "processed"}
 
 
+@cloud_app.post("/webhook/telegram")
+async def receive_telegram_webhook(request: Request):
+    """
+    Receives Telegram Bot updates (inline keyboard triage clicks & bot commands).
+    Triage responses: [⭐ Star Clip] or [❌ False Alarm].
+    """
+    import time
+    body = await request.json()
+    logger.info(f"Incoming Telegram webhook callback: {body}")
+
+    # 1. Handle Inline Keyboard Triage Button Clicks (callback_query)
+    if "callback_query" in body:
+        cq = body["callback_query"]
+        cb_data = cq.get("data", "")
+        sender_id = str(cq.get("from", {}).get("id", "unknown"))
+        sender_name = cq.get("from", {}).get("first_name", "User")
+
+        triage_entry = {
+            "source": "telegram",
+            "sender": sender_id,
+            "sender_name": sender_name,
+            "button_id": cb_data,
+            "title": "Star Clip" if "star" in cb_data else "False Alarm",
+            "timestamp": cq.get("message", {}).get("date", int(time.time()))
+        }
+        triage_log.append(triage_entry)
+        logger.info(f"Telegram user {sender_name} ({sender_id}) triaged event: {cb_data}")
+
+        return {
+            "status": "processed",
+            "type": "callback_query",
+            "triage": triage_entry
+        }
+
+    # 2. Handle Text Commands (e.g. /status, /help, /start)
+    if "message" in body:
+        msg = body["message"]
+        text = msg.get("text", "").strip()
+
+        if text.startswith("/status"):
+            active_sites = watchdog.get_all_sites()
+            return {
+                "status": "processed",
+                "type": "command",
+                "command": "/status",
+                "active_sites_count": len(active_sites),
+                "reply_text": f"VYZN Netra Fleet Status: {len(active_sites)} site(s) monitored."
+            }
+        elif text.startswith("/help") or text.startswith("/start"):
+            return {
+                "status": "processed",
+                "type": "command",
+                "command": text,
+                "reply_text": "Welcome to VYZN Netra AI Surveillance Bot. You will receive after-hours threat alerts here."
+            }
+
+    return {"status": "acknowledged"}
+
+
 @cloud_app.get("/api/v1/triage-log")
 def get_triage_log():
     """Returns log of interactive responses from shopkeepers."""

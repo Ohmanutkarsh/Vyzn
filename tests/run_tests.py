@@ -89,6 +89,11 @@ from tests.test_resource_governor import (
     test_resource_governor_day_night_transition,
     test_resource_governor_priority_api_stability
 )
+from tests.test_telegram_alerts import (
+    test_telegram_alert_payload_structure,
+    test_telegram_alert_simulation_dispatch,
+    test_telegram_webhook_triage_and_commands
+)
 
 
 def run_all():
@@ -144,6 +149,9 @@ def run_all():
         ("test_camera_discovery_and_adoption_endpoints", lambda: with_tmp_path(test_camera_discovery_and_adoption_endpoints)),
         ("test_resource_governor_day_night_transition", lambda: test_resource_governor_day_night_transition()),
         ("test_resource_governor_priority_api_stability", lambda: test_resource_governor_priority_api_stability()),
+        ("test_telegram_alert_payload_structure", lambda: test_telegram_alert_payload_structure()),
+        ("test_telegram_alert_simulation_dispatch", lambda: test_telegram_alert_simulation_dispatch()),
+        ("test_telegram_webhook_triage_and_commands", lambda: test_telegram_webhook_triage_and_commands()),
     ]
 
 

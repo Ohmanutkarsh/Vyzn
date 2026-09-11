@@ -24,9 +24,9 @@ from vyzn_cloud.security import (
 from vyzn_cloud.fleet_routes import MANAGED_CONFIGS, FLEET_INCIDENTS
 from vyzn.ai.detector import get_detector, Detection
 from vyzn.scoring.engine import ScoringEngine, is_time_after_hours, check_box_intersects_zone
-from vyzn.core.events import DetectionCandidate
+from vyzn.core.events import EventRecord, DetectionCandidate
 from vyzn.core.config import BusinessHours, ZonePolygon
-from vyzn.alerts.whatsapp import send_interactive_threat_alert
+from vyzn.alerts.telegram import send_telegram_threat_alert
 
 logger = logging.getLogger("vyzn_cloud.ingest")
 
@@ -194,6 +194,15 @@ async def ingest_snapshot(
             "object_type": best_candidate.object_type,
             "status": "verified_threat"
         })
+        fake_rec = EventRecord(
+            event_group_id=inc_id,
+            camera_id=camera_id,
+            start_time=now_dt.isoformat(),
+            object_type=best_candidate.object_type,
+            confidence=best_candidate.confidence,
+            score=highest_score
+        )
+        send_telegram_threat_alert(fake_rec)
         logger.warning(
             f"🚨 [CLOUD INGEST ALERT] Verified {best_candidate.object_type} threat at site [{resolved_site}] camera [{camera_id}], score={highest_score}!"
         )
