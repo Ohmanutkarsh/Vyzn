@@ -124,7 +124,7 @@ class ScoringEngine:
             if candidate.object_type in ["person", "vehicle"] and gate_l0_passed:
                 threat_floor = max(50, self.alert_threshold)
             else:
-                threat_floor = 50
+                threat_floor = 30  # Non-priority floor (animals, daytime public) maintains >=20pt buffer below threshold
 
             subtotal_1234 = max(threat_floor, subtotal_123)
             l4_adjustment = subtotal_1234 - subtotal_123

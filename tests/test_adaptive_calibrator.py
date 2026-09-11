@@ -73,22 +73,41 @@ def test_calibrator_sample_gating_and_bayesian_estimation(tmp_path):
 
 
 def test_anti_gaming_slew_rate_limiter():
-    """Verifies that an attacker flooding 50 false alarms cannot shift bias by > 5 pts instantaneously."""
+    """
+    Verifies that an attacker flooding 50 false alarms cannot shift bias by > 5 pts instantaneously,
+    and cannot bypass the limit with rapid successive calls within the 24-hour window.
+    """
     calibrator = AdaptiveCalibrator(db=None, min_samples=10, max_penalty=25, max_slew_per_day=5)
 
-    # Simulate 50 false alarms, 0 threats
     stats = {
         "reviewed": 50,
         "false_positive": 50,
         "confirmed_threat": 0,
         "fpr_fraction": 1.0
     }
-    bias, debug = calibrator.compute_bayesian_bias_from_stats("cam_attack_target", stats)
+    t0 = 100000.0
 
-    # Target bias would be -min(25, round(theta * 30)) ~ -22
-    # But slew rate limiter MUST restrict it to max -5
-    assert debug["slew_limited"] is True
-    assert bias == -5, f"Expected slew limited bias to -5, got {bias}"
+    # Call 1 at t0: Target ~ -22, but capped at -5
+    bias_1, debug_1 = calibrator.compute_bayesian_bias_from_stats("cam_attack_target", stats, now_ts=t0)
+    assert debug_1["slew_limited"] is True
+    assert bias_1 == -5, f"Expected initial slew limited bias to -5, got {bias_1}"
+    assert debug_1["remaining_24h_budget"] == 0
+
+    # Call 2 at t0 + 10s: Rapid attack attempt MUST be completely blocked (remaining budget = 0)
+    bias_2, debug_2 = calibrator.compute_bayesian_bias_from_stats("cam_attack_target", stats, now_ts=t0 + 10.0)
+    assert debug_2["slew_limited"] is True
+    assert bias_2 == -5, f"Rapid call must remain locked at -5, got {bias_2}"
+    assert debug_2["remaining_24h_budget"] == 0
+
+    # Call 3 at t0 + 3600s (1 hour later): Still blocked in same 24-hour window
+    bias_3, debug_3 = calibrator.compute_bayesian_bias_from_stats("cam_attack_target", stats, now_ts=t0 + 3600.0)
+    assert bias_3 == -5, f"1 hour later must still remain locked at -5, got {bias_3}"
+
+    # Call 4 at t0 + 86401s (24 hours and 1 second later): Rolling window frees budget
+    bias_4, debug_4 = calibrator.compute_bayesian_bias_from_stats("cam_attack_target", stats, now_ts=t0 + 86401.0)
+    assert debug_4["slew_limited"] is True
+    assert bias_4 == -10, f"Next day allowed step of 5 pts to -10, got {bias_4}"
+    assert debug_4["remaining_24h_budget"] == 0
 
 
 def test_rolling_window_decays_old_nuisance(tmp_path):
@@ -163,5 +182,57 @@ def test_hard_floor_inviolability_under_severe_camera_bias():
         timestamp=datetime.now(timezone.utc)
     )
     anim_score, anim_alert, anim_breakdown = engine.evaluate(stray_animal, camera_bias=-10)
-    assert anim_score <= 55, f"Animal score {anim_score} should remain below alert threshold"
+    assert anim_score <= 45, f"Animal score {anim_score} should remain below alert threshold"
     assert anim_alert is False, "Stray animal after hours must NOT fire false alarm"
+
+    # 4. Critical Boundary Collision Regression Test: Minimum allowed OTA threshold (65)
+    min_thresh_engine = ScoringEngine(alert_threshold=65)
+    min_anim_score, min_anim_alert, _ = min_thresh_engine.evaluate(stray_animal, camera_bias=0)
+    assert min_anim_score < 65, f"Animal score {min_anim_score} must not breach minimum threshold 65"
+    assert min_anim_alert is False, "Stray animal must not fire false alert even at minimum allowed threshold 65"
+
+    min_burglar_score, min_burglar_alert, _ = min_thresh_engine.evaluate(creeping_burglar, camera_bias=-25)
+    assert min_burglar_score >= 65, f"Burglar score {min_burglar_score} must meet or exceed threshold 65"
+    assert min_burglar_alert is True, "Burglar must alert at minimum allowed threshold 65"
+
+
+def test_calibrator_cannot_influence_upstream_detection():
+    """
+    MATHEMATICAL INVARIANCE TEST:
+    Verifies that camera_bias (even an extreme adversarial value of -100)
+    has ZERO influence on upstream detector outputs:
+    - Object candidate confidence is unmodified.
+    - Upstream is_valid_detection remains True.
+    - Upstream classification and bounding box coordinates are completely preserved.
+    """
+    engine = ScoringEngine(alert_threshold=70)
+
+    candidate = DetectionCandidate(
+        camera_id="cam_invariance_test",
+        object_type="person",
+        confidence=0.88,
+        motion_ratio=0.08,
+        track_duration_sec=3.0,
+        bounding_box=[0.2, 0.2, 0.5, 0.8],
+        is_after_hours=True,
+        is_in_restricted_zone=True,
+        is_night_ir=False,
+        timestamp=datetime.now(timezone.utc)
+    )
+
+    # Evaluate with baseline camera_bias = 0
+    score_clean, alert_clean, breakdown_clean = engine.evaluate(candidate, camera_bias=0)
+
+    # Evaluate with extreme adversarial dampener camera_bias = -100
+    score_dampened, alert_dampened, breakdown_dampened = engine.evaluate(candidate, camera_bias=-100)
+
+    # Upstream properties MUST be identical
+    assert breakdown_clean["is_valid_detection"] is True
+    assert breakdown_dampened["is_valid_detection"] is True
+    assert candidate.confidence == 0.88
+    assert candidate.object_type == "person"
+    assert candidate.bounding_box == [0.2, 0.2, 0.5, 0.8]
+
+    # Inviolable floor MUST hold even with -100 camera bias
+    assert score_dampened >= 70, f"Score {score_dampened} fell below threshold floor under bias -100"
+    assert alert_dampened is True, "Alert must fire for verified intruder despite -100 bias"

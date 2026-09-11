@@ -124,9 +124,9 @@ def test_stolen_device_site_key_revocation():
         f"/api/v1/edge/sites/{stolen_site_id}/config",
         headers={"X-Site-Key": stolen_key}
     )
-    # MUST BE REJECTED WITH 401
+    # MUST BE REJECTED WITH 401 and generic "Unauthorized" with zero state leakage
     assert post_theft_res.status_code == 401
-    assert "revoked" in post_theft_res.json()["detail"].lower()
+    assert post_theft_res.json()["detail"] == "Unauthorized"
 
 
 def test_installer_key_revocation():
@@ -142,10 +142,106 @@ def test_installer_key_revocation():
     # 2. Revoke key
     assert revoke_installer_key(token) is True
 
-    # 3. Subsequent call MUST fail with 401
+    # 3. Subsequent call MUST fail with 401 and generic "Unauthorized"
     res_revoked = client.get("/api/v1/fleet/sites", headers={"X-Installer-Key": token})
     assert res_revoked.status_code == 401
-    assert "revoked" in res_revoked.json()["detail"].lower()
+    assert res_revoked.json()["detail"] == "Unauthorized"
+
+
+def test_durable_revocation_across_service_restart():
+    """
+    PERSISTENCE INVARIANT:
+    Ensures that revoked credentials persist in SQLite across simulated service restarts.
+    Wiping in-memory sets and re-initializing the database MUST reload blacklists.
+    """
+    from vyzn_cloud.security import (
+        REVOKED_SITE_KEYS,
+        REVOKED_INSTALLER_KEYS,
+        SITE_SECRETS,
+        _init_security_db
+    )
+    client = TestClient(cloud_app)
+    stolen_key = "vyzn_edge_secret_verma_retail_1184"
+
+    # Verify stolen key is in memory
+    assert stolen_key in REVOKED_SITE_KEYS
+
+    # Simulate catastrophic service restart: wipe in-memory sets completely
+    REVOKED_SITE_KEYS.clear()
+    REVOKED_INSTALLER_KEYS.clear()
+    SITE_SECRETS.clear()
+
+    # Re-initialize DB schema and cache from persistent storage
+    _init_security_db()
+
+    # Stolen key MUST be restored to in-memory blacklist
+    assert stolen_key in REVOKED_SITE_KEYS
+
+    # Stolen box connection attempt must still be rejected
+    res = client.get(
+        "/api/v1/edge/sites/site_verma_retail/config",
+        headers={"X-Site-Key": stolen_key}
+    )
+    assert res.status_code == 401
+    assert res.json()["detail"] == "Unauthorized"
+
+
+def test_site_key_reissuance_and_staged_config_resigning():
+    """
+    KEY ROTATION & REISSUANCE INVARIANT:
+    Verifies that when a replacement box is installed for a site (e.g. site_verma_retail after theft),
+    the installer can reissue a fresh key. Staged config is automatically re-signed with the new key.
+    """
+    client = TestClient(cloud_app)
+    installer_headers = {"X-Installer-Key": "installer_key_delhi_netra_01"}
+    site_id = "site_verma_retail"
+
+    # 1. Stage a configuration for site_verma_retail
+    stage_res = client.post(
+        f"/api/v1/fleet/sites/{site_id}/config",
+        json={
+            "alert_score_threshold": 70,
+            "business_hours_start": "09:00",
+            "business_hours_end": "21:00",
+            "cameras": {}
+        },
+        headers=installer_headers
+    )
+    assert stage_res.status_code == 200
+
+    # 2. Reissue key for replacement box
+    reissue_res = client.post(
+        f"/api/v1/fleet/sites/{site_id}/reissue-key",
+        headers=installer_headers
+    )
+    assert reissue_res.status_code == 200
+    data = reissue_res.json()
+    assert data["status"] == "reissued"
+    assert data["site_id"] == site_id
+    assert data["staged_config_resigned"] is True
+    new_key = data["new_site_key"]
+    assert new_key.startswith(f"vyzn_edge_secret_{site_id}_")
+
+    # 3. Old stolen key must now be rejected
+    old_key = "vyzn_edge_secret_verma_retail_1184"
+    old_res = client.get(
+        f"/api/v1/edge/sites/{site_id}/config",
+        headers={"X-Site-Key": old_key}
+    )
+    assert old_res.status_code == 401
+    assert old_res.json()["detail"] == "Unauthorized"
+
+    # 4. New replacement box successfully authenticates and pulls staged config
+    new_res = client.get(
+        f"/api/v1/edge/sites/{site_id}/config",
+        headers={"X-Site-Key": new_key}
+    )
+    assert new_res.status_code == 200
+    pulled = new_res.json()
+    assert "signature" in pulled
+
+    # 5. The pulled config signature cryptographically verifies with the new key
+    assert verify_config_hmac(site_id, pulled["config"], pulled["signature"]) is True
 
 
 def test_fleet_portal_html_rendering():

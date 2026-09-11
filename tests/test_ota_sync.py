@@ -89,11 +89,11 @@ def test_semantic_geometry_validation():
     except ValueError as e:
         assert "near-zero area" in str(e)
 
-    # 4. Reject dangerous threshold (< 50 or > 80)
-    bad_thresh_low = {"alert_score_threshold": 20, "cameras": {}}
+    # 4. Reject dangerous threshold (< 65 or > 80)
+    bad_thresh_low = {"alert_score_threshold": 55, "cameras": {}}
     try:
         validate_semantic_config(bad_thresh_low)
-        assert False, "Should have rejected low threshold"
+        assert False, "Should have rejected low threshold (< 65)"
     except ValueError as e:
         assert "outside safe operating bounds" in str(e)
 

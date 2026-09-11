@@ -20,6 +20,7 @@ from vyzn_cloud.security import (
     compute_config_hash,
     generate_config_hmac,
     revoke_site_key,
+    reissue_site_key,
     revoke_installer_key,
     INSTALLERS,
     SITE_SECRETS
@@ -104,7 +105,7 @@ class CameraConfigModel(BaseModel):
 
 
 class FleetConfigPayload(BaseModel):
-    alert_score_threshold: int = Field(70, ge=50, le=80)
+    alert_score_threshold: int = Field(70, ge=65, le=80)
     business_hours_start: str = Field("09:00", pattern=r"^\d{2}:\d{2}$")
     business_hours_end: str = Field("21:00", pattern=r"^\d{2}:\d{2}$")
     cameras: Dict[str, CameraConfigModel] = {}
@@ -273,6 +274,33 @@ def revoke_site_credentials(
     result = revoke_site_key(site_id, reason="physical_theft_reported")
     logger.critical(f"🚨 Physical theft reported by installer [{installer.get('name')}]! Revoked key for site [{site_id}].")
     return result
+
+
+@fleet_router.post("/api/v1/fleet/sites/{site_id}/reissue-key")
+def reissue_site_credentials(
+    site_id: str,
+    installer: Dict[str, Any] = Depends(authenticate_installer)
+):
+    """
+    Reissues a fresh shared secret key for an edge site (e.g. after replacing a stolen box).
+    Revokes previous key, stores new key in persistent DB, and re-signs any staged configuration.
+    """
+    authorize_site_access(installer, site_id)
+    new_key = reissue_site_key(site_id)
+    resigned = False
+    if site_id in MANAGED_CONFIGS:
+        cfg_payload = MANAGED_CONFIGS[site_id]["config"]
+        new_sig = generate_config_hmac(site_id, cfg_payload)
+        MANAGED_CONFIGS[site_id]["signature"] = new_sig
+        resigned = True
+
+    logger.info(f"Installer [{installer.get('name')}] reissued site key for [{site_id}]. Staged config re-signed: {resigned}.")
+    return {
+        "status": "reissued",
+        "site_id": site_id,
+        "new_site_key": new_key,
+        "staged_config_resigned": resigned
+    }
 
 
 @fleet_router.get("/api/v1/fleet/incidents")

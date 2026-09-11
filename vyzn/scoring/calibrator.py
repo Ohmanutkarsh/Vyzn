@@ -1,4 +1,4 @@
-﻿"""
+"""
 Adaptive Edge Intelligence & Hardened Closed-Loop Auto-Calibrator.
 Translates real-world shopkeeper triage decisions into camera-specific bias adjustments,
 driving false-alarm rates asymptotically toward zero while resisting adversarial gaming.
@@ -50,13 +50,17 @@ class AdaptiveCalibrator:
         self._last_refresh: float = 0.0
         self._manual_overrides: Dict[str, int] = {}
 
-        # Anti-gaming slew rate tracking: camera_id -> (timestamp, bias)
+        # Anti-gaming slew rate tracking:
+        # camera_id -> [(timestamp, delta_applied)] in rolling 24-hour window
+        self._adjustment_history: Dict[str, list[tuple[float, int]]] = {}
+        self._current_bias: Dict[str, int] = {}
         self._bias_history: Dict[str, tuple[float, int]] = {}
 
     def compute_bayesian_bias_from_stats(
         self,
         camera_id: str,
-        stats: Dict[str, Any]
+        stats: Dict[str, Any],
+        now_ts: Optional[float] = None
     ) -> tuple[int, Dict[str, Any]]:
         """
         Calculates score penalty bias using Beta-Binomial conjugate Bayesian estimation:
@@ -64,9 +68,10 @@ class AdaptiveCalibrator:
         Posterior: Beta(alpha + FP, beta + TP)
         Posterior Mean theta_hat = (FP + alpha) / (FP + TP + alpha + beta)
 
-        Gating:
+        Gating & Anti-Gaming Controls:
         - If reviewed events < min_samples (15), bias = 0.
-        - Rate limiting: max slew of max_slew_per_day points per 24 hours.
+        - Cumulative Slew Rate Limiter: max cumulative drift of max_slew_per_day
+          across any rolling 24-hour sliding window (86,400 seconds).
         """
         fp = stats.get("false_positive", 0)
         tp = stats.get("confirmed_threat", 0)
@@ -90,28 +95,36 @@ class AdaptiveCalibrator:
         raw_penalty = int(round(theta_hat * 30.0))
         target_bias = -min(self.max_penalty, max(0, raw_penalty))
 
-        # 3. Anti-Gaming Slew Rate Limiter (max shift per 24 hours)
-        now = time.monotonic()
+        # 3. Cumulative Sliding-Window Slew Rate Limiter (rolling 24h)
+        now = now_ts if now_ts is not None else time.monotonic()
+        history = self._adjustment_history.setdefault(camera_id, [])
+
+        # Prune records older than 24 hours (86,400s)
+        cutoff = now - 86400.0
+        history = [(ts, delta) for ts, delta in history if ts >= cutoff]
+        self._adjustment_history[camera_id] = history
+
+        current_bias = self._current_bias.get(camera_id, 0)
+        used_slew = sum(abs(delta) for _, delta in history)
+        remaining_budget = max(0, self.max_slew_per_day - used_slew)
+
+        desired_delta = target_bias - current_bias
         slew_limited = False
-        final_bias = target_bias
 
-        if camera_id in self._bias_history:
-            last_time, last_bias = self._bias_history[camera_id]
-            elapsed_days = max(0.001, (now - last_time) / 86400.0)
-            max_allowed_delta = max(1, int(round(self.max_slew_per_day * max(1.0, elapsed_days))))
-
-            if abs(target_bias - last_bias) > max_allowed_delta:
-                slew_limited = True
-                if target_bias < last_bias:
-                    final_bias = last_bias - max_allowed_delta
-                else:
-                    final_bias = last_bias + max_allowed_delta
+        if abs(desired_delta) > remaining_budget:
+            slew_limited = True
+            if desired_delta < 0:
+                applied_delta = -remaining_budget
+            else:
+                applied_delta = remaining_budget
         else:
-            # First initialization: cap initial leap to max_slew_per_day
-            if abs(target_bias) > self.max_slew_per_day:
-                slew_limited = True
-                final_bias = -self.max_slew_per_day
+            applied_delta = desired_delta
 
+        final_bias = current_bias + applied_delta
+        if applied_delta != 0:
+            history.append((now, applied_delta))
+
+        self._current_bias[camera_id] = final_bias
         self._bias_history[camera_id] = (now, final_bias)
 
         debug_info = {
@@ -120,6 +133,8 @@ class AdaptiveCalibrator:
             "target_bias": target_bias,
             "final_bias": final_bias,
             "slew_limited": slew_limited,
+            "used_24h_slew": used_slew + abs(applied_delta),
+            "remaining_24h_budget": max(0, remaining_budget - abs(applied_delta)),
             "post_alpha": post_alpha,
             "post_beta": post_beta
         }

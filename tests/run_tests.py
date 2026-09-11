@@ -58,7 +58,8 @@ from tests.test_adaptive_calibrator import (
     test_calibrator_sample_gating_and_bayesian_estimation,
     test_anti_gaming_slew_rate_limiter,
     test_rolling_window_decays_old_nuisance,
-    test_hard_floor_inviolability_under_severe_camera_bias
+    test_hard_floor_inviolability_under_severe_camera_bias,
+    test_calibrator_cannot_influence_upstream_detection
 )
 from tests.test_ota_sync import (
     test_canonical_hash_and_hmac_tamper_detection,
@@ -70,6 +71,8 @@ from tests.test_fleet_portal import (
     test_fleet_tenant_scoping_and_remote_config_dispatch,
     test_stolen_device_site_key_revocation,
     test_installer_key_revocation,
+    test_durable_revocation_across_service_restart,
+    test_site_key_reissuance_and_staged_config_resigning,
     test_fleet_portal_html_rendering
 )
 from tests.test_e2e_fleet_sync import test_end_to_end_fleet_observability_and_ota_closed_loop
@@ -109,6 +112,7 @@ def run_all():
         ("test_anti_gaming_slew_rate_limiter", lambda: test_anti_gaming_slew_rate_limiter()),
         ("test_rolling_window_decays_old_nuisance", lambda: with_tmp_path(test_rolling_window_decays_old_nuisance)),
         ("test_hard_floor_inviolability_under_severe_camera_bias", lambda: test_hard_floor_inviolability_under_severe_camera_bias()),
+        ("test_calibrator_cannot_influence_upstream_detection", lambda: test_calibrator_cannot_influence_upstream_detection()),
         ("test_canonical_hash_and_hmac_tamper_detection", lambda: test_canonical_hash_and_hmac_tamper_detection()),
         ("test_semantic_geometry_validation", lambda: test_semantic_geometry_validation()),
         ("test_wholesale_atomic_zone_swap_and_rollback", lambda: with_tmp_path(test_wholesale_atomic_zone_swap_and_rollback)),
@@ -116,10 +120,15 @@ def run_all():
         ("test_fleet_tenant_scoping_and_remote_config_dispatch", lambda: test_fleet_tenant_scoping_and_remote_config_dispatch()),
         ("test_stolen_device_site_key_revocation", lambda: test_stolen_device_site_key_revocation()),
         ("test_installer_key_revocation", lambda: test_installer_key_revocation()),
+        ("test_durable_revocation_across_service_restart", lambda: test_durable_revocation_across_service_restart()),
+        ("test_site_key_reissuance_and_staged_config_resigning", lambda: test_site_key_reissuance_and_staged_config_resigning()),
         ("test_fleet_portal_html_rendering", lambda: test_fleet_portal_html_rendering()),
         ("test_end_to_end_fleet_observability_and_ota_closed_loop", lambda: with_tmp_path(test_end_to_end_fleet_observability_and_ota_closed_loop)),
     ]
 
+
+    from vyzn_cloud.security import _reset_security_state
+    _reset_security_state()
 
     passed = 0
     failed = 0

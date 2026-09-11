@@ -49,8 +49,8 @@ def validate_semantic_config(config_dict: Dict[str, Any]) -> None:
     """
     threshold = config_dict.get("alert_score_threshold")
     if threshold is not None:
-        if not (50 <= threshold <= 80):
-            raise ValueError(f"Alert score threshold {threshold} outside safe operating bounds [50, 80]")
+        if not (65 <= threshold <= 80):
+            raise ValueError(f"Alert score threshold {threshold} outside safe operating bounds [65, 80]")
 
     cameras = config_dict.get("cameras", {})
     for cam_id, cam_cfg in cameras.items():
