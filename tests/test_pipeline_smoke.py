@@ -48,7 +48,13 @@ def test_pipeline_synthetic_smoke(tmp_path: Path):
         time.sleep(7.0)
 
         # Verify SQLite index has recorded events
-        events = pipeline.db.query_events(limit=10)
+        events = []
+        for _ in range(12):
+            events = pipeline.db.query_events(limit=10)
+            if len(events) > 0:
+                break
+            time.sleep(0.3)
+
         assert len(events) > 0, "Expected at least one recorded event in SQLite"
 
         # Check recorded event details

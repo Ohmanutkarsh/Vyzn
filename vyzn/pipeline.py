@@ -86,11 +86,14 @@ class EdgePipeline:
 
         # Ring buffers for pre-roll video (stores downscaled frames for ~10 seconds = 40 frames @ 4 fps)
         self.ring_buffers: Dict[str, deque] = {}
-        # Active event buffers
+        # Active event buffers and tracking state
         self.event_buffers: Dict[str, List] = {}
         self.active_event_ids: Dict[str, str] = {}
         self.active_event_scores: Dict[str, int] = {}
         self.active_event_start_times: Dict[str, str] = {}
+        self.active_event_last_motion: Dict[str, float] = {}
+        self.active_event_alert_sent: Dict[str, bool] = {}
+        self.active_event_best_candidates: Dict[str, Optional[DetectionCandidate]] = {}
 
         self.worker_thread: Optional[threading.Thread] = None
 
@@ -221,49 +224,49 @@ class EdgePipeline:
                 highest_score = score
                 best_candidate = candidate
 
-            # 7. Event Assembly & Recording Logic
-            if highest_score >= 40 and best_candidate:
-                # Initiate or extend event
+            # 7. Event Assembly & Grace Period Logic
+            is_active_motion = (highest_score >= 40 and best_candidate is not None)
+
+            if is_active_motion:
+                # Start new event if not already tracking one
                 if camera_id not in self.active_event_ids:
                     event_id = f"ev_{camera_id}_{int(time.time())}"
                     self.active_event_ids[camera_id] = event_id
                     self.active_event_scores[camera_id] = highest_score
                     self.active_event_start_times[camera_id] = now_dt.isoformat()
-                    # Initialize event buffer with pre-roll
+                    self.active_event_alert_sent[camera_id] = False
+                    self.active_event_best_candidates[camera_id] = best_candidate
+                    # Pre-fill event buffer with pre-roll history (~10s = 40 frames)
                     self.event_buffers[camera_id] = list(self.ring_buffers.get(camera_id, []))
 
+                # Append current frame and update state
                 self.event_buffers[camera_id].append(frame)
-                self.active_event_scores[camera_id] = max(
-                    self.active_event_scores[camera_id],
-                    highest_score
-                )
+                self.active_event_last_motion[camera_id] = frame_time
+                if highest_score > self.active_event_scores[camera_id]:
+                    self.active_event_scores[camera_id] = highest_score
+                    self.active_event_best_candidates[camera_id] = best_candidate
 
-                # If event duration reaches ~8 seconds (32 frames @ 4 fps) or alert fires
-                if len(self.event_buffers[camera_id]) >= 32 or should_alert_flag:
-                    self._finalize_event(
-                        camera_id=camera_id,
-                        candidate=best_candidate,
-                        should_alert=should_alert_flag
-                    )
+                # Trigger alert dispatch once per event as soon as threshold is met
+                if should_alert_flag and not self.active_event_alert_sent.get(camera_id, False):
+                    self.active_event_alert_sent[camera_id] = True
+
+                # Cap maximum segment duration (24 frames ≈ 6 seconds @ 4 fps)
+                if len(self.event_buffers[camera_id]) >= 24:
+                    self._finalize_event(camera_id)
 
             elif camera_id in self.active_event_ids:
-                # Trailing frames to conclude event
+                # Trailing frames during grace period (motion has paused)
                 self.event_buffers[camera_id].append(frame)
-                if len(self.event_buffers[camera_id]) >= 20:
-                    self._finalize_event(
-                        camera_id=camera_id,
-                        candidate=best_candidate,
-                        should_alert=False
-                    )
+                last_m_time = self.active_event_last_motion.get(camera_id, frame_time)
+
+                # Close event if quiet for > 2.5 seconds or reached segment limit
+                if (frame_time - last_m_time > 2.5) or (len(self.event_buffers[camera_id]) >= 24):
+                    self._finalize_event(camera_id)
 
             self.frame_queue.task_done()
 
-    def _finalize_event(
-        self,
-        camera_id: str,
-        candidate: Optional[DetectionCandidate],
-        should_alert: bool
-    ):
+    def _finalize_event(self, camera_id: str):
+        """Finalizes an event segment, encodes crash-safe fMP4, indexes to SQLite, and dispatches alert."""
         event_id = self.active_event_ids.pop(camera_id, None)
         if not event_id:
             return
@@ -271,7 +274,13 @@ class EdgePipeline:
         frames = self.event_buffers.pop(camera_id, [])
         score = self.active_event_scores.pop(camera_id, 50)
         start_time = self.active_event_start_times.pop(camera_id, datetime.now(timezone.utc).isoformat())
+        self.active_event_last_motion.pop(camera_id, None)
+        alert_sent = self.active_event_alert_sent.pop(camera_id, False)
+        candidate = self.active_event_best_candidates.pop(camera_id, None)
         end_time = datetime.now(timezone.utc).isoformat()
+
+        if len(frames) < 6:
+            return
 
         # Write fMP4 clip and thumbnail
         clip_path, thumb_path = self.clip_writer.write_clip_from_frames(
@@ -301,8 +310,8 @@ class EdgePipeline:
         self.db.insert_event(record)
         self.db.log_audit("EVENT_RECORDED", event_id, f"Score: {score}, Obj: {obj_type}")
 
-        # Alert dispatch if verified
-        if should_alert or score >= self.settings.alert_score_threshold:
+        # Dispatch alert if score qualifies
+        if alert_sent or score >= self.settings.alert_score_threshold:
             self.dispatcher.dispatch(record, clip_path, thumb_path)
 
     def get_telemetry_status(self) -> Dict:
@@ -323,6 +332,14 @@ class EdgePipeline:
     def stop(self):
         """Stops all threads and closes database."""
         self.running = False
+
+        # Flush any active events currently in progress before terminating
+        for cam_id in list(self.active_event_ids.keys()):
+            try:
+                self._finalize_event(cam_id)
+            except Exception as e:
+                logger.error(f"Error finalizing event for {cam_id} on stop: {e}")
+
         for t in self.capture_threads:
             if hasattr(t, "stop"):
                 t.stop()
