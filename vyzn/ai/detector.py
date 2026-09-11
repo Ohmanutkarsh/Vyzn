@@ -114,3 +114,15 @@ class MockDetector(BaseDetector):
                 label="person"
             )]
         return []
+
+
+def get_detector(engine: str = "mock", model_path: Optional[str] = None, **kwargs) -> BaseDetector:
+    """Factory helper to instantiate appropriate computer vision detector."""
+    if engine.lower() in ("onnx", "opencv", "rfdetr"):
+        from vyzn.ai.onnx_detector import ONNXDetector
+        return ONNXDetector(model_path=model_path, **kwargs)
+    elif engine.lower() in ("yolo", "yolov8", "ultralytics"):
+        return YOLOv8Detector(model_name=model_path or "yolov8n.pt", **kwargs)
+    else:
+        return MockDetector(**kwargs)
+

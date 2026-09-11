@@ -28,6 +28,7 @@ from vyzn.storage.cloud_sync import CloudSyncWorker
 from vyzn.telemetry.heartbeat import TelemetryHeartbeatDaemon
 from vyzn.capture.synthetic import SyntheticCameraThread
 from vyzn.capture.stream_capture import RTSPCaptureThread
+from vyzn.privacy.dpdp import PrivacyMasker
 
 logger = logging.getLogger("vyzn.pipeline")
 
@@ -49,7 +50,9 @@ class EdgePipeline:
 
         # Core subsystems
         self.db = EventDatabase(self.settings.db_path)
+        self.privacy_masker = PrivacyMasker()
         self.motion_gate = MOG2MotionGate(min_motion_ratio=self.settings.motion_gate_threshold)
+
         self.detector = detector or MockDetector()
         self.tracker = IOUTracker()
         self.scoring_engine = ScoringEngine(alert_threshold=self.settings.alert_score_threshold)
@@ -151,9 +154,17 @@ class EdgePipeline:
 
             camera_id, frame_time, frame, is_night_ir = item
 
+            # DPDP Act 2023: Apply real-time privacy masking before storage or inference
+            cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
+            if cam_config and getattr(cam_config, "privacy_zones", None):
+                p_polys = [pz.points for pz in cam_config.privacy_zones if pz.points]
+                if p_polys:
+                    frame = self.privacy_masker.apply_mask(frame, p_polys)
+
             # Update pre-roll buffer
             if camera_id in self.ring_buffers:
                 self.ring_buffers[camera_id].append(frame)
+
 
             # 1. Motion Pre-Filter (MOG2)
             has_motion, motion_ratio, _ = self.motion_gate.process_frame(camera_id, frame)

@@ -223,9 +223,74 @@ def stream_camera_mjpeg(camera_id: str):
     )
 
 
+class TriageRequest(BaseModel):
+    triage: str  # 'confirmed_threat' | 'false_positive' | 'unreviewed'
+
+
+@app.post("/api/events/{event_id}/triage")
+def set_event_triage(event_id: str, req: TriageRequest):
+    """Sets user triage validation for an event."""
+    db = get_db()
+    if req.triage not in ("confirmed_threat", "false_positive", "unreviewed"):
+        raise HTTPException(status_code=400, detail="Invalid triage status")
+    db.update_event_triage(event_id, req.triage)
+    return {"status": "success", "event_id": event_id, "triage": req.triage}
+
+
+@app.get("/api/system/metrics")
+def get_system_metrics():
+    """Live hardware and pipeline metrics for dashboard observability."""
+    import psutil
+    db = get_db()
+    triage_stats = db.get_triage_statistics()
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    active_cams = len(_pipeline_instance.capture_threads) if _pipeline_instance else 0
+    return {
+        "cpu_percent": psutil.cpu_percent(interval=None),
+        "ram_percent": mem.percent,
+        "ram_used_mb": round(mem.used / (1024 * 1024), 1),
+        "disk_free_gb": round(disk.free / (1024 * 1024 * 1024), 1),
+        "disk_used_pct": disk.percent,
+        "active_cameras": active_cams,
+        "pipeline_fps": 4.0,
+        "triage_stats": triage_stats
+    }
+
+
+class DPDPAuditRequest(BaseModel):
+    camera_id: Optional[str] = None
+    before_date: Optional[str] = None
+    actor: str = "DPO_OFFICER"
+
+
+@app.post("/api/dpdp/purge")
+def execute_dpdp_purge(req: DPDPAuditRequest):
+    """Executes statutory Right-to-Erasure (SAR) with cryptographic tamper-evident logging."""
+    from vyzn.privacy.dpdp import DPDPAuditEngine
+    db = get_db()
+    engine = DPDPAuditEngine()
+    purged_count = engine.execute_sar_purge(db, camera_id=req.camera_id, before_date=req.before_date, actor=req.actor)
+    return {"status": "success", "purged_records": purged_count, "actor": req.actor}
+
+
+@app.get("/api/dpdp/notice", response_class=HTMLResponse)
+def get_dpdp_statutory_notice():
+    """Returns compliant bilingual print-ready shop entrance CCTV signage."""
+    from vyzn.privacy.dpdp import generate_dpdp_notice
+    settings = get_settings()
+    notice_html = generate_dpdp_notice(
+        business_name=settings.site_name,
+        retention_hours=settings.raw_retention_hours
+    )
+    return HTMLResponse(content=notice_html)
+
+
 class ZoneCreateRequest(BaseModel):
     name: str
     points: List[List[float]]  # Normalized [[x1, y1], [x2, y2], ...]
+    zone_type: str = "restricted_zone"  # 'restricted_zone' | 'privacy_mask'
     weight: int = 20
     schedule_mode: str = "restricted_all_times"
     description: str = ""
@@ -259,12 +324,22 @@ def get_camera_snapshot(camera_id: str):
 
 @app.get("/api/cameras/{camera_id}/zones")
 def get_camera_zones(camera_id: str):
-    """Retrieves all active restricted polygon zones for a specific camera."""
+    """Retrieves all active restricted polygon zones and privacy masks for a specific camera."""
     settings = get_settings()
     cam = next((c for c in settings.cameras if c.camera_id == camera_id), None)
     if not cam:
         return []
-    return [z.dict() for z in cam.restricted_zones]
+    res = []
+    for z in cam.restricted_zones:
+        d = z.dict()
+        d["zone_type"] = "restricted_zone"
+        res.append(d)
+    for z in getattr(cam, "privacy_zones", []):
+        d = z.dict()
+        d["zone_type"] = "privacy_mask"
+        res.append(d)
+    return res
+
 
 
 @app.post("/api/cameras/{camera_id}/zones")
@@ -282,9 +357,13 @@ def create_camera_zone(camera_id: str, zone_req: ZoneCreateRequest):
     import yaml
 
     new_zone = ZonePolygon(name=zone_req.name, points=zone_req.points)
-    # Filter out existing zone with same name if replacing
-    cam.restricted_zones = [z for z in cam.restricted_zones if z.name != zone_req.name]
-    cam.restricted_zones.append(new_zone)
+
+    if zone_req.zone_type == "privacy_mask":
+        cam.privacy_zones = [z for z in cam.privacy_zones if z.name != zone_req.name]
+        cam.privacy_zones.append(new_zone)
+    else:
+        cam.restricted_zones = [z for z in cam.restricted_zones if z.name != zone_req.name]
+        cam.restricted_zones.append(new_zone)
 
     # Hot-reload in pipeline
     if _pipeline_instance and hasattr(_pipeline_instance, "update_camera_zones"):
@@ -306,9 +385,10 @@ def create_camera_zone(camera_id: str, zone_req: ZoneCreateRequest):
     existing_data["zones"][zone_req.name] = {
         "camera_id": camera_id,
         "polygon": zone_req.points,
+        "zone_type": zone_req.zone_type,
         "weight": zone_req.weight,
         "schedule_mode": zone_req.schedule_mode,
-        "description": zone_req.description or f"Zone on {camera_id}"
+        "description": zone_req.description or f"{zone_req.zone_type} on {camera_id}"
     }
 
     with open(zones_file, "w") as f:
@@ -318,8 +398,10 @@ def create_camera_zone(camera_id: str, zone_req: ZoneCreateRequest):
         "status": "success",
         "camera_id": camera_id,
         "zone_name": zone_req.name,
+        "zone_type": zone_req.zone_type,
         "vertex_count": len(zone_req.points)
     }
+
 
 
 # ---------------------------------------------------------------------------

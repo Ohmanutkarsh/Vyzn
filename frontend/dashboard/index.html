@@ -30,6 +30,20 @@
     </div>
   </header>
 
+  <!-- Live Edge Hardware & Pipeline Telemetry Strip -->
+  <div style="max-width: 1440px; margin: 12px auto 0; padding: 0 2rem;">
+    <div class="telemetry-strip">
+      <div class="telemetry-chip">CPU: <span id="telemetry-cpu">--%</span></div>
+      <div class="telemetry-chip">RAM: <span id="telemetry-ram">-- MB</span></div>
+      <div class="telemetry-chip">Disk Free: <span id="telemetry-disk">-- GB</span></div>
+      <div class="telemetry-chip">Inference FPS: <span id="telemetry-fps">4.0</span></div>
+      <div class="telemetry-chip">Empirical FAR: <span id="telemetry-far" class="text-teal">0.0%</span></div>
+      <div style="margin-left: auto; display: flex; gap: 0.5rem;">
+        <a href="/api/dpdp/notice" target="_blank" class="btn-zone btn-dpdp" style="text-decoration:none; font-size:0.75rem; padding:0.35rem 0.65rem;">📄 DPDP 2023 Notice</a>
+      </div>
+    </div>
+  </div>
+
   <main class="dashboard-content">
     <!-- Key Metric Counters (The Metrics That Matter) -->
     <section class="metrics-grid">
@@ -66,10 +80,12 @@
             <button class="cam-tab" data-cam="cam_shutter_night">Rear Shutter (Night IR)</button>
           </div>
           <div class="header-actions">
-            <button class="btn-zone" id="btn-open-zone-drawer">✏️ Draw Restricted Zone</button>
+            <button class="btn-zone" id="btn-open-zone-drawer">✏️ Draw Threat Zone</button>
+            <button class="btn-zone btn-privacy" id="btn-open-privacy-drawer">🛡️ Draw Privacy Mask</button>
             <div class="stream-protocol-badge">MJPEG / RTSP</div>
           </div>
         </div>
+
 
         <div class="video-container">
           <img id="live-stream-img" src="/api/cameras/cam_corridor/mjpeg" alt="Live Camera Stream">
@@ -125,6 +141,8 @@
         <button class="btn-secondary" id="btn-modal-close-action">Close</button>
       </div>
     </div>
+  </div>
+
   <!-- Interactive Polygon Zone Drawing Modal -->
   <div class="modal-backdrop" id="zone-modal" style="display: none;">
     <div class="modal-box modal-lg">
@@ -133,17 +151,24 @@
         <button class="btn-close" id="btn-close-zone-modal">&times;</button>
       </div>
       <div class="modal-body">
-        <p class="zone-instruction">Click 3 or more points on the camera frame to outline a restricted security zone (e.g. Cash Drawer, Rear Shutter, Safe Vault).</p>
+        <p class="zone-instruction" id="zone-instruction-text">Click 3 or more points on the camera frame to outline a security zone or privacy mask.</p>
         <div class="canvas-wrapper">
           <canvas id="zone-canvas" width="640" height="360"></canvas>
         </div>
         <div class="zone-form-grid">
           <div class="form-group">
+            <label>Zone Mode</label>
+            <select id="zone-type-select">
+              <option value="restricted_zone">Security Threat Zone</option>
+              <option value="privacy_mask">DPDP 2023 Privacy Mask (Blur)</option>
+            </select>
+          </div>
+          <div class="form-group">
             <label>Zone Identifier</label>
             <input type="text" id="zone-name-input" placeholder="e.g. cash_counter_zone" value="cash_counter_zone">
           </div>
           <div class="form-group">
-            <label>Threat Weight (Points)</label>
+            <label>Threat Weight</label>
             <input type="number" id="zone-weight-input" value="20" min="5" max="40">
           </div>
           <div class="form-group">
@@ -161,6 +186,7 @@
       </div>
     </div>
   </div>
+
 
   <script src="/static/app.js"></script>
 </body>

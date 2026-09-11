@@ -87,6 +87,7 @@ class DatabaseWriterWorker(threading.Thread):
             status TEXT DEFAULT 'raw',         -- 'raw' | 'compressed' | 'deleted'
             starred INTEGER DEFAULT 0,         -- 0 or 1
             synced INTEGER DEFAULT 0,          -- 0 or 1 (updated by Cloud Sync)
+            user_triage TEXT DEFAULT 'unreviewed', -- 'unreviewed' | 'confirmed_threat' | 'false_positive'
             file_path TEXT NOT NULL,           -- Path to .mp4
             thumb_path TEXT NOT NULL           -- Path to .jpg
         );
@@ -112,7 +113,12 @@ class DatabaseWriterWorker(threading.Thread):
             queue_depth INTEGER
         );
         """)
+        try:
+            conn.execute("ALTER TABLE events ADD COLUMN user_triage TEXT DEFAULT 'unreviewed';")
+        except sqlite3.OperationalError:
+            pass  # Already present
         conn.commit()
+
 
 
 class EventDatabase:
@@ -146,13 +152,14 @@ class EventDatabase:
         INSERT OR REPLACE INTO events (
             event_group_id, camera_id, start_time, end_time,
             object_type, confidence, score, status,
-            starred, synced, file_path, thumb_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            starred, synced, user_triage, file_path, thumb_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             event.event_group_id, event.camera_id, event.start_time, event.end_time,
             event.object_type, event.confidence, event.score, event.status,
-            event.starred, event.synced, event.file_path, event.thumb_path
+            event.starred, event.synced, getattr(event, "user_triage", "unreviewed"),
+            event.file_path, event.thumb_path
         )
         self.writer.queue.put((sql, params, callback))
 
@@ -160,14 +167,61 @@ class EventDatabase:
         sql = "UPDATE events SET status = ? WHERE event_group_id = ?"
         self.writer.queue.put((sql, (status, event_group_id), None))
 
+    def update_event_triage(self, event_group_id: str, triage: str):
+        """Updates user triage status ('confirmed_threat', 'false_positive', 'unreviewed')."""
+        sql = "UPDATE events SET user_triage = ? WHERE event_group_id = ?"
+        self.writer.queue.put((sql, (triage, event_group_id), None))
+
+    def get_triage_statistics(self) -> Dict[str, Any]:
+        """Returns aggregate metrics on owner triage decisions and empirical false alarm rate."""
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT user_triage, COUNT(*) FROM events GROUP BY user_triage")
+            rows = cursor.fetchall()
+            stats = {"unreviewed": 0, "confirmed_threat": 0, "false_positive": 0, "total": 0}
+            for status, count in rows:
+                if status in stats:
+                    stats[status] = count
+                stats["total"] += count
+            reviewed = stats["confirmed_threat"] + stats["false_positive"]
+            stats["false_positive_rate"] = round((stats["false_positive"] / float(reviewed)) * 100.0, 1) if reviewed > 0 else 0.0
+            return stats
+        finally:
+            conn.close()
+
     def mark_event_synced(self, event_group_id: str):
         sql = "UPDATE events SET synced = 1 WHERE event_group_id = ?"
         self.writer.queue.put((sql, (event_group_id,), None))
+
 
     def log_audit(self, action: str, event_group_id: Optional[str] = None, details: str = ""):
         sql = "INSERT INTO audit_log (timestamp_utc, action, event_group_id, details) VALUES (?, ?, ?, ?)"
         ts = datetime.now(timezone.utc).isoformat()
         self.writer.queue.put((sql, (ts, action, event_group_id, details), None))
+
+    def fetch_all(self, sql: str, params: tuple = ()) -> List[Any]:
+        """Executes a read query and returns all matching rows."""
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            return cursor.fetchall()
+        finally:
+            conn.close()
+
+    def execute_sync(self, sql: str, params: tuple = ()):
+        """Dispatches a write to the writer worker and blocks until committed."""
+        done_event = threading.Event()
+        err_holder = []
+        def on_done(res, err):
+            if err:
+                err_holder.append(err)
+            done_event.set()
+        self.writer.queue.put((sql, params, on_done))
+        done_event.wait(timeout=5.0)
+        if err_holder:
+            raise err_holder[0]
 
     def get_event(self, event_group_id: str) -> Optional[EventRecord]:
         """Reads a single event by ID."""
@@ -181,6 +235,7 @@ class EventDatabase:
             return EventRecord(**dict(row))
         finally:
             conn.close()
+
 
     def query_events(
         self,

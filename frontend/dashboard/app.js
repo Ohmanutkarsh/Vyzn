@@ -60,6 +60,51 @@ async function fetchStatus() {
   }
 }
 
+// Fetch Live Hardware & System Metrics
+async function fetchTelemetry() {
+  try {
+    const res = await fetch("/api/system/metrics");
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const cpuElem = document.getElementById("telemetry-cpu");
+    if (cpuElem && data.cpu_percent !== undefined) cpuElem.textContent = `${data.cpu_percent}%`;
+
+    const ramElem = document.getElementById("telemetry-ram");
+    if (ramElem && data.ram_used_mb !== undefined) ramElem.textContent = `${data.ram_used_mb} MB (${data.ram_percent}%)`;
+
+    const diskElem = document.getElementById("telemetry-disk");
+    if (diskElem && data.disk_free_gb !== undefined) diskElem.textContent = `${data.disk_free_gb} GB`;
+
+    const fpsElem = document.getElementById("telemetry-fps");
+    if (fpsElem && data.pipeline_fps !== undefined) fpsElem.textContent = data.pipeline_fps;
+
+    const farElem = document.getElementById("telemetry-far");
+    if (farElem && data.triage_stats) {
+      farElem.textContent = `${data.triage_stats.false_positive_rate}%`;
+    }
+  } catch (err) {
+    console.debug("Telemetry fetch error:", err);
+  }
+}
+
+// Handle User Incident Triage
+async function setEventTriage(eventId, triageDecision) {
+  try {
+    const res = await fetch(`/api/events/${eventId}/triage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ triage: triageDecision })
+    });
+    if (res.ok) {
+      fetchEvents();
+      fetchTelemetry();
+    }
+  } catch (err) {
+    console.error("Triage update error:", err);
+  }
+}
+
 // Fetch and Render Events
 async function fetchEvents() {
   try {
@@ -91,6 +136,20 @@ async function fetchEvents() {
       const isHigh = ev.score >= 70;
       const timeStr = ev.start_time ? new Date(ev.start_time).toLocaleTimeString() : "";
 
+      let triageHtml = '';
+      if (ev.user_triage === 'confirmed_threat') {
+        triageHtml = '<span class="badge-threat">✅ Confirmed Threat</span>';
+      } else if (ev.user_triage === 'false_positive') {
+        triageHtml = '<span class="badge-false">❌ False Alarm</span>';
+      } else {
+        triageHtml = `
+          <div class="event-triage-actions">
+            <button class="btn-triage btn-triage-threat" data-id="${ev.event_group_id}">✅ Threat</button>
+            <button class="btn-triage btn-triage-false" data-id="${ev.event_group_id}">❌ False Alarm</button>
+          </div>
+        `;
+      }
+
       card.innerHTML = `
         <img class="event-thumb" src="/api/events/${ev.event_group_id}/thumb" alt="Thumb" onerror="this.src='/static/styles.css'">
         <div class="event-details">
@@ -108,12 +167,13 @@ async function fetchEvents() {
               ${ev.starred ? '⭐' : '☆'}
             </button>
           </div>
+          ${triageHtml}
         </div>
       `;
 
       // Click card to open video replay
       card.addEventListener("click", (e) => {
-        if (e.target.classList.contains("btn-star-mini")) return;
+        if (e.target.classList.contains("btn-star-mini") || e.target.classList.contains("btn-triage")) return;
         openModal(ev);
       });
 
@@ -124,6 +184,22 @@ async function fetchEvents() {
         toggleStar(ev.event_group_id, starBtn);
       });
 
+      // Triage buttons
+      const threatBtn = card.querySelector(".btn-triage-threat");
+      if (threatBtn) {
+        threatBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setEventTriage(ev.event_group_id, "confirmed_threat");
+        });
+      }
+      const falseBtn = card.querySelector(".btn-triage-false");
+      if (falseBtn) {
+        falseBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          setEventTriage(ev.event_group_id, "false_positive");
+        });
+      }
+
       eventsList.appendChild(card);
     });
 
@@ -131,6 +207,7 @@ async function fetchEvents() {
     console.debug("Events fetch error:", err);
   }
 }
+
 
 // Modal Handlers
 function openModal(event) {
@@ -191,22 +268,38 @@ const zoneModal = document.getElementById("zone-modal");
 const zoneCanvas = document.getElementById("zone-canvas");
 const ctx = zoneCanvas.getContext("2d");
 const btnOpenZoneDrawer = document.getElementById("btn-open-zone-drawer");
+const btnOpenPrivacyDrawer = document.getElementById("btn-open-privacy-drawer");
 const btnCloseZoneModal = document.getElementById("btn-close-zone-modal");
 const btnClearZone = document.getElementById("btn-clear-zone");
 const btnSaveZone = document.getElementById("btn-save-zone");
 const zoneNameInput = document.getElementById("zone-name-input");
 const zoneWeightInput = document.getElementById("zone-weight-input");
 const zoneScheduleSelect = document.getElementById("zone-schedule-select");
+const zoneTypeSelect = document.getElementById("zone-type-select");
 const zoneModalTitle = document.getElementById("zone-modal-title");
+const zoneInstructionText = document.getElementById("zone-instruction-text");
 
 let zonePoints = [];
 let baseSnapshot = new Image();
 
-btnOpenZoneDrawer.addEventListener("click", () => {
-  zoneModalTitle.textContent = `Interactive Zone Polygon Drawer — [${activeCamera}]`;
-  zoneNameInput.value = `${activeCamera}_restricted_zone`;
+function openZoneDrawer(isPrivacy = false) {
+  if (isPrivacy) {
+    zoneTypeSelect.value = "privacy_mask";
+    zoneModalTitle.textContent = `DPDP 2023 Privacy Mask Drawer — [${activeCamera}]`;
+    zoneNameInput.value = `${activeCamera}_privacy_mask`;
+    if (zoneInstructionText) {
+      zoneInstructionText.textContent = "Click 3 or more points to outline an area to permanently blur on live feeds and recordings (e.g. neighbor window, public road).";
+    }
+  } else {
+    zoneTypeSelect.value = "restricted_zone";
+    zoneModalTitle.textContent = `Interactive Zone Polygon Drawer — [${activeCamera}]`;
+    zoneNameInput.value = `${activeCamera}_restricted_zone`;
+    if (zoneInstructionText) {
+      zoneInstructionText.textContent = "Click 3 or more points on the camera frame to outline a restricted security threat zone (e.g. Cash Drawer, Rear Shutter, Safe Vault).";
+    }
+  }
   zonePoints = [];
-  
+
   // Load current camera snapshot onto canvas
   baseSnapshot = new Image();
   baseSnapshot.crossOrigin = "anonymous";
@@ -219,11 +312,16 @@ btnOpenZoneDrawer.addEventListener("click", () => {
     redrawCanvas();
     zoneModal.style.display = "flex";
   };
-});
+}
+
+btnOpenZoneDrawer.addEventListener("click", () => openZoneDrawer(false));
+if (btnOpenPrivacyDrawer) {
+  btnOpenPrivacyDrawer.addEventListener("click", () => openZoneDrawer(true));
+}
 
 function redrawCanvas() {
   ctx.clearRect(0, 0, zoneCanvas.width, zoneCanvas.height);
-  
+
   // 1. Draw base snapshot if available
   if (baseSnapshot.complete && baseSnapshot.naturalWidth > 0) {
     ctx.drawImage(baseSnapshot, 0, 0, zoneCanvas.width, zoneCanvas.height);
@@ -234,6 +332,8 @@ function redrawCanvas() {
 
   if (zonePoints.length === 0) return;
 
+  const isPrivacy = zoneTypeSelect && zoneTypeSelect.value === "privacy_mask";
+
   // 2. Draw polygon lines and filled area
   ctx.beginPath();
   ctx.moveTo(zonePoints[0].x, zonePoints[0].y);
@@ -243,11 +343,11 @@ function redrawCanvas() {
 
   if (zonePoints.length >= 3) {
     ctx.closePath();
-    ctx.fillStyle = "rgba(15, 110, 86, 0.35)"; // Translucent deep teal
+    ctx.fillStyle = isPrivacy ? "rgba(2, 132, 199, 0.4)" : "rgba(15, 110, 86, 0.35)";
     ctx.fill();
   }
 
-  ctx.strokeStyle = "#5DCAA5"; // Mint accent border
+  ctx.strokeStyle = isPrivacy ? "#38bdf8" : "#5DCAA5";
   ctx.lineWidth = 2.5;
   ctx.stroke();
 
@@ -255,7 +355,7 @@ function redrawCanvas() {
   zonePoints.forEach((pt, idx) => {
     ctx.beginPath();
     ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
-    ctx.fillStyle = idx === 0 ? "#BA7517" : "#5DCAA5"; // First point amber, others mint
+    ctx.fillStyle = idx === 0 ? "#BA7517" : (isPrivacy ? "#38bdf8" : "#5DCAA5");
     ctx.fill();
     ctx.strokeStyle = "#FFFFFF";
     ctx.lineWidth = 1.5;
@@ -301,12 +401,15 @@ btnSaveZone.addEventListener("click", async () => {
     Number((p.y / zoneCanvas.height).toFixed(3))
   ]);
 
+  const zoneType = zoneTypeSelect ? zoneTypeSelect.value : "restricted_zone";
+
   const payload = {
     name: zoneNameInput.value.trim() || `${activeCamera}_zone`,
     points: normPoints,
+    zone_type: zoneType,
     weight: parseInt(zoneWeightInput.value, 10) || 20,
     schedule_mode: zoneScheduleSelect.value,
-    description: `User defined polygon on ${activeCamera}`
+    description: `${zoneType} on ${activeCamera}`
   };
 
   try {
@@ -317,7 +420,7 @@ btnSaveZone.addEventListener("click", async () => {
     });
 
     if (res.ok) {
-      alert(`✅ Restricted zone [${payload.name}] successfully saved and hot-reloaded into edge pipeline!`);
+      alert(`✅ ${zoneType === 'privacy_mask' ? 'Privacy Mask' : 'Threat Zone'} [${payload.name}] successfully saved and hot-reloaded into edge pipeline!`);
       closeZoneModal();
     } else {
       const err = await res.json();
@@ -331,6 +434,9 @@ btnSaveZone.addEventListener("click", async () => {
 // Poll intervals
 setInterval(fetchStatus, 3000);
 setInterval(fetchEvents, 4000);
+setInterval(fetchTelemetry, 3000);
 
 fetchStatus();
 fetchEvents();
+fetchTelemetry();
+

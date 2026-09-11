@@ -20,6 +20,7 @@ class EventRecord:
     status: str = "raw"                 # 'raw' | 'compressed' | 'deleted'
     starred: int = 0                    # 0 or 1
     synced: int = 0                     # 0 or 1
+    user_triage: str = "unreviewed"     # 'unreviewed' | 'confirmed_threat' | 'false_positive'
     file_path: str = ""                 # Path to .mp4
     thumb_path: str = ""                # Path to .jpg
 
@@ -35,9 +36,11 @@ class EventRecord:
             "status": self.status,
             "starred": self.starred,
             "synced": self.synced,
+            "user_triage": self.user_triage,
             "file_path": self.file_path,
             "thumb_path": self.thumb_path,
         }
+
 
 
 @dataclass

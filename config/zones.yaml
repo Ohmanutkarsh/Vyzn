@@ -27,6 +27,7 @@ zones:
       - 0.7
     schedule_mode: restricted_all_times
     weight: 25
+    zone_type: restricted_zone
   entrance_shutter:
     camera_id: cam_shutter_night
     description: Main shutter perimeter - alerts active strictly between 21:00 and
@@ -56,3 +57,18 @@ zones:
       - 0.6
     schedule_mode: restricted_all_times
     weight: 25
+  privacy_front_street:
+    camera_id: cam_test
+    description: privacy_mask on cam_test
+    polygon:
+    - - 0.1
+      - 0.1
+    - - 0.4
+      - 0.1
+    - - 0.4
+      - 0.4
+    - - 0.1
+      - 0.4
+    schedule_mode: restricted_all_times
+    weight: 20
+    zone_type: privacy_mask

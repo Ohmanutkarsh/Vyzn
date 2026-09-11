@@ -35,6 +35,8 @@ class CameraConfig(BaseModel):
     is_night_ir: bool = False
     business_hours: BusinessHours = Field(default_factory=BusinessHours)
     restricted_zones: List[ZonePolygon] = Field(default_factory=list)
+    privacy_zones: List[ZonePolygon] = Field(default_factory=list)
+
 
 
 class EdgeSettings(BaseSettings):

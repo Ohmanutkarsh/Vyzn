@@ -37,9 +37,23 @@ from tests.test_whatsapp import (
 from tests.test_cloud_sync import test_cloud_sync_worker_marks_synced
 from tests.test_zones_api import test_zones_and_snapshot_api
 from tests.test_cloud_backend import (
+
     test_dead_man_watchdog_detects_silence,
     test_cloud_webhook_heartbeat_and_triage
 )
+from tests.test_onnx_detector import (
+    test_onnx_detector_initialization_and_fallback,
+    test_detector_factory
+)
+from tests.test_privacy_and_dpdp import (
+    test_privacy_masker_blur,
+    test_privacy_masker_blackout,
+    test_dpdp_audit_hash_chain,
+    test_dpdp_sar_purge,
+    test_dpdp_notice_generator
+)
+from tests.test_benchmark_suite import test_benchmark_execution
+from tests.test_triage_and_metrics_api import test_triage_and_metrics_endpoints
 
 
 def run_all():
@@ -63,7 +77,17 @@ def run_all():
         ("test_zones_and_snapshot_api", lambda: with_tmp_path(test_zones_and_snapshot_api)),
         ("test_dead_man_watchdog_detects_silence", lambda: test_dead_man_watchdog_detects_silence()),
         ("test_cloud_webhook_heartbeat_and_triage", lambda: test_cloud_webhook_heartbeat_and_triage()),
+        ("test_onnx_detector_initialization_and_fallback", lambda: test_onnx_detector_initialization_and_fallback()),
+        ("test_detector_factory", lambda: test_detector_factory()),
+        ("test_privacy_masker_blur", lambda: test_privacy_masker_blur()),
+        ("test_privacy_masker_blackout", lambda: test_privacy_masker_blackout()),
+        ("test_dpdp_audit_hash_chain", lambda: test_dpdp_audit_hash_chain()),
+        ("test_dpdp_sar_purge", lambda: test_dpdp_sar_purge()),
+        ("test_dpdp_notice_generator", lambda: test_dpdp_notice_generator()),
+        ("test_benchmark_execution", lambda: test_benchmark_execution()),
+        ("test_triage_and_metrics_endpoints", lambda: test_triage_and_metrics_endpoints()),
     ]
+
 
     passed = 0
     failed = 0

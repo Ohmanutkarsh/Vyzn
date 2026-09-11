@@ -540,3 +540,96 @@ body {
   background: #FFFFFF;
   color: var(--color-text);
 }
+
+/* Telemetry Header Strip */
+.telemetry-strip {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 0.45rem 1rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #475569;
+}
+
+.telemetry-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.telemetry-chip span {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.btn-privacy {
+  background: #0284c7 !important;
+  color: #fff !important;
+}
+
+.btn-dpdp {
+  background: #475569 !important;
+  color: #fff !important;
+}
+
+/* Triage Buttons in Event Feed */
+.event-triage-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.btn-triage {
+  padding: 0.25rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.btn-triage-threat {
+  background: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
+}
+
+.btn-triage-threat:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+.btn-triage-false {
+  background: #e0f2fe;
+  color: #075985;
+  border-color: #bae6fd;
+}
+
+.btn-triage-false:hover {
+  background: #0284c7;
+  color: #fff;
+}
+
+.badge-threat {
+  background: #fee2e2;
+  color: #991b1b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
+.badge-false {
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+}
+
