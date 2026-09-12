@@ -4,6 +4,7 @@
 [![Architecture](https://img.shields.io/badge/architecture-Edge%20%2B%20Cloud%20Fleet-blue.svg)](#architecture)
 [![Notifications](https://img.shields.io/badge/alerts-Telegram%20Engine-2CA5E0.svg)](#telegram-alert-engine)
 [![Deployment](https://img.shields.io/badge/deploy-Vercel%20Serverless-black.svg)](#cloud-and-vercel-deployment)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FOhmanutkarsh%2FVyzn)
 
 **VYZN** is an enterprise-grade AI-powered Video Management System (VMS) engineered for retail theft prevention, multi-store surveillance, and sub-second incident alerting. It pairs local, zero-hardware edge intelligence with a centralized multi-tenant cloud fleet console and instant Telegram incident triage.
 
