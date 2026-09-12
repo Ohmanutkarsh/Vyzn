@@ -1,8 +1,8 @@
 [
   {
-    "camera_id": "cam_webcam_0",
-    "name": "Laptop Integrated Camera",
-    "rtsp_url": "0",
+    "camera_id": "cam_adopted_01",
+    "name": "Entrance CP-PLUS",
+    "rtsp_url": "rtsp://admin:Password@123@192.168.1.150:554/cam/realmonitor?channel=1&subtype=0",
     "enabled": true,
     "location_id": "loc_primary",
     "target_fps": 4.0,
@@ -11,7 +11,7 @@
     "downscale_width": 640,
     "downscale_height": 360,
     "is_night_ir": false,
-    "owner_email": "tapise.utkarsh@gmail.com",
+    "owner_email": null,
     "business_hours": {
       "enabled": true,
       "start_hour": 9,

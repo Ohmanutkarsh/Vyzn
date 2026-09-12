@@ -1,0 +1,1256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VYZN Netra — Multi-Tenant Fleet Observability Portal</title>
+    <style>
+        :root {
+            --bg-base: #0a0c10;
+            --bg-card: #12151c;
+            --bg-surface: #181d26;
+            --border-subtle: #232a38;
+            --border-focus: #3b82f6;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --cyan: #06b6d4;
+            --purple: #8b5cf6;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-subtle);
+            padding-bottom: 20px;
+            margin-bottom: 24px;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo-badge {
+            background: linear-gradient(135deg, var(--primary), var(--purple));
+            color: white;
+            font-weight: 800;
+            font-size: 18px;
+            padding: 8px 14px;
+            border-radius: 8px;
+            letter-spacing: 1px;
+        }
+
+        .auth-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            padding: 6px 14px;
+            border-radius: 8px;
+        }
+
+        .auth-input {
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            font-size: 13px;
+            outline: none;
+            width: 250px;
+        }
+
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            color: var(--text-main);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-subtle);
+        }
+
+        .grid-layout {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .card-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .site-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 10px;
+            padding: 18px;
+            margin-bottom: 14px;
+            transition: transform 0.15s, border-color 0.15s;
+        }
+
+        .site-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-2px);
+        }
+
+        .site-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .site-name {
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-online {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .badge-offline {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .stat-value {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .incident-item {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 8px;
+            padding: 14px;
+            margin-bottom: 10px;
+        }
+
+        .incident-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+        }
+
+        .form-control {
+            width: 100%;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-main);
+            font-size: 13px;
+        }
+
+        .form-control:focus {
+            border-color: var(--border-focus);
+            outline: none;
+        }
+
+        .notice-box {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            color: #93c5fd;
+            margin-bottom: 16px;
+        }
+
+        /* Interruption-Proof Onboarding & Stolen Emergency Styles */
+        .draft-banner {
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            border-radius: 8px;
+            padding: 14px 18px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #fbbf24;
+            font-size: 13px;
+        }
+
+        .draft-banner-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .draft-banner-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-danger-subtle {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #f87171;
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-danger-subtle:hover {
+            background: rgba(239, 68, 68, 0.3);
+            border-color: #ef4444;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(4px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .modal-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 680px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 20px;
+            border-top: 1px solid var(--border-subtle);
+            background: var(--bg-surface);
+        }
+
+        .wizard-steps {
+            display: flex;
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-subtle);
+            overflow-x: auto;
+        }
+
+        .wizard-step-tab {
+            flex: 1;
+            padding: 10px 8px;
+            font-size: 11px;
+            font-weight: 700;
+            text-align: center;
+            color: var(--text-muted);
+            border-bottom: 2px solid transparent;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .wizard-step-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            background: rgba(37, 99, 235, 0.08);
+        }
+
+        .wizard-step-tab.completed {
+            color: var(--success);
+        }
+
+        .step-panel {
+            display: none;
+        }
+
+        .step-panel.active {
+            display: block;
+        }
+
+        .callout-box {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 6px;
+            padding: 12px;
+            font-size: 12px;
+            color: #a7f3d0;
+            margin-bottom: 14px;
+        }
+
+        .callout-warn {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: #fde68a;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="header">
+        <div class="logo-group">
+            <div class="logo-badge">VYZN NETRA</div>
+            <div>
+                <h1 style="font-size: 18px; font-weight: 700;">Multi-Tenant Fleet Observability</h1>
+                <p style="font-size: 12px; color: var(--text-muted);">Commercial Edge Surveillance Cloud Operations (Port 9000)</p>
+            </div>
+        </div>
+
+        <div class="auth-bar">
+            <span style="font-size: 12px; color: var(--text-muted);">🔑 Installer Key:</span>
+            <input type="password" id="installerKeyInput" class="auth-input" value="installer_key_delhi_netra_01" placeholder="Enter X-Installer-Key">
+            <button class="btn btn-secondary" onclick="loginPreset('installer_key_delhi_netra_01')">Delhi Installer</button>
+            <button class="btn btn-secondary" onclick="loginPreset('installer_key_master_admin_99')">Master Admin</button>
+            <button class="btn" onclick="refreshFleetData()">Connect</button>
+            <button class="btn" style="background: #10b981; border: 1px solid #059669;" onclick="openNewOnboardingWizard()">➕ Onboard Site</button>
+        </div>
+    </header>
+
+    <!-- Draft Resume Banner (Flow 3) -->
+    <div id="draftResumeBanner" class="draft-banner" style="display: none;"></div>
+
+    <div class="notice-box">
+        🔒 <strong>Enterprise Security Active:</strong> All endpoints enforce tenant scoping and installer authentication. OTA configuration pushes are cryptographically signed with site-specific HMAC-SHA256 tokens and backed by an atomic rollback-to-last-known-good mechanism on the edge box.
+    </div>
+
+    <div class="grid-layout">
+        <!-- Main Column: Monitored Edge Sites -->
+        <div>
+            <div class="card">
+                <div class="card-title">
+                    <span>🏬 Monitored Retail Stores & Edge Nodes</span>
+                    <span id="siteCountBadge" class="badge" style="background: var(--bg-surface);">3 Sites Scoped</span>
+                </div>
+
+                <div id="sitesContainer">
+                    <p style="color: var(--text-muted); font-size: 13px;">Loading fleet telemetry...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar: Incidents & Remote OTA Dispatcher -->
+        <div>
+            <!-- Remote OTA Config Push -->
+            <div class="card">
+                <div class="card-title">
+                    <span>🚀 Remote OTA Config Dispatcher</span>
+                </div>
+                <div class="form-group">
+                    <label>Target Site</label>
+                    <select id="otaSiteSelect" class="form-control">
+                        <option value="site_local_default">Edge Node (Local Deployment)</option>
+                        <option value="site_sharma_kirana">Sharma Kirana Store (South Delhi)</option>
+                        <option value="site_verma_retail">Verma Hardware Depot (Noida)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Alert Score Threshold (40 - 90)</label>
+                    <input type="number" id="otaThreshold" class="form-control" value="70" min="40" max="90">
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" class="form-group">
+                    <div>
+                        <label>Business Hours Start</label>
+                        <input type="text" id="otaStart" class="form-control" value="09:00">
+                    </div>
+                    <div>
+                        <label>Business Hours End</label>
+                        <input type="text" id="otaEnd" class="form-control" value="21:00">
+                    </div>
+                </div>
+                <button class="btn" style="width: 100%;" onclick="dispatchOtaConfig()">Deploy Signed OTA Config</button>
+                <div id="otaResultMsg" style="margin-top: 12px; font-size: 12px; color: var(--success);"></div>
+            </div>
+
+            <!-- Fleet Incidents -->
+            <div class="card">
+                <div class="card-title">
+                    <span>🚨 Verified Cross-Store Incidents</span>
+                </div>
+                <div id="incidentsContainer">
+                    <p style="color: var(--text-muted); font-size: 13px;">Loading incidents...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function getHeaders() {
+            const key = document.getElementById('installerKeyInput').value.trim();
+            return {
+                'Content-Type': 'application/json',
+                'X-Installer-Key': key
+            };
+        }
+
+        function loginPreset(key) {
+            document.getElementById('installerKeyInput').value = key;
+            refreshFleetData();
+        }
+
+        async function refreshFleetData() {
+            const headers = getHeaders();
+            try {
+                // Fetch Authorized Sites
+                const res = await fetch('/api/v1/fleet/sites', { headers });
+                if (!res.ok) {
+                    if (res.status === 401) {
+                        document.getElementById('sitesContainer').innerHTML = '<p style="color: var(--danger);">❌ Authentication Failed: Invalid or missing X-Installer-Key.</p>';
+                        return;
+                    }
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                const sites = await res.json();
+                renderSites(sites);
+
+                // Fetch Incidents
+                const incRes = await fetch('/api/v1/fleet/incidents', { headers });
+                if (incRes.ok) {
+                    const incidents = await incRes.json();
+                    renderIncidents(incidents);
+                }
+
+                // Check pending onboarding drafts (Flow 3)
+                await checkPendingDrafts();
+            } catch (err) {
+                console.error("Fleet sync error:", err);
+            }
+        }
+
+        function renderSites(sites) {
+            document.getElementById('siteCountBadge').textContent = `${sites.length} Sites Scoped`;
+            const container = document.getElementById('sitesContainer');
+            if (sites.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-muted);">No sites assigned to this installer credentials.</p>';
+                return;
+            }
+
+            container.innerHTML = sites.map(site => {
+                const isOnline = site.status === 'ONLINE';
+                const badgeClass = isOnline ? 'badge-online' : 'badge-offline';
+                const sys = site.system || {};
+                const pipe = site.pipeline || {};
+
+                return `
+                    <div class="site-card">
+                        <div class="site-header">
+                            <div>
+                                <div class="site-name">${site.name || site.site_id}</div>
+                                <div style="font-size: 12px; color: var(--text-muted);">ID: ${site.site_id} · OTA Config: v${site.config_version || 1} (${site.config_hash || 'init'})</div>
+                            </div>
+                            <span class="badge ${badgeClass}">${site.status}</span>
+                        </div>
+
+                        <div class="stats-row">
+                            <div class="stat-item">
+                                <span class="stat-label">CPU Load</span>
+                                <span class="stat-value">${sys.cpu_usage_pct || 0}%</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">RAM In-Use</span>
+                                <span class="stat-value">${sys.ram_used_mb ? Math.round(sys.ram_used_mb) + ' MB' : '--'}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Disk Free</span>
+                                <span class="stat-value">${sys.disk_free_pct || 0}%</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Active Cameras</span>
+                                <span class="stat-value" style="color: var(--cyan);">${pipe.active_cameras || 3} RTSP</span>
+                            </div>
+                        </div>
+                        <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 11px; color: var(--text-muted);">Tunnel: <code style="color: var(--cyan);">${site.edge_url || 'http://127.0.0.1:8000'}</code></span>
+                            <div style="display: flex; gap: 8px;">
+                                <button type="button" class="btn-danger-subtle" onclick="reportStolenSite('${site.site_id}', '${(site.name || site.site_id).replace(/'/g, "\\'")}')">
+                                    🚨 Report Stolen
+                                </button>
+                                <a href="/fleet/proxy/${site.site_id}/" target="_blank" class="btn" style="padding: 5px 12px; font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                                    🖥️ Remote Edge Console
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderIncidents(incidents) {
+            const container = document.getElementById('incidentsContainer');
+            if (!incidents || incidents.length === 0) {
+                container.innerHTML = '<p style="color: var(--text-muted); font-size: 12px;">No active high-threat incidents.</p>';
+                return;
+            }
+
+            container.innerHTML = incidents.map(inc => `
+                <div class="incident-item">
+                    <div class="incident-header">
+                        <span>${inc.site_name || inc.site_id}</span>
+                        <span style="color: var(--danger);">Score: ${inc.score}/100</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted);">
+                        Trigger: <strong>${inc.object_type.toUpperCase()}</strong> on ${inc.camera_id}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function dispatchOtaConfig() {
+            const siteId = document.getElementById('otaSiteSelect').value;
+            const threshold = parseInt(document.getElementById('otaThreshold').value, 10);
+            const start = document.getElementById('otaStart').value.trim();
+            const end = document.getElementById('otaEnd').value.trim();
+            const msgEl = document.getElementById('otaResultMsg');
+
+            msgEl.textContent = "Validating and dispatching signed OTA config...";
+            msgEl.style.color = "var(--cyan)";
+
+            const payload = {
+                alert_score_threshold: threshold,
+                business_hours_start: start,
+                business_hours_end: end,
+                cameras: {
+                    "cam_front_counter": {
+                        "restricted_zones": [
+                            {
+                                "name": "safe_vault_area",
+                                "points": [[0.6, 0.6], [0.95, 0.6], [0.95, 0.95], [0.6, 0.95]]
+                            }
+                        ]
+                    }
+                }
+            };
+
+            try {
+                const res = await fetch(`/api/v1/fleet/sites/${siteId}/config`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    msgEl.style.color = "var(--success)";
+                    msgEl.innerHTML = `✅ <strong>Deployed v${data.config_version}</strong><br>HMAC: ${data.signature.substring(0, 12)}...<br>Canonical Hash: ${data.config_hash.substring(0, 10)}...`;
+                    refreshFleetData();
+                } else {
+                    msgEl.style.color = "var(--danger)";
+                    msgEl.textContent = `❌ Error (${res.status}): ${data.detail || 'Failed'}`;
+                }
+            } catch (e) {
+                msgEl.style.color = "var(--danger)";
+                msgEl.textContent = `❌ Network failure: ${e.message}`;
+            }
+        }
+
+        // ===================================================================
+        // Interruption-Proof Site Onboarding State Machine (Flow 3 & Flow 6)
+        // ===================================================================
+        let activeDraftId = null;
+        let currentWizardStep = 1;
+        let isTestVerified = false;
+
+        async function checkPendingDrafts() {
+            const banner = document.getElementById('draftResumeBanner');
+            if (!banner) return;
+            try {
+                const res = await fetch('/api/v1/fleet/onboarding/drafts', { headers: getHeaders() });
+                if (!res.ok) {
+                    banner.style.display = 'none';
+                    return;
+                }
+                const data = await res.json();
+                const drafts = data.drafts || [];
+                if (drafts.length === 0) {
+                    banner.style.display = 'none';
+                    return;
+                }
+
+                const d = drafts[0];
+                const stepNum = d.current_step || 1;
+                banner.innerHTML = `
+                    <div class="draft-banner-left">
+                        <span style="font-size: 18px;">⚠️</span>
+                        <div>
+                            <strong>In-Progress Setup Draft Detected:</strong> [${d.site_name}] — Step ${stepNum} of 6
+                            <span style="font-size: 11px; opacity: 0.8; margin-left: 8px;">(Arlo-proof: Server-side persisted)</span>
+                        </div>
+                    </div>
+                    <div class="draft-banner-actions">
+                        <button class="btn" style="padding: 5px 14px; font-size: 12px; background: #f59e0b; color: #000; font-weight: 700;" onclick="resumeDraft('${d.draft_id}')">
+                            ▶️ Resume Setup (Step ${stepNum})
+                        </button>
+                        <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;" onclick="discardDraft('${d.draft_id}')">
+                            🗑️ Discard
+                        </button>
+                    </div>
+                `;
+                banner.style.display = 'flex';
+            } catch (err) {
+                console.debug("Check drafts error:", err);
+            }
+        }
+
+        function openNewOnboardingWizard() {
+            activeDraftId = 'draft_site_' + Date.now();
+            currentWizardStep = 1;
+            isTestVerified = false;
+
+            document.getElementById('wzSiteName').value = 'Verma Electronics';
+            document.getElementById('wzCategory').value = 'electronics';
+            document.getElementById('wzAddress').value = 'Plot 42, Sector 18, Noida';
+            document.getElementById('wzOwnerName').value = 'Anil Verma';
+            document.getElementById('wzBoxUrl').value = 'http://127.0.0.1:8000';
+            document.getElementById('wzPairingCode').value = 'VYZN-BOX-' + Math.floor(1000 + Math.random() * 9000);
+            document.getElementById('wzHardwareProfile').value = 'rk3588';
+            document.getElementById('wzCam1Name').value = 'Main Glass Entrance Door';
+            document.getElementById('wzCam1Url').value = 'rtsp://admin:pass@192.168.1.101:554/ch1';
+            document.getElementById('wzCam2Name').value = 'Cash Counter & Safe Drawer';
+            document.getElementById('wzCam2Url').value = 'rtsp://admin:pass@192.168.1.102:554/ch1';
+            document.getElementById('wzCam3Name').value = 'Rear Loading Bay & Night Shutter';
+            document.getElementById('wzCam3Url').value = 'rtsp://admin:pass@192.168.1.103:554/ch1';
+            document.getElementById('wzHoursStart').value = '09:00';
+            document.getElementById('wzHoursEnd').value = '21:00';
+            document.getElementById('wzAlertThreshold').value = '70';
+            document.getElementById('wzTeleChat').value = '987654321';
+            document.getElementById('wzTeleToken').value = '';
+            document.getElementById('wzOwnerPhone').value = '+91 98765 43210';
+            document.getElementById('boxProbeResult').textContent = 'Ready to probe LAN reachability.';
+            document.getElementById('wzTestStatusBox').innerHTML = '⏳ Status: Pending test alert verification.';
+            document.getElementById('wzGoLiveResult').innerHTML = '';
+
+            updateWizardUI();
+            document.getElementById('onboardingModal').style.display = 'flex';
+            saveDraftState();
+        }
+
+        async function resumeDraft(draftId) {
+            try {
+                const res = await fetch(`/api/v1/fleet/onboarding/drafts/${draftId}`, { headers: getHeaders() });
+                if (!res.ok) {
+                    alert("Could not load draft state: " + res.statusText);
+                    return;
+                }
+                const draft = await res.json();
+                activeDraftId = draft.draft_id;
+                currentWizardStep = draft.current_step || 1;
+                isTestVerified = Boolean(draft.test_verified);
+
+                const data = draft.data || {};
+                const ident = data.identity || {};
+                const hw = data.hardware || {};
+                const cams = data.cameras || {};
+                const sched = data.schedule || {};
+                const routing = data.routing || {};
+
+                document.getElementById('wzSiteName').value = draft.site_name || ident.site_name || '';
+                document.getElementById('wzCategory').value = ident.category || 'electronics';
+                document.getElementById('wzAddress').value = ident.address || '';
+                document.getElementById('wzOwnerName').value = ident.owner_name || '';
+                document.getElementById('wzBoxUrl').value = hw.box_url || 'http://127.0.0.1:8000';
+                document.getElementById('wzPairingCode').value = hw.pairing_code || '';
+                document.getElementById('wzHardwareProfile').value = hw.hardware_profile || 'rk3588';
+
+                document.getElementById('wzCam1Name').value = cams.cam1_name || 'Main Glass Entrance Door';
+                document.getElementById('wzCam1Url').value = cams.cam1_url || 'rtsp://admin:pass@192.168.1.101:554/ch1';
+                document.getElementById('wzCam2Name').value = cams.cam2_name || 'Cash Counter & Safe Drawer';
+                document.getElementById('wzCam2Url').value = cams.cam2_url || 'rtsp://admin:pass@192.168.1.102:554/ch1';
+                document.getElementById('wzCam3Name').value = cams.cam3_name || 'Rear Loading Bay & Night Shutter';
+                document.getElementById('wzCam3Url').value = cams.cam3_url || 'rtsp://admin:pass@192.168.1.103:554/ch1';
+
+                document.getElementById('wzHoursStart').value = sched.hours_start || '09:00';
+                document.getElementById('wzHoursEnd').value = sched.hours_end || '21:00';
+                document.getElementById('wzAlertThreshold').value = sched.threshold || '70';
+
+                document.getElementById('wzTeleChat').value = routing.telegram_chat_id || '';
+                document.getElementById('wzTeleToken').value = routing.telegram_bot_token || '';
+                document.getElementById('wzOwnerPhone').value = routing.owner_phone || '';
+
+                if (isTestVerified) {
+                    document.getElementById('wzTestStatusBox').innerHTML = '✅ <strong style="color: var(--success);">Test Alert Confirmed Delivered!</strong> Go-Live unlocked.';
+                    const goLiveBtn = document.getElementById('btnWizardGoLive');
+                    goLiveBtn.disabled = false;
+                    goLiveBtn.style.opacity = '1';
+                    goLiveBtn.style.cursor = 'pointer';
+                } else {
+                    document.getElementById('wzTestStatusBox').innerHTML = '⏳ Status: Pending test alert verification.';
+                    const goLiveBtn = document.getElementById('btnWizardGoLive');
+                    goLiveBtn.disabled = true;
+                    goLiveBtn.style.opacity = '0.4';
+                    goLiveBtn.style.cursor = 'not-allowed';
+                }
+
+                updateWizardUI();
+                document.getElementById('onboardingModal').style.display = 'flex';
+            } catch (err) {
+                alert("Error resuming draft: " + err.message);
+            }
+        }
+
+        async function discardDraft(draftId) {
+            if (!confirm("Are you sure you want to discard this in-progress onboarding draft?")) return;
+            try {
+                const res = await fetch(`/api/v1/fleet/onboarding/drafts/${draftId}`, {
+                    method: 'DELETE',
+                    headers: getHeaders()
+                });
+                if (res.ok) {
+                    await checkPendingDrafts();
+                } else {
+                    alert("Failed to delete draft: " + res.statusText);
+                }
+            } catch (err) {
+                alert("Network error deleting draft: " + err.message);
+            }
+        }
+
+        async function discardActiveDraft() {
+            if (activeDraftId) {
+                await discardDraft(activeDraftId);
+                closeOnboardingModal(false);
+            }
+        }
+
+        function closeOnboardingModal(save = false) {
+            if (save && activeDraftId) {
+                saveDraftState();
+            }
+            document.getElementById('onboardingModal').style.display = 'none';
+            checkPendingDrafts();
+        }
+
+        function updateWizardUI() {
+            document.getElementById('wizardSubtitle').textContent = `Atomic Interruption-Proof State Machine (Step ${currentWizardStep} of 6)`;
+            for (let i = 1; i <= 6; i++) {
+                const tab = document.getElementById(`tabStep${i}`);
+                const panel = document.getElementById(`stepPanel${i}`);
+                if (tab) {
+                    tab.classList.toggle('active', i === currentWizardStep);
+                    tab.classList.toggle('completed', i < currentWizardStep);
+                }
+                if (panel) {
+                    panel.classList.toggle('active', i === currentWizardStep);
+                }
+            }
+
+            document.getElementById('btnWizardBack').disabled = (currentWizardStep === 1);
+            document.getElementById('btnWizardBack').style.opacity = (currentWizardStep === 1) ? '0.5' : '1';
+            const nextBtn = document.getElementById('btnWizardNext');
+            if (currentWizardStep === 6) {
+                nextBtn.style.display = 'none';
+            } else {
+                nextBtn.style.display = 'inline-block';
+                nextBtn.textContent = 'Next ▶';
+            }
+        }
+
+        function jumpToStep(stepNum) {
+            saveDraftState(stepNum);
+        }
+
+        function navigateWizard(delta) {
+            const target = currentWizardStep + delta;
+            if (target >= 1 && target <= 6) {
+                saveDraftState(target);
+            }
+        }
+
+        async function saveDraftState(targetStep = null) {
+            if (!activeDraftId) return;
+
+            const siteName = document.getElementById('wzSiteName').value.trim() || 'New Commercial Premise';
+            const payload = {
+                site_name: siteName,
+                current_step: targetStep || currentWizardStep,
+                test_verified: isTestVerified,
+                data: {
+                    identity: {
+                        site_name: siteName,
+                        category: document.getElementById('wzCategory').value,
+                        address: document.getElementById('wzAddress').value.trim(),
+                        owner_name: document.getElementById('wzOwnerName').value.trim()
+                    },
+                    hardware: {
+                        box_url: document.getElementById('wzBoxUrl').value.trim(),
+                        pairing_code: document.getElementById('wzPairingCode').value.trim(),
+                        hardware_profile: document.getElementById('wzHardwareProfile').value
+                    },
+                    cameras: {
+                        cam1_name: document.getElementById('wzCam1Name').value.trim(),
+                        cam1_url: document.getElementById('wzCam1Url').value.trim(),
+                        cam2_name: document.getElementById('wzCam2Name').value.trim(),
+                        cam2_url: document.getElementById('wzCam2Url').value.trim(),
+                        cam3_name: document.getElementById('wzCam3Name').value.trim(),
+                        cam3_url: document.getElementById('wzCam3Url').value.trim()
+                    },
+                    schedule: {
+                        hours_start: document.getElementById('wzHoursStart').value.trim(),
+                        hours_end: document.getElementById('wzHoursEnd').value.trim(),
+                        threshold: parseInt(document.getElementById('wzAlertThreshold').value, 10) || 70
+                    },
+                    routing: {
+                        telegram_chat_id: document.getElementById('wzTeleChat').value.trim(),
+                        telegram_bot_token: document.getElementById('wzTeleToken').value.trim(),
+                        owner_phone: document.getElementById('wzOwnerPhone').value.trim()
+                    }
+                }
+            };
+
+            if (targetStep) currentWizardStep = targetStep;
+            updateWizardUI();
+
+            try {
+                await fetch(`/api/v1/fleet/onboarding/drafts/${activeDraftId}`, {
+                    method: 'PUT',
+                    headers: getHeaders(),
+                    body: JSON.stringify(payload)
+                });
+            } catch (err) {
+                console.debug("Draft auto-save error:", err);
+            }
+        }
+
+        async function probeEdgeBox() {
+            const boxUrl = document.getElementById('wzBoxUrl').value.trim();
+            const resEl = document.getElementById('boxProbeResult');
+            resEl.textContent = '⏳ Probing edge box LAN endpoint...';
+            resEl.style.color = 'var(--cyan)';
+
+            try {
+                // Probe via local endpoint or cloud status
+                const res = await fetch(`${boxUrl}/api/status`, { signal: AbortSignal.timeout(3000) });
+                if (res.ok) {
+                    const data = await res.json();
+                    resEl.innerHTML = `🟢 <strong>Reachable!</strong> AI FPS: ${data.pipeline ? data.pipeline.fps : 4.0}, Model: ${data.system ? data.system.platform : 'Active'}`;
+                    resEl.style.color = 'var(--success)';
+                } else {
+                    resEl.textContent = `🟡 Host responded HTTP ${res.status}. Ready for cloud pairing.`;
+                    resEl.style.color = 'var(--warning)';
+                }
+            } catch (e) {
+                resEl.textContent = '🟡 Direct browser LAN CORS blocked or offline. Pairing code will bridge over tunnel.';
+                resEl.style.color = 'var(--text-muted)';
+            }
+        }
+
+        async function triggerWizardTestAlert() {
+            if (!activeDraftId) return;
+            const btn = document.getElementById('btnTriggerTestAlert');
+            const statusBox = document.getElementById('wzTestStatusBox');
+            btn.disabled = true;
+            btn.textContent = '⏳ Dispatching...';
+            statusBox.innerHTML = '✈️ Sending synthetic threat alert to Telegram...';
+
+            await saveDraftState(6);
+
+            try {
+                const res = await fetch(`/api/v1/fleet/onboarding/drafts/${activeDraftId}/test-alert`, {
+                    method: 'POST',
+                    headers: getHeaders()
+                });
+                const data = await res.json();
+                if (res.ok && data.test_verified) {
+                    isTestVerified = true;
+                    statusBox.innerHTML = `✅ <strong>Test Alert Confirmed!</strong> Delivered to Telegram [<code>${data.target_chat}</code>]. Go-Live unlocked.`;
+                    statusBox.style.color = 'var(--success)';
+
+                    const goLiveBtn = document.getElementById('btnWizardGoLive');
+                    goLiveBtn.disabled = false;
+                    goLiveBtn.style.opacity = '1';
+                    goLiveBtn.style.cursor = 'pointer';
+                } else {
+                    statusBox.innerHTML = `❌ Test alert failed: ${data.detail || 'Could not verify delivery'}`;
+                    statusBox.style.color = 'var(--danger)';
+                }
+            } catch (e) {
+                statusBox.innerHTML = `❌ Error dispatching test alert: ${e.message}`;
+                statusBox.style.color = 'var(--danger)';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🔔 Dispatch Test Alert';
+            }
+        }
+
+        async function submitGoLive() {
+            if (!activeDraftId) return;
+            const resBox = document.getElementById('wzGoLiveResult');
+            resBox.innerHTML = '🚀 Deploying site and provisioning cryptographic keys...';
+            resBox.style.color = 'var(--cyan)';
+
+            try {
+                const res = await fetch(`/api/v1/fleet/onboarding/drafts/${activeDraftId}/go-live`, {
+                    method: 'POST',
+                    headers: getHeaders()
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    resBox.innerHTML = `🎉 <strong>Site Deployed!</strong> [${data.site_id}] is now Online with edge secret <code>${data.edge_secret_preview}</code>.`;
+                    resBox.style.color = 'var(--success)';
+
+                    setTimeout(() => {
+                        document.getElementById('onboardingModal').style.display = 'none';
+                        activeDraftId = null;
+                        refreshFleetData();
+                    }, 1800);
+                } else {
+                    resBox.innerHTML = `❌ Go-Live Failed (${res.status}): ${data.detail || 'Error'}`;
+                    resBox.style.color = 'var(--danger)';
+                }
+            } catch (e) {
+                resBox.innerHTML = `❌ Network failure: ${e.message}`;
+                resBox.style.color = 'var(--danger)';
+            }
+        }
+
+        async function reportStolenSite(siteId, siteName) {
+            const confirmed = confirm(
+                `🚨 EMERGENCY SECURITY ACTION: REPORT STOLEN DEVICE\n\n` +
+                `Premise: [${siteName}] (${siteId})\n\n` +
+                `This will IMMEDIATELY:\n` +
+                `1. Revoke edge authentication keys so thieves cannot access cloud data.\n` +
+                `2. Sever all active tunnels and telemetry streams.\n` +
+                `3. Auto-generate a replacement onboarding draft pre-filled with this site's exact zones and schedules.\n\n` +
+                `Are you sure you want to proceed?`
+            );
+
+            if (!confirmed) return;
+
+            try {
+                const res = await fetch(`/api/v1/fleet/sites/${siteId}/stolen`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({ reason: "device_physically_stolen" })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    alert(`🚨 CREDENTIALS REVOKED!\n\n${data.message}\n\nLoading pre-filled replacement wizard...`);
+                    await refreshFleetData();
+                    if (data.replacement_draft_id) {
+                        await resumeDraft(data.replacement_draft_id);
+                    }
+                } else {
+                    alert(`Failed to execute stolen device revocation: ${data.detail || res.statusText}`);
+                }
+            } catch (e) {
+                alert(`Network failure reporting stolen device: ${e.message}`);
+            }
+        }
+
+        // Initial Load
+        refreshFleetData();
+        setInterval(refreshFleetData, 10000);
+    </script>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL: Interruption-Proof Site Onboarding Wizard (Flow 3)             -->
+    <!-- ===================================================================== -->
+    <div id="onboardingModal" class="modal-overlay" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <div>
+                    <h3 id="wizardTitle" style="font-size: 16px; font-weight: 700;">➕ Onboard New Commercial Site</h3>
+                    <p style="font-size: 11px; color: var(--text-muted);" id="wizardSubtitle">Atomic Interruption-Proof State Machine (Step 1 of 6)</p>
+                </div>
+                <button onclick="closeOnboardingModal(true)" style="background:none; border:none; color:var(--text-muted); font-size:20px; cursor:pointer;">&times;</button>
+            </div>
+
+            <!-- 6-Step Stepper Tabs -->
+            <div class="wizard-steps">
+                <div class="wizard-step-tab active" id="tabStep1" onclick="jumpToStep(1)">1. Identity</div>
+                <div class="wizard-step-tab" id="tabStep2" onclick="jumpToStep(2)">2. Box Probe</div>
+                <div class="wizard-step-tab" id="tabStep3" onclick="jumpToStep(3)">3. Cameras</div>
+                <div class="wizard-step-tab" id="tabStep4" onclick="jumpToStep(4)">4. Zones</div>
+                <div class="wizard-step-tab" id="tabStep5" onclick="jumpToStep(5)">5. Telegram</div>
+                <div class="wizard-step-tab" id="tabStep6" onclick="jumpToStep(6)">6. Verify & Go Live</div>
+            </div>
+
+            <div class="modal-body">
+                <!-- STEP 1: Site Identity & Business Category -->
+                <div class="step-panel active" id="stepPanel1">
+                    <div class="callout-box">
+                        🏢 <strong>Step 1: Commercial Premise Identity</strong> — Pre-registers the site in cloud tenant inventory.
+                    </div>
+                    <div class="form-group">
+                        <label>Site / Store Name *</label>
+                        <input type="text" id="wzSiteName" class="form-control" placeholder="e.g. Verma Electronics & Hardware" value="Verma Electronics">
+                    </div>
+                    <div class="form-group">
+                        <label>Property Category</label>
+                        <select id="wzCategory" class="form-control">
+                            <option value="retail_kirana">Retail Kirana / FMCG Store</option>
+                            <option value="electronics" selected>Electronics & Hardware Depot</option>
+                            <option value="jewellery">Jewellery / High-Value Vault</option>
+                            <option value="residential">Gated Society / Residential Property</option>
+                            <option value="warehouse">Logistics Hub / Shutter Warehouse</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Premise Physical Address</label>
+                        <input type="text" id="wzAddress" class="form-control" placeholder="Plot 42, Sector 18, Commercial Belt, Noida">
+                    </div>
+                    <div class="form-group">
+                        <label>Store Manager / Owner Name</label>
+                        <input type="text" id="wzOwnerName" class="form-control" placeholder="Anil Verma" value="Anil Verma">
+                    </div>
+                </div>
+
+                <!-- STEP 2: Box Discovery & Provisioning -->
+                <div class="step-panel" id="stepPanel2">
+                    <div class="callout-box">
+                        ⚡ <strong>Step 2: Edge Box Hardware Pairing</strong> — Probe edge device LAN connectivity and provision initial cryptographic keys.
+                    </div>
+                    <div class="form-group">
+                        <label>Edge Device LAN / Tunnel URL</label>
+                        <input type="text" id="wzBoxUrl" class="form-control" placeholder="http://127.0.0.1:8000" value="http://127.0.0.1:8000">
+                    </div>
+                    <div class="form-group">
+                        <label>Box Hardware Serial / Pairing Code</label>
+                        <input type="text" id="wzPairingCode" class="form-control" placeholder="VYZN-EDGE-2026-X9" value="VYZN-EDGE-2026-X9">
+                    </div>
+                    <div class="form-group">
+                        <label>Edge Hardware Profile</label>
+                        <select id="wzHardwareProfile" class="form-control">
+                            <option value="rk3588">Rockchip RK3588 (6 TOPS NPU) — Fanless Retail Box</option>
+                            <option value="jetson_orin">NVIDIA Jetson Orin Nano (40 TOPS) — High Throughput</option>
+                            <option value="x86_openvino">Intel x86 Core i5/i7 (OpenVINO AI Decimator)</option>
+                        </select>
+                    </div>
+                    <div style="margin-top: 14px; display: flex; gap: 10px; align-items: center;">
+                        <button type="button" class="btn btn-secondary" onclick="probeEdgeBox()">⚡ Probe Box Reachability</button>
+                        <span id="boxProbeResult" style="font-size: 12px; color: var(--text-muted);">Ready to test LAN reachability.</span>
+                    </div>
+                </div>
+
+                <!-- STEP 3: Pre-Ordered Camera Labeling -->
+                <div class="step-panel" id="stepPanel3">
+                    <div class="callout-box">
+                        📹 <strong>Step 3: Pre-Ordered Camera Labeling</strong> — Labels must match the physical installation sequence to prevent cross-wiring errors.
+                    </div>
+                    <div class="form-group">
+                        <label>Camera 1 (Primary Entrance / Shutter)</label>
+                        <input type="text" id="wzCam1Name" class="form-control" value="Main Glass Entrance Door">
+                        <input type="text" id="wzCam1Url" class="form-control" style="margin-top: 4px; font-family: monospace; font-size: 12px;" value="rtsp://admin:pass@192.168.1.101:554/ch1">
+                    </div>
+                    <div class="form-group">
+                        <label>Camera 2 (Cash Register & POS Counter)</label>
+                        <input type="text" id="wzCam2Name" class="form-control" value="Cash Counter & Safe Drawer">
+                        <input type="text" id="wzCam2Url" class="form-control" style="margin-top: 4px; font-family: monospace; font-size: 12px;" value="rtsp://admin:pass@192.168.1.102:554/ch1">
+                    </div>
+                    <div class="form-group">
+                        <label>Camera 3 (Rear Loading Shutter / Vault)</label>
+                        <input type="text" id="wzCam3Name" class="form-control" value="Rear Loading Bay & Night Shutter">
+                        <input type="text" id="wzCam3Url" class="form-control" style="margin-top: 4px; font-family: monospace; font-size: 12px;" value="rtsp://admin:pass@192.168.1.103:554/ch1">
+                    </div>
+                </div>
+
+                <!-- STEP 4: Threat Zones & Operating Schedules -->
+                <div class="step-panel" id="stepPanel4">
+                    <div class="callout-box">
+                        📐 <strong>Step 4: Threat Geofence & Business Hours</strong> — After-hours motion triggers intrusion alerts; daytime activity is suppressed unless restricted vault is breached.
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;" class="form-group">
+                        <div>
+                            <label>Business Hours Start (Store Opens)</label>
+                            <input type="text" id="wzHoursStart" class="form-control" value="09:00">
+                        </div>
+                        <div>
+                            <label>Business Hours End (Store Closes)</label>
+                            <input type="text" id="wzHoursEnd" class="form-control" value="21:00">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Restricted Zone: Cash Counter & Safe Vault</label>
+                        <input type="text" id="wzVaultZone" class="form-control" value="Zone 'safe_vault_area' (+25 threat score, 24/7 strictly armed)">
+                    </div>
+                    <div class="form-group">
+                        <label>Alert Sensitivity Score Floor (40 - 90)</label>
+                        <input type="number" id="wzAlertThreshold" class="form-control" value="70" min="40" max="90">
+                    </div>
+                </div>
+
+                <!-- STEP 5: Telegram Alert Routing -->
+                <div class="step-panel" id="stepPanel5">
+                    <div class="callout-box">
+                        ✈️ <strong>Step 5: Direct Telegram Incident Routing</strong> — VYZN prioritizes Telegram for instant video alerts with zero Meta Cloud API per-message fees.
+                    </div>
+                    <div class="form-group">
+                        <label>Store Owner / Resident Telegram Chat ID *</label>
+                        <input type="text" id="wzTeleChat" class="form-control" placeholder="e.g. 987654321 or -100123456789" value="987654321">
+                        <span style="font-size: 11px; color: var(--text-muted);">Get chat ID by messaging @userinfobot on Telegram</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Dedicated Telegram Bot Token (Optional, or uses central VYZN Bot)</label>
+                        <input type="password" id="wzTeleToken" class="form-control" placeholder="7123456789:AAH... from @BotFather">
+                    </div>
+                    <div class="form-group">
+                        <label>Emergency Escalation Phone Number</label>
+                        <input type="tel" id="wzOwnerPhone" class="form-control" value="+91 98765 43210">
+                    </div>
+                </div>
+
+                <!-- STEP 6: Synthetic Test Verification & Go-Live Gate -->
+                <div class="step-panel" id="stepPanel6">
+                    <div class="callout-box callout-warn">
+                        🔒 <strong>Step 6 Mandatory Gate:</strong> The "Go Live" deployment button is strictly blocked until a synthetic test alert is confirmed received on Telegram. This prevents deploying sites with dead alert channels.
+                    </div>
+
+                    <div style="background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-weight: 700; font-size: 14px;">Telegram Alert Channel Verification</div>
+                                <div style="font-size: 12px; color: var(--text-muted);">Dispatches synthetic threat clip with [⭐ Star] [❌ False] buttons to target chat</div>
+                            </div>
+                            <button type="button" class="btn" style="background: var(--primary);" id="btnTriggerTestAlert" onclick="triggerWizardTestAlert()">
+                                🔔 Dispatch Test Alert
+                            </button>
+                        </div>
+                        <div id="wzTestStatusBox" style="margin-top: 14px; font-size: 12px; color: var(--text-muted);">
+                            ⏳ Status: Pending test alert verification.
+                        </div>
+                    </div>
+
+                    <div style="padding: 14px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; margin-bottom: 16px;">
+                        <div style="font-weight: 700; color: var(--success); margin-bottom: 4px;">Ready to Deploy Edge Hardware:</div>
+                        <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">
+                            Upon clicking Go-Live, the cloud generates a unique HMAC-SHA256 edge credentials key, registers the premise into active installer monitoring scope, and transitions site status to <strong>ONLINE</strong>.
+                        </p>
+                    </div>
+
+                    <button type="button" class="btn" id="btnWizardGoLive" style="width: 100%; padding: 12px; font-size: 14px; background: #10b981; opacity: 0.4; cursor: not-allowed;" disabled onclick="submitGoLive()">
+                        🚀 Go Live & Deploy Edge Node
+                    </button>
+                    <div id="wzGoLiveResult" style="margin-top: 10px; font-size: 12px; text-align: center;"></div>
+                </div>
+            </div>
+
+            <!-- Footer Stepper Actions -->
+            <div class="modal-footer">
+                <div>
+                    <button type="button" class="btn-danger-subtle" onclick="discardActiveDraft()">🗑️ Discard Draft</button>
+                    <button type="button" class="btn btn-secondary" style="margin-left: 8px;" onclick="closeOnboardingModal(true)">💾 Save & Resume Later</button>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn btn-secondary" id="btnWizardBack" onclick="navigateWizard(-1)">◀ Back</button>
+                    <button type="button" class="btn" id="btnWizardNext" onclick="navigateWizard(1)">Next ▶</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
