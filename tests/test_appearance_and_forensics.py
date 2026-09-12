@@ -239,3 +239,77 @@ def test_bandwidth_settings_api():
     updated = post_res.json()["config"]
     assert updated["max_upload_mbps"] == 4.5
     assert updated["retention_hours"] == 48
+
+
+def test_forensic_search_endpoint():
+    """Verifies that the GET /api/v1/forensics/search endpoint supports multi-criteria queries."""
+    from fastapi.testclient import TestClient
+
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        td = Path(tmpdir)
+        db_path = td / "forensics_test.db"
+        db = EventDatabase(db_path)
+        settings = EdgeSettings(site_id="site_search_hub")
+        init_api(db, settings)
+
+        # Seed events
+        events_data = [
+            ("ev_search_1", "cam_vault", "2026-09-12T10:00:00Z", "person", 0.95, 90, "red", "restricted_vault", "Intruder detected in vault"),
+            ("ev_search_2", "cam_corridor", "2026-09-12T11:00:00Z", "vehicle", 0.88, 40, "blue", "main_corridor", "Vehicle passing corridor"),
+            ("ev_search_3", "cam_counter", "2026-09-12T12:00:00Z", "person", 0.91, 75, "black", "cash_counter", "Cash counter breach alert")
+        ]
+
+        for gid, cid, st, obj, conf, sc, col, zn, desc in events_data:
+            db.execute_sync(
+                """
+                INSERT INTO events (
+                    event_group_id, camera_id, start_time, object_type, confidence, score,
+                    status, starred, synced, user_triage, file_path, thumb_path, dominant_color, zone_name
+                ) VALUES (?, ?, ?, ?, ?, ?, 'raw', 0, 0, 'unreviewed', '', '', ?, ?)
+                """,
+                (gid, cid, st, obj, conf, sc, col, zn)
+            )
+
+        client = TestClient(app)
+
+        # 1. Filter by object_type = 'person'
+        res = client.get("/api/v1/forensics/search?object_type=person")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 2
+        ids = [r["event_group_id"] for r in data["results"]]
+        assert "ev_search_1" in ids
+        assert "ev_search_3" in ids
+
+        # 2. Filter by color = 'red'
+        res = client.get("/api/v1/forensics/search?color=red")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 1
+        assert data["results"][0]["event_group_id"] == "ev_search_1"
+
+        # 3. Filter by min_score = 80
+        res = client.get("/api/v1/forensics/search?min_score=80")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 1
+        assert data["results"][0]["event_group_id"] == "ev_search_1"
+
+        # 4. Free-text search q = 'counter'
+        res = client.get("/api/v1/forensics/search?q=counter")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 1
+        assert data["results"][0]["event_group_id"] == "ev_search_3"
+
+        # 5. Temporal range filter
+        res = client.get("/api/v1/forensics/search?date_from=2026-09-12T10:30:00Z")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["count"] == 2
+        ids = [r["event_group_id"] for r in data["results"]]
+        assert "ev_search_2" in ids
+        assert "ev_search_3" in ids
+
+        db.close()
+

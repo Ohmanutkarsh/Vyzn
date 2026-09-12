@@ -11,6 +11,7 @@ import json
 import secrets
 import sqlite3
 import logging
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Set
@@ -91,6 +92,26 @@ def _init_security_db(db_path: Optional[Path] = None):
                 key TEXT PRIMARY KEY,
                 reason TEXT NOT NULL,
                 revoked_at TEXT NOT NULL
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS account_lockouts (
+                identifier TEXT PRIMARY KEY,
+                failed_attempts INTEGER DEFAULT 0,
+                locked_until_epoch REAL DEFAULT 0,
+                last_attempt_epoch REAL DEFAULT 0
+            );
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS site_onboarding_drafts (
+                draft_id TEXT PRIMARY KEY,
+                installer_id TEXT NOT NULL,
+                site_name TEXT NOT NULL,
+                current_step INTEGER DEFAULT 1,
+                data_json TEXT NOT NULL,
+                test_verified INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
         """)
 
@@ -344,3 +365,176 @@ def authenticate_edge_box(
         )
 
     return matched_site
+
+
+# ===========================================================================
+# Account Lockout & Brute Force Defense (Flow 1)
+# ===========================================================================
+def record_failed_login(identifier: str, max_attempts: int = 5, lockout_seconds: int = 900, db_path: Optional[Path] = None) -> bool:
+    """Records a failed authentication attempt. Returns True if account is now locked."""
+    conn = _get_db_connection(db_path)
+    now = time.time()
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT failed_attempts, locked_until_epoch FROM account_lockouts WHERE identifier = ?", (identifier,))
+            row = cursor.fetchone()
+            if not row:
+                attempts = 1
+                locked_until = 0.0
+                cursor.execute(
+                    "INSERT INTO account_lockouts (identifier, failed_attempts, locked_until_epoch, last_attempt_epoch) VALUES (?, ?, ?, ?)",
+                    (identifier, attempts, locked_until, now)
+                )
+            else:
+                attempts = row["failed_attempts"] + 1
+                locked_until = row["locked_until_epoch"]
+                if attempts >= max_attempts:
+                    locked_until = now + lockout_seconds
+                    logger.warning(f"Account [{identifier}] locked for {lockout_seconds}s after {attempts} failed attempts")
+                cursor.execute(
+                    "UPDATE account_lockouts SET failed_attempts = ?, locked_until_epoch = ?, last_attempt_epoch = ? WHERE identifier = ?",
+                    (attempts, locked_until, now, identifier)
+                )
+
+        return (locked_until > now)
+    finally:
+        conn.close()
+
+
+def is_account_locked(identifier: str, db_path: Optional[Path] = None) -> tuple[bool, int]:
+    """Returns (is_locked, remaining_lockout_seconds)."""
+    conn = _get_db_connection(db_path)
+    now = time.time()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT locked_until_epoch FROM account_lockouts WHERE identifier = ?", (identifier,))
+        row = cursor.fetchone()
+        if not row:
+            return False, 0
+        locked_until = float(row["locked_until_epoch"])
+        if locked_until > now:
+            return True, int(locked_until - now)
+        return False, 0
+    finally:
+        conn.close()
+
+
+def reset_failed_logins(identifier: str, db_path: Optional[Path] = None) -> None:
+    """Clears failed attempts counter on successful login."""
+    conn = _get_db_connection(db_path)
+    try:
+        with conn:
+            conn.execute("DELETE FROM account_lockouts WHERE identifier = ?", (identifier,))
+    finally:
+        conn.close()
+
+
+# ===========================================================================
+# Interruption-Proof Site Onboarding Draft Store (Flow 3)
+# ===========================================================================
+def save_onboarding_draft(
+    draft_id: str,
+    installer_id: str,
+    site_name: str,
+    current_step: int,
+    data: Dict[str, Any],
+    test_verified: bool = False,
+    db_path: Optional[Path] = None
+) -> Dict[str, Any]:
+    """Saves or updates wizard step state atomically to survive mid-session dropouts."""
+    conn = _get_db_connection(db_path)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    data_str = json.dumps(data)
+    verified_int = 1 if test_verified else 0
+
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT draft_id, test_verified FROM site_onboarding_drafts WHERE draft_id = ?", (draft_id,))
+            existing = cursor.fetchone()
+            if existing:
+                # Preserve test_verified if already marked True
+                final_verified = 1 if (verified_int or existing["test_verified"]) else 0
+                cursor.execute("""
+                    UPDATE site_onboarding_drafts
+                    SET site_name = ?, current_step = ?, data_json = ?, test_verified = ?, updated_at = ?
+                    WHERE draft_id = ?
+                """, (site_name, current_step, data_str, final_verified, now_iso, draft_id))
+            else:
+                cursor.execute("""
+                    INSERT INTO site_onboarding_drafts
+                    (draft_id, installer_id, site_name, current_step, data_json, test_verified, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (draft_id, installer_id, site_name, current_step, data_str, verified_int, now_iso, now_iso))
+
+        return {
+            "draft_id": draft_id,
+            "installer_id": installer_id,
+            "site_name": site_name,
+            "current_step": current_step,
+            "test_verified": bool(verified_int),
+            "updated_at": now_iso
+        }
+    finally:
+        conn.close()
+
+
+def get_onboarding_draft(draft_id: str, db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Retrieves full draft state for resuming an in-progress setup wizard."""
+    conn = _get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM site_onboarding_drafts WHERE draft_id = ?", (draft_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "draft_id": row["draft_id"],
+            "installer_id": row["installer_id"],
+            "site_name": row["site_name"],
+            "current_step": row["current_step"],
+            "data": json.loads(row["data_json"]),
+            "test_verified": bool(row["test_verified"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"]
+        }
+    finally:
+        conn.close()
+
+
+def list_onboarding_drafts(installer_id: str, db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Lists all active in-progress drafts for an installer."""
+    conn = _get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        if installer_id == "inst_admin_root":
+            cursor.execute("SELECT draft_id, installer_id, site_name, current_step, test_verified, updated_at FROM site_onboarding_drafts ORDER BY updated_at DESC")
+        else:
+            cursor.execute("SELECT draft_id, installer_id, site_name, current_step, test_verified, updated_at FROM site_onboarding_drafts WHERE installer_id = ? ORDER BY updated_at DESC", (installer_id,))
+        rows = cursor.fetchall()
+        return [
+            {
+                "draft_id": r["draft_id"],
+                "installer_id": r["installer_id"],
+                "site_name": r["site_name"],
+                "current_step": r["current_step"],
+                "test_verified": bool(r["test_verified"]),
+                "updated_at": r["updated_at"]
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
+def delete_onboarding_draft(draft_id: str, db_path: Optional[Path] = None) -> bool:
+    """Discards or clears completed onboarding draft."""
+    conn = _get_db_connection(db_path)
+    try:
+        with conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM site_onboarding_drafts WHERE draft_id = ?", (draft_id,))
+            return cursor.rowcount > 0
+    finally:
+        conn.close()

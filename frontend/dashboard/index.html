@@ -18,35 +18,21 @@
         <span class="logo-product">Surveillance Console</span>
       </div>
       <div class="site-selector-dropdown-wrap">
-        <button class="site-selector-btn" id="btn-site-toggle" type="button" title="Switch Store / Branch">
+        <button class="site-selector-btn" id="btn-site-toggle" type="button" title="Switch Property / Location">
           <span class="site-icon">📍</span>
-          <span class="site-name" id="site-name-display">Nagpur Hub • Main Store</span>
-          <span class="site-badge">Edge Online</span>
+          <span class="site-name" id="site-name-display">Primary Premises</span>
+          <span class="site-badge">AI Online</span>
           <span class="dropdown-chevron">▾</span>
         </button>
         <div class="site-dropdown-menu" id="site-dropdown-menu" style="display: none;">
-          <div class="site-dropdown-header">MULTI-STORE ENTERPRISE FLEET</div>
-          <div class="site-option active" data-site-id="site_nagpur_hub" data-site-name="Nagpur Hub • Main Store">
-            <span class="site-opt-dot"></span>
-            <div class="site-opt-info">
-              <span class="site-opt-name">Nagpur Hub • Main Store</span>
-              <span class="site-opt-meta">Active Gateway • 3 Cameras Online</span>
-            </div>
-            <span class="site-opt-check">✓</span>
+          <div class="site-dropdown-header">SWITCH PROPERTY / LOCATION</div>
+          <div id="site-options-list" class="site-options-container">
+            <!-- Rendered dynamically from /api/v1/locations -->
           </div>
-          <div class="site-option" data-site-id="site_sadar_branch" data-site-name="Sadar Retail Branch">
-            <span class="site-opt-dot standby"></span>
-            <div class="site-opt-info">
-              <span class="site-opt-name">Sadar Retail Branch</span>
-              <span class="site-opt-meta">Secondary Gateway • 4 Cameras Online</span>
-            </div>
-          </div>
-          <div class="site-option" data-site-id="site_midc_warehouse" data-site-name="MIDC Warehouse #2">
-            <span class="site-opt-dot standby"></span>
-            <div class="site-opt-info">
-              <span class="site-opt-name">MIDC Warehouse #2</span>
-              <span class="site-opt-meta">Industrial NVR Bridge • 2 Cameras Online</span>
-            </div>
+          <div class="site-dropdown-footer" style="padding: 8px 12px; border-top: 1px solid var(--border-subtle);">
+            <button type="button" class="btn-site-add" id="btn-open-add-location-modal" style="width: 100%; background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); color: #38bdf8; padding: 6px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; cursor: pointer;">
+              ➕ Add Property Location
+            </button>
           </div>
         </div>
       </div>
@@ -83,6 +69,12 @@
     </div>
 
     <div class="header-right">
+      <!-- Telegram Status Pill Button -->
+      <button class="btn-header-tool" id="btn-open-telegram-modal" type="button" title="Configure Two-Way Telegram Security Bot">
+        <span class="tele-status-dot" id="header-tele-dot"></span>
+        <span class="tele-btn-label" id="header-tele-label">✈️ Telegram Bot</span>
+      </button>
+
       <div class="clock-chip" id="vms-clock">--:--:-- UTC</div>
       
       <!-- Supabase Auth User Capsule -->
@@ -91,50 +83,178 @@
           <span class="user-status-dot" id="user-status-dot"></span>
           <span class="user-email" id="user-email">Guest Mode</span>
           <span class="user-role-badge" id="user-role-badge">NOT SIGNED IN</span>
+          <span class="user-phone-pill" id="user-phone-pill" style="display: none; font-size: 0.7rem; color: #10b981; font-weight: 700; background: rgba(16, 185, 129, 0.15); padding: 1px 6px; border-radius: 10px; border: 1px solid rgba(16, 185, 129, 0.3);"></span>
         </div>
+        <button class="btn-auth-action" id="btn-phone-modal-open" style="display: none; background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.4); color: #10b981;">📱 Link Phone</button>
         <button class="btn-auth-action" id="btn-auth-modal-open">Sign In / Register</button>
       </div>
     </div>
   </header>
 
-  <!-- Core 4-Pane Workspace Shell -->
+  <!-- Core Workspace Shell -->
   <div class="vms-shell">
     
-    <!-- Left Fixed Navigation Sidebar (64px wide) -->
+    <!-- Left Navigation Sidebar -->
     <aside class="vms-sidebar">
       <div class="sidebar-nav">
         <button class="nav-btn active" id="nav-cockpit" title="Live Video Cockpit">
           <span class="nav-icon">📹</span>
           <span class="nav-label">Live</span>
         </button>
-        <button class="nav-btn" id="nav-map" title="2D Retail Floorplan & Camera FOV Cones">
-          <span class="nav-icon">🗺️</span>
-          <span class="nav-label">Map</span>
+        <button class="nav-btn" id="nav-clips" title="Incident Clips & Real Recorded Footage">
+          <span class="nav-icon">🎞️</span>
+          <span class="nav-label">Clips</span>
         </button>
-        <button class="nav-btn" id="nav-zones" title="Interactive Geofence & Privacy Mask Studio">
+        <button class="nav-btn" id="nav-search" title="Forensic Search & Evidence Investigation">
+          <span class="nav-icon">🔎</span>
+          <span class="nav-label">Search</span>
+        </button>
+        <button class="nav-btn" id="nav-discovery" title="Connect Camera (Phone, Laptop Webcam, or IP Camera)">
+          <span class="nav-icon">➕</span>
+          <span class="nav-label">Add Cam</span>
+        </button>
+        <button class="nav-btn nav-btn-disabled" id="nav-map" title="Layout disabled at this stage" disabled style="opacity: 0.4; cursor: not-allowed; position: relative;">
+          <span class="nav-icon">🗺️</span>
+          <span class="nav-label">Layout</span>
+          <span style="position: absolute; top: 2px; right: 4px; font-size: 11px;">❌</span>
+        </button>
+        <button class="nav-btn" id="nav-zones" title="Security Geofence & Threat Zones">
           <span class="nav-icon">📐</span>
           <span class="nav-label">Zones</span>
         </button>
-        <button class="nav-btn" id="nav-discovery" title="Zero-Touch ONVIF Camera Discovery">
-          <span class="nav-icon">🔍</span>
-          <span class="nav-label">Discover</span>
-        </button>
-        <button class="nav-btn" id="nav-dpdp" title="DPDP 2023 Statutory Signage & Compliance">
-          <span class="nav-icon">🛡️</span>
-          <span class="nav-label">DPDP</span>
-        </button>
-        <a href="http://127.0.0.1:9000/fleet" target="_blank" class="nav-btn" id="nav-fleet" title="Multi-Tenant Cloud Fleet Portal">
-          <span class="nav-icon">☁️</span>
-          <span class="nav-label">Fleet</span>
-        </a>
       </div>
       <div class="sidebar-footer">
-        <div class="health-pulse-ring" title="Edge Bridge Heartbeat Active"></div>
+        <div class="health-pulse-ring" title="AI Edge Engine Active"></div>
       </div>
     </aside>
 
     <!-- Main Stage: Center Flexible Video Viewport & Controls -->
     <main class="vms-main">
+      <!-- Dedicated Clips / Footage Stage -->
+      <div class="clips-stage" id="clips-stage" style="display: none;">
+        <div class="clips-toolbar">
+          <div class="clips-toolbar-left">
+            <span class="section-title">INCIDENT FOOTAGE & CLIPS GALLERY</span>
+            <span class="clips-subtitle">Real verified recordings (10s pre-roll + motion + 10s post-roll)</span>
+          </div>
+          <div class="clips-toolbar-right">
+            <select id="clips-filter-tier" class="filter-select" style="background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 4px 8px; font-size: 0.75rem;">
+              <option value="all">All Risk Tiers</option>
+              <option value="tier4">Tier 4: Critical (85–100)</option>
+              <option value="tier3">Tier 3: Suspicious (66–84)</option>
+              <option value="tier2">Tier 2: Elevated (36–65)</option>
+              <option value="tier1">Tier 1: Normal (0–35)</option>
+            </select>
+            <select id="clips-filter-camera" class="filter-select" style="background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 4px 8px; font-size: 0.75rem;">
+              <option value="all">All Cameras</option>
+            </select>
+            <button class="btn-panel-refresh" id="btn-refresh-clips" title="Refresh Clips">↻ Refresh</button>
+          </div>
+        </div>
+        <div class="clips-grid-container">
+          <div class="clips-grid" id="clips-grid">
+            <!-- Rendered dynamically as square cards -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Dedicated Forensic Search & Investigation Stage (Flow 7) -->
+      <div class="search-stage" id="search-stage" style="display: none;">
+        <div class="search-toolbar">
+          <div class="search-toolbar-left">
+            <span class="section-title">FORENSIC SEARCH & EVIDENCE INVESTIGATION</span>
+            <span class="search-subtitle">Multi-dimensional incident retrieval across objects, garment colors, geofence zones, and time spans</span>
+          </div>
+          <div class="search-toolbar-right">
+            <button class="btn-panel-refresh" id="btn-reset-search" title="Reset Search Filters">↻ Reset Filters</button>
+            <button class="btn-tool btn-tool-accent" id="btn-run-search">🔍 Run Forensic Search</button>
+          </div>
+        </div>
+
+        <!-- Search Filters Panel -->
+        <div class="search-filter-panel">
+          <div class="search-filter-row">
+            <div class="search-input-field-wrap flex-grow">
+              <label for="search-input-query">Free-Text Query / Keywords</label>
+              <input type="text" id="search-input-query" placeholder="e.g. red shirt intruder near cash counter, rear shutter breach..." class="search-text-input">
+            </div>
+            <div class="search-input-field-wrap">
+              <label for="search-select-obj">Detected Object</label>
+              <select id="search-select-obj" class="filter-select">
+                <option value="all">All Objects</option>
+                <option value="person">👤 Person</option>
+                <option value="vehicle">🚗 Vehicle</option>
+                <option value="animal">🐾 Animal</option>
+              </select>
+            </div>
+            <div class="search-input-field-wrap">
+              <label for="search-select-color">Dominant / Garment Color</label>
+              <select id="search-select-color" class="filter-select">
+                <option value="all">All Colors</option>
+                <option value="red">🔴 Red Garment</option>
+                <option value="blue">🔵 Blue Garment</option>
+                <option value="green">🟢 Green Garment</option>
+                <option value="yellow">🟡 Yellow Garment</option>
+                <option value="black">⚫ Black / Dark</option>
+                <option value="white">⚪ White / Light</option>
+              </select>
+            </div>
+            <div class="search-input-field-wrap">
+              <label for="search-select-zone">Geofenced Zone</label>
+              <select id="search-select-zone" class="filter-select">
+                <option value="all">All Zones</option>
+                <option value="restricted_vault">🚨 Restricted Vault</option>
+                <option value="cash_counter">💵 Cash Counter</option>
+                <option value="rear_shutter">🚪 Rear Shutter</option>
+                <option value="main_corridor">🚶 Main Corridor</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="search-filter-row secondary-row">
+            <div class="search-input-field-wrap">
+              <label for="search-select-cam">Camera Stream</label>
+              <select id="search-select-cam" class="filter-select">
+                <option value="all">All Cameras</option>
+              </select>
+            </div>
+            <div class="search-input-field-wrap">
+              <label for="search-date-from">From Date / Time</label>
+              <input type="datetime-local" id="search-date-from" class="search-date-input">
+            </div>
+            <div class="search-input-field-wrap">
+              <label for="search-date-to">To Date / Time</label>
+              <input type="datetime-local" id="search-date-to" class="search-date-input">
+            </div>
+            <div class="search-input-field-wrap flex-slider">
+              <div class="slider-label-bar">
+                <label for="search-slider-score">Min Threat Score:</label>
+                <span class="search-score-val" id="search-score-val">0 / 100</span>
+              </div>
+              <input type="range" id="search-slider-score" min="0" max="100" value="0" class="qos-slider">
+            </div>
+          </div>
+        </div>
+
+        <!-- Search Results Header -->
+        <div class="search-results-header">
+          <div class="search-results-count-wrap">
+            <span class="search-results-badge" id="search-results-count">0 matching incidents</span>
+            <span class="search-results-sub">Direct evidence queries backed by SQLite compound index (Section 65B Certified)</span>
+          </div>
+        </div>
+
+        <!-- Search Results Grid -->
+        <div class="clips-grid-container">
+          <div class="clips-grid" id="search-results-grid">
+            <div class="empty-clips-placeholder">
+              <div class="empty-clips-icon">🔎</div>
+              <span>Enter search criteria or click "Run Forensic Search" to query historical video footage.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="cockpit-stage" id="cockpit-stage">
         <!-- Cockpit Toolbar -->
         <div class="cockpit-toolbar">
@@ -160,90 +280,14 @@
           </div>
         </div>
 
-        <!-- Video Tiles Container (Responsive CSS Grid) -->
+        <!-- Video Tiles Container (Dynamically rendered by app.js) -->
         <div class="video-grid grid-2x2" id="video-grid">
-          <!-- Camera Tile 1 -->
-          <div class="camera-tile" id="tile-cam_corridor" data-cam="cam_corridor">
-            <div class="tile-media">
-              <img class="tile-stream" src="/api/cameras/cam_corridor/mjpeg" alt="Corridor Camera">
-              <canvas class="tile-overlay-canvas"></canvas>
-            </div>
-            <div class="tile-hud-top">
-              <div class="tile-cam-info">
-                <span class="stream-dot"></span>
-                <span class="tile-cam-name">Corridor (Day Main)</span>
-                <span class="stream-profile-badge" id="badge-stream-cam_corridor">SUB 480p</span>
-              </div>
-              <div class="tile-stats">
-                <span class="fps-pill">4.0 FPS</span>
-                <span class="protocol-pill">RTSP</span>
-              </div>
-            </div>
-            <div class="tile-hud-bottom">
-              <button class="hud-btn btn-stream-toggle" data-cam="cam_corridor" title="Toggle Main (HD) / Sub (SD) Stream">HD/SD</button>
-              <button class="hud-btn btn-tile-snapshot" data-cam="cam_corridor" title="Capture Still Snapshot">📷 Snapshot</button>
-              <button class="hud-btn btn-tile-zone" data-cam="cam_corridor" title="Draw Threat Zone on this camera">✏️ Zone</button>
-              <button class="hud-btn btn-tile-expand" data-cam="cam_corridor" title="Maximize View">⛶</button>
-            </div>
-          </div>
-
-          <!-- Camera Tile 2 -->
-          <div class="camera-tile" id="tile-cam_cash_counter" data-cam="cam_cash_counter">
-            <div class="tile-media">
-              <img class="tile-stream" src="/api/cameras/cam_cash_counter/mjpeg" alt="Cash Counter">
-              <canvas class="tile-overlay-canvas"></canvas>
-            </div>
-            <div class="tile-hud-top">
-              <div class="tile-cam-info">
-                <span class="stream-dot"></span>
-                <span class="tile-cam-name">Cash Counter (Safe Vault)</span>
-                <span class="stream-profile-badge" id="badge-stream-cam_cash_counter">SUB 480p</span>
-              </div>
-              <div class="tile-stats">
-                <span class="fps-pill">4.0 FPS</span>
-                <span class="protocol-pill">RTSP</span>
-              </div>
-            </div>
-            <div class="tile-hud-bottom">
-              <button class="hud-btn btn-stream-toggle" data-cam="cam_cash_counter" title="Toggle Main (HD) / Sub (SD) Stream">HD/SD</button>
-              <button class="hud-btn btn-tile-snapshot" data-cam="cam_cash_counter" title="Capture Still Snapshot">📷 Snapshot</button>
-              <button class="hud-btn btn-tile-zone" data-cam="cam_cash_counter" title="Draw Threat Zone on this camera">✏️ Zone</button>
-              <button class="hud-btn btn-tile-expand" data-cam="cam_cash_counter" title="Maximize View">⛶</button>
-            </div>
-          </div>
-
-          <!-- Camera Tile 3 -->
-          <div class="camera-tile" id="tile-cam_shutter_night" data-cam="cam_shutter_night">
-            <div class="tile-media">
-              <img class="tile-stream" src="/api/cameras/cam_shutter_night/mjpeg" alt="Rear Shutter">
-              <canvas class="tile-overlay-canvas"></canvas>
-            </div>
-            <div class="tile-hud-top">
-              <div class="tile-cam-info">
-                <span class="stream-dot"></span>
-                <span class="tile-cam-name">Rear Shutter (Night IR)</span>
-                <span class="stream-profile-badge" id="badge-stream-cam_shutter_night">SUB 480p</span>
-              </div>
-              <div class="tile-stats">
-                <span class="fps-pill">4.0 FPS</span>
-                <span class="protocol-pill">RTSP</span>
-              </div>
-            </div>
-            <div class="tile-hud-bottom">
-              <button class="hud-btn btn-stream-toggle" data-cam="cam_shutter_night" title="Toggle Main (HD) / Sub (SD) Stream">HD/SD</button>
-              <button class="hud-btn btn-tile-snapshot" data-cam="cam_shutter_night" title="Capture Still Snapshot">📷 Snapshot</button>
-              <button class="hud-btn btn-tile-zone" data-cam="cam_shutter_night" title="Draw Threat Zone on this camera">✏️ Zone</button>
-              <button class="hud-btn btn-tile-expand" data-cam="cam_shutter_night" title="Maximize View">⛶</button>
-            </div>
-          </div>
-
-          <!-- Camera Tile 4 (Virtual Standby Slot for Discovered Camera) -->
           <div class="camera-tile standby-tile" id="tile-cam_standby">
             <div class="standby-content">
-              <div class="standby-icon">➕</div>
-              <div class="standby-title">Slot 4: Empty Camera Bay</div>
-              <div class="standby-sub">Adopt ONVIF / RTSP camera from local LAN</div>
-              <button class="btn-tool" id="btn-empty-bay-adopt">Scan & Connect Camera</button>
+              <div class="standby-icon">📹</div>
+              <div class="standby-title">Connect Camera</div>
+              <div class="standby-sub">Connect your Phone Camera, Laptop Webcam, or IP Camera</div>
+              <button class="btn-tool" id="btn-empty-bay-adopt">➕ Add Camera</button>
             </div>
           </div>
         </div>
@@ -495,7 +539,8 @@
       <div class="quick-login-strip">
         <div class="quick-label">⚡ 1-Click Demo Profiles:</div>
         <div class="quick-chips-row">
-          <button type="button" class="btn-quick-chip" data-email="shopkeeper@kirana.in" data-pass="kirana123">👤 Shopkeeper</button>
+          <button type="button" class="btn-quick-chip" data-email="owner@vyzn.ai" data-pass="owner123">🏠 Resident / Owner</button>
+          <button type="button" class="btn-quick-chip" data-email="shopkeeper@kirana.in" data-pass="kirana123">🛒 Shopkeeper</button>
           <button type="button" class="btn-quick-chip" data-email="installer@safenet.in" data-pass="safenet123">🔧 Installer</button>
           <button type="button" class="btn-quick-chip" data-email="admin@vyzn.ai" data-pass="admin123">👑 Fleet Admin</button>
         </div>
@@ -505,11 +550,11 @@
       <form id="form-login" class="auth-form">
         <div class="input-group">
           <label for="login-email">Email Address</label>
-          <input type="email" id="login-email" placeholder="owner@kirana.in" value="shopkeeper@kirana.in" required>
+          <input type="email" id="login-email" placeholder="owner@vyzn.ai" value="owner@vyzn.ai" required>
         </div>
         <div class="input-group">
           <label for="login-password">Password</label>
-          <input type="password" id="login-password" value="kirana123" required>
+          <input type="password" id="login-password" value="owner123" required>
         </div>
         <button type="submit" class="btn-auth-primary" id="btn-submit-login">Sign In with Supabase</button>
       </form>
@@ -518,22 +563,23 @@
       <form id="form-register" class="auth-form" style="display: none;">
         <div class="input-group">
           <label for="reg-fullname">Full Name</label>
-          <input type="text" id="reg-fullname" placeholder="Rajesh Sharma" required>
+          <input type="text" id="reg-fullname" placeholder="Anil Verma" required>
         </div>
         <div class="input-group">
-          <label for="reg-email">Business Email</label>
-          <input type="email" id="reg-email" placeholder="rajesh@supermart.in" required>
+          <label for="reg-email">Email Address</label>
+          <input type="email" id="reg-email" placeholder="user@domain.in" required>
         </div>
         <div class="input-group">
           <label for="reg-password">Password</label>
           <input type="password" id="reg-password" placeholder="••••••••••••" required>
         </div>
         <div class="input-group">
-          <label for="reg-role">Role Scope</label>
+          <label for="reg-role">Account Type / Scope</label>
           <select id="reg-role">
-            <option value="shopkeeper">Shopkeeper / Store Owner</option>
-            <option value="installer">Certified SafeNet Installer</option>
-            <option value="admin">Central Fleet Admin</option>
+            <option value="resident">Home / Resident / Property Owner</option>
+            <option value="shopkeeper">Shopkeeper / Retailer</option>
+            <option value="installer">Certified Security Installer</option>
+            <option value="admin">Central Fleet Administrator</option>
           </select>
         </div>
         <button type="submit" class="btn-auth-primary" id="btn-submit-register">Create Account</button>
@@ -641,13 +687,37 @@
       </div>
 
       <div class="modal-tabs">
-        <button class="modal-tab active" id="tab-cam-webcam">📷 Local Physical Camera</button>
-        <button class="modal-tab" id="tab-cam-rtsp">🌐 Network RTSP Stream</button>
-        <button class="modal-tab" id="tab-cam-onvif">🔍 ONVIF LAN Discovery</button>
+        <button class="modal-tab active" id="tab-cam-phone">📱 Smartphone Camera</button>
+        <button class="modal-tab" id="tab-cam-webcam">💻 Laptop / USB Webcam</button>
+        <button class="modal-tab" id="tab-cam-rtsp">🌐 Network RTSP / IP Camera</button>
+        <button class="modal-tab" id="tab-cam-onvif">🔍 ONVIF LAN Scan</button>
       </div>
 
-      <!-- Tab A: Local Physical Webcam -->
-      <div id="pane-cam-webcam" class="discovery-body">
+      <!-- Tab 1: Smartphone Camera (Android & iOS) -->
+      <div id="pane-cam-phone" class="discovery-body">
+        <div class="setup-guide-box" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 14px;">
+          <div style="font-weight: 700; color: #10b981; margin-bottom: 6px;">📱 3-Step Setup: Turn Any Phone Into an AI Security Camera</div>
+          <ol style="margin: 0; padding-left: 20px; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">
+            <li><strong>Install App:</strong> Install free <em>"IP Webcam"</em> (Android) or <em>"DroidCam"</em> (iOS / Android).</li>
+            <li><strong>Start Server:</strong> Connect phone to your Wi-Fi and tap <em>"Start Server"</em> at the bottom of the app.</li>
+            <li><strong>Enter Stream URL:</strong> Note the IP displayed on phone screen (e.g. <code>http://192.168.1.15:8080/video</code>) and paste below.</li>
+          </ol>
+        </div>
+        <div class="input-group">
+          <label for="input-phone-url">Phone Camera Video Stream URL</label>
+          <input type="text" id="input-phone-url" placeholder="http://192.168.1.15:8080/video" value="http://192.168.1.15:8080/video">
+        </div>
+        <div class="input-group">
+          <label for="input-phone-name">Camera Name</label>
+          <input type="text" id="input-phone-name" value="Living Room Phone Camera">
+        </div>
+        <button class="btn-scan-action" id="btn-adopt-phone-camera" style="margin-top:0.5rem; background: #10b981;">
+          📱 Connect Smartphone Camera
+        </button>
+      </div>
+
+      <!-- Tab 2: Local Physical Webcam -->
+      <div id="pane-cam-webcam" class="discovery-body" style="display: none;">
         <p class="discovery-hint">Connect your laptop's integrated camera or any USB webcam directly to the AI surveillance pipeline.</p>
         <div class="input-group">
           <label for="select-local-device">Available Physical Devices</label>
@@ -659,19 +729,19 @@
         </div>
         <div class="input-group">
           <label for="input-webcam-name">Camera Name</label>
-          <input type="text" id="input-webcam-name" value="Physical Camera (Webcam 0)">
+          <input type="text" id="input-webcam-name" value="Laptop Integrated Camera">
         </div>
         <button class="btn-scan-action" id="btn-adopt-physical-webcam" style="margin-top:0.5rem;">
           ⚡ Connect Physical Camera to Cockpit
         </button>
       </div>
 
-      <!-- Tab B: Network RTSP / IP Camera -->
+      <!-- Tab 3: Network RTSP / IP Camera -->
       <div id="pane-cam-rtsp" class="discovery-body" style="display: none;">
-        <p class="discovery-hint">Connect any CP Plus, Hikvision, Dahua, or generic RTSP/H.264 camera feed.</p>
+        <p class="discovery-hint">Connect any CP Plus, Hikvision, Dahua, Ezviz, TP-Link, or generic RTSP camera feed.</p>
         <div class="input-group">
           <label for="input-rtsp-id">Camera Identifier</label>
-          <input type="text" id="input-rtsp-id" placeholder="e.g. cam_front_gate" value="cam_custom_rtsp">
+          <input type="text" id="input-rtsp-id" placeholder="e.g. cam_front_gate" value="cam_front_gate">
         </div>
         <div class="input-group">
           <label for="input-rtsp-name">Display Name</label>
@@ -684,17 +754,17 @@
         <div class="input-group">
           <label for="select-rtsp-fps">Decimated Inference FPS</label>
           <select id="select-rtsp-fps">
-            <option value="4.0">4.0 FPS (Recommended - Ultra-Low Bandwidth)</option>
+            <option value="4.0">4.0 FPS (Recommended - Low Thermal)</option>
             <option value="8.0">8.0 FPS (Standard Commercial)</option>
             <option value="15.0">15.0 FPS (High Motion)</option>
           </select>
         </div>
         <button class="btn-scan-action" id="btn-adopt-manual-rtsp" style="margin-top:0.5rem;">
-          🌐 Connect Network RTSP Stream
+          🌐 Connect Network RTSP Camera
         </button>
       </div>
 
-      <!-- Tab C: ONVIF LAN Auto-Discovery -->
+      <!-- Tab 4: ONVIF LAN Auto-Discovery -->
       <div id="pane-cam-onvif" class="discovery-body" style="display: none;">
         <div class="discovery-scan-bar">
           <input type="text" id="scan-subnet-input" placeholder="Subnet / IPs (optional, e.g. 192.168.1.100)">
@@ -808,6 +878,150 @@
         <div class="qos-actions">
           <button class="btn-qos-save" id="btn-save-qos-settings">💾 Apply QoS Bandwidth Policy</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 6: Telegram Bot & Two-Way Interactive Triage Center                 -->
+  <!-- ========================================================================= -->
+  <div class="modal-scrim" id="telegram-modal" style="display: none;">
+    <div class="modal-card telegram-modal-card">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge telegram-badge">✈️</div>
+          <div>
+            <h3>Telegram Bot Alert Center</h3>
+            <p class="modal-subtitle">Direct Mobile Incident Cards & CGNAT-Immune Two-Way AI Calibration</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-telegram-modal">&times;</button>
+      </div>
+
+      <div class="telegram-modal-body">
+        <!-- Live Status Banner -->
+        <div class="telegram-status-banner" id="telegram-status-banner">
+          <div class="status-indicator-dot" id="modal-tele-dot"></div>
+          <div class="status-details">
+            <span class="status-title" id="modal-tele-status-title">Checking Telegram Bot Connection...</span>
+            <span class="status-desc" id="modal-tele-status-desc">Two-way long polling enables instant triage without public IPs or webhooks.</span>
+          </div>
+        </div>
+
+        <div class="telegram-config-form">
+          <div class="input-group">
+            <label for="input-telegram-token">
+              Telegram Bot Token:
+              <span class="input-hint">From @BotFather (e.g. <code>7123456789:AAH...</code>)</span>
+            </label>
+            <input type="password" id="input-telegram-token" placeholder="Paste your bot token from @BotFather" class="auth-input-field">
+          </div>
+
+          <div class="input-group">
+            <label for="input-telegram-chat">
+              Target Chat / Group / Channel ID:
+              <span class="input-hint">From @userinfobot (e.g. <code>987654321</code> or <code>-100...</code>)</span>
+            </label>
+            <input type="text" id="input-telegram-chat" placeholder="e.g. 987654321 or -1001234567890" class="auth-input-field">
+          </div>
+
+          <div class="qos-toggle-row" style="margin-top: 14px;">
+            <label class="toggle-switch">
+              <input type="checkbox" id="check-enable-poller" checked>
+              <span class="toggle-slider"></span>
+            </label>
+            <div class="toggle-label-group">
+              <span class="toggle-title">Enable Outbound Long-Polling Worker (CGNAT Bypass)</span>
+              <span class="toggle-desc">Automatically listens for shopkeeper button taps ([⭐ Star Clip] / [❌ False Alarm]) and continuously tunes AI sensitivity.</span>
+            </div>
+          </div>
+
+          <!-- Test Ping Output Banner -->
+          <div class="test-ping-result" id="test-ping-result" style="display: none;"></div>
+
+          <div class="telegram-action-buttons">
+            <button class="btn-action btn-ping-action" id="btn-telegram-test-ping" type="button">
+              🔔 Send Test Verification Alert
+            </button>
+            <button class="btn-action btn-save-action" id="btn-save-telegram-config" type="button">
+              💾 Save & Activate Bot
+            </button>
+          </div>
+        </div>
+
+        <!-- How It Works Callout -->
+        <div class="telegram-guide-box">
+          <div class="guide-title">💡 Why Telegram Instead of WhatsApp for Indian SMBs?</div>
+          <ul class="guide-list">
+            <li><strong>Zero Cost:</strong> No Meta Cloud API per-conversation fees ($0.05+/chat).</li>
+            <li><strong>Zero Webhook Requirement:</strong> Outbound long polling reaches Telegram through Jio/Airtel CGNAT with zero port forwarding.</li>
+            <li><strong>Instant Full-HD Video:</strong> Sends full 1080p MP4 clips directly with interactive inline buttons.</li>
+            <li><strong>Closed-Loop AI Calibration:</strong> Tapping <em>[❌ False Alarm]</em> updates the Beta-Binomial Bayesian calibrator immediately.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  <!-- ========================================================================= -->
+  <!-- MODAL 7: Property Location Management                                     -->
+  <!-- ========================================================================= -->
+  <div class="modal-scrim" id="location-modal" style="display: none;">
+    <div class="modal-card" style="max-width: 440px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">📍</div>
+          <div>
+            <h3>Add Property Location</h3>
+            <p class="modal-subtitle">Residential, Retail Store, Housing Society, Warehouse</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-location-modal">&times;</button>
+      </div>
+      <form id="form-add-location" class="auth-form" style="padding: 18px 24px;">
+        <div class="input-group">
+          <label for="loc-name-input">Property / Location Name</label>
+          <input type="text" id="loc-name-input" placeholder="e.g. Sector 14 Residency, Kirana Store" required>
+        </div>
+        <div class="input-group">
+          <label for="loc-addr-input">Address / Tag (Optional)</label>
+          <input type="text" id="loc-addr-input" placeholder="e.g. Main Gate, Shop Floor, Floor 2">
+        </div>
+        <button type="submit" class="btn-auth-primary" style="margin-top: 10px;">💾 Save Property Location</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL 8: Mobile Phone OTP Verification                                   -->
+  <!-- ========================================================================= -->
+  <div class="modal-scrim" id="phone-modal" style="display: none;">
+    <div class="modal-card" style="max-width: 440px;">
+      <div class="modal-header">
+        <div class="modal-title-group">
+          <div class="modal-icon-badge">📱</div>
+          <div>
+            <h3>Link Mobile Phone Number</h3>
+            <p class="modal-subtitle">Direct Security Alerts & SMS OTP Verification</p>
+          </div>
+        </div>
+        <button class="btn-modal-close" id="btn-close-phone-modal">&times;</button>
+      </div>
+      <div style="padding: 18px 24px;">
+        <div id="phone-step-1">
+          <div class="input-group">
+            <label for="input-phone-number">Mobile Phone Number (with Country Code)</label>
+            <input type="tel" id="input-phone-number" placeholder="+91 98765 43210" value="+91 98765 43210" required>
+          </div>
+          <button type="button" class="btn-auth-primary" id="btn-send-phone-otp" style="margin-top: 10px;">📩 Send Verification OTP</button>
+        </div>
+        <div id="phone-step-2" style="display: none; margin-top: 14px;">
+          <div class="input-group">
+            <label for="input-phone-otp">Enter 6-Digit OTP</label>
+            <input type="text" id="input-phone-otp" placeholder="123456" maxlength="6" style="letter-spacing: 4px; font-size: 1.2rem; text-align: center; font-weight: 700;">
+            <span class="input-hint" id="otp-hint-text" style="color: #38bdf8; font-size: 0.75rem; margin-top: 4px;"></span>
+          </div>
+          <button type="button" class="btn-auth-primary" id="btn-verify-phone-otp" style="margin-top: 10px;">✅ Verify & Link Phone</button>
+        </div>
+        <div id="phone-feedback" style="margin-top: 12px; font-size: 0.82rem;"></div>
       </div>
     </div>
   </div>

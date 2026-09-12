@@ -24,15 +24,26 @@ class BusinessHours(BaseModel):
     end_minute: int = 0
 
 
+class LocationConfig(BaseModel):
+    location_id: str
+    name: str
+    address: Optional[str] = ""
+    owner_email: Optional[str] = None
+
+
 class CameraConfig(BaseModel):
     camera_id: str
     name: str
     rtsp_url: str
     enabled: bool = True
+    location_id: Optional[str] = "loc_primary"
     target_fps: float = 4.0
+    capture_fps: float = 15.0
+    ai_inference_fps: float = 4.0
     downscale_width: int = 640
     downscale_height: int = 360
     is_night_ir: bool = False
+    owner_email: Optional[str] = None
     business_hours: BusinessHours = Field(default_factory=BusinessHours)
     restricted_zones: List[ZonePolygon] = Field(default_factory=list)
     privacy_zones: List[ZonePolygon] = Field(default_factory=list)
@@ -46,14 +57,18 @@ class EdgeSettings(BaseSettings):
     db_path: Path = Path("./data/clips/index.db")
 
     # Scoring & Thresholds
-    alert_score_threshold: int = 70
+    alert_score_threshold: int = 85
     motion_gate_threshold: float = 0.005  # 0.5% frame change
     day_conf_min: float = 0.35
     night_conf_min: float = 0.25
 
-    # Storage & Retention
+    # Storage & Retention & Clipping
     raw_retention_hours: int = 72
     disk_safety_threshold_pct: float = 85.0
+    max_storage_quota_gb: float = 20.0
+    pre_roll_sec: float = 10.0
+    post_roll_sec: float = 10.0
+    event_inactivity_gap_sec: float = 90.0
 
     # Telemetry & Observability
     telemetry_interval_sec: int = 60

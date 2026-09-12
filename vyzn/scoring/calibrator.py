@@ -227,3 +227,13 @@ class AdaptiveCalibrator:
     def clear_manual_bias(self, camera_id: str):
         """Removes manual override and restores auto-calibration."""
         self._manual_overrides.pop(camera_id, None)
+
+    def record_triage(self, camera_id: str, is_threat: bool):
+        """
+        Invalidates cached calibration metrics so that subsequent bias queries
+        incorporate the newly recorded triage decision immediately.
+        """
+        self._last_refresh = 0.0
+        self._bias_cache.pop(camera_id, None)
+        self._stats_cache.pop(camera_id, None)
+        self.refresh(force=True)

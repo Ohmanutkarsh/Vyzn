@@ -253,3 +253,8 @@ def test_fleet_portal_html_rendering():
     assert "VYZN NETRA" in content
     assert "Multi-Tenant Fleet Observability" in content
     assert "Remote OTA Config Dispatcher" in content
+    assert "draftResumeBanner" in content
+    assert "onboardingModal" in content
+    assert "Report Stolen" in content
+    assert "triggerWizardTestAlert" in content
+    assert "submitGoLive" in content

@@ -12,6 +12,68 @@ zones:
     schedule_mode: restricted_all_times
     weight: 25
     zone_type: restricted_zone
+  cam_phone_1789147932161_restricted_vault:
+    camera_id: cam_phone_1789147932161
+    description: restricted_zone geofence created via UI studio
+    polygon:
+    - - 0.714
+      - 0.753
+    - - 0.433
+      - 0.531
+    - - 0.433
+      - 0.55
+    - - 0.377
+      - 0.814
+    - - 0.377
+      - 0.831
+    - - 0.867
+      - 0.314
+    - - 0.678
+      - 0.3
+    - - 0.458
+      - 0.228
+    - - 0.306
+      - 0.256
+    - - 0.823
+      - 0.578
+    - - 0.647
+      - 0.167
+    - - 0.338
+      - 0.442
+    - - 0.887
+      - 0.356
+    - - 0.728
+      - 0.156
+    - - 0.317
+      - 0.6
+    - - 0.858
+      - 0.639
+    - - 0.472
+      - 0.056
+    - - 0.583
+      - 0.897
+    - - 0.858
+      - 0.786
+    - - 0.237
+      - 0.386
+    schedule_mode: restricted_all_times
+    weight: 25
+    zone_type: restricted_zone
+  cam_webcam_0_restricted_vault:
+    camera_id: cam_webcam_0
+    description: restricted_zone geofence created via UI studio
+    polygon:
+    - - 0.634
+      - 0.622
+    - - 0.616
+      - 0.164
+    - - 0.397
+      - 0.183
+    - - 0.35
+      - 0.669
+    schedule_mode: restricted_all_times
+    weight: 25
+    zone_type: restricted_zone
   cash_counter:
     camera_id: cam_cash_counter
     description: Cash drawer zone - generates immediate alert on loitering > 15s

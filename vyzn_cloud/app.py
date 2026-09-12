@@ -43,9 +43,10 @@ def cloud_health():
 
 
 @cloud_app.post("/api/v1/telemetry/heartbeat")
-def receive_edge_heartbeat(payload: TelemetryHeartbeatPayload):
+def receive_edge_heartbeat(payload: TelemetryHeartbeatPayload, request: Request):
     """Ingests 60-second JSON heartbeat from an active edge box and signals OTA updates."""
-    watchdog.record_heartbeat(payload.site_id, payload.dict())
+    client_host = request.client.host if request.client else "127.0.0.1"
+    watchdog.record_heartbeat(payload.site_id, payload.dict(), client_host=client_host)
 
     managed = MANAGED_CONFIGS.get(payload.site_id)
     new_config_available = False

@@ -7,9 +7,10 @@ from __future__ import annotations
 import time
 import threading
 import queue
+from collections import deque
 import numpy as np
 import cv2
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from vyzn.core.config import CameraConfig
 
 
@@ -33,6 +34,22 @@ class SyntheticCameraThread(threading.Thread):
         self.last_frame_timestamp = 0.0
         self.fps_measured = config.target_fps
         self.is_connected = True
+        self.latest_frame: Optional[np.ndarray] = None
+        self._latest_lock = threading.Lock()
+        self.ring_buffer: deque[bytes] = deque(maxlen=int(config.target_fps * 10))
+        self._ring_lock = threading.Lock()
+
+    def get_latest_jpeg(self, quality: int = 75) -> Optional[bytes]:
+        with self._latest_lock:
+            if self.latest_frame is None:
+                return None
+            frame = self.latest_frame.copy()
+        ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        return jpeg.tobytes() if ret else None
+
+    def get_ring_buffer_copy(self) -> List[bytes]:
+        with self._ring_lock:
+            return list(self.ring_buffer)
 
     def run(self):
         w = self.config.downscale_width
@@ -108,6 +125,14 @@ class SyntheticCameraThread(threading.Thread):
             # Timestamp and queue push
             now = time.monotonic()
             self.last_frame_timestamp = now
+            with self._latest_lock:
+                self.latest_frame = frame
+
+            ret_enc, jpeg_bytes = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if ret_enc:
+                with self._ring_lock:
+                    self.ring_buffer.append(jpeg_bytes.tobytes())
+
             item = (self.config.camera_id, now, frame, self.config.is_night_ir)
 
             if self.output_queue.full():

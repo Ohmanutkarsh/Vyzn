@@ -21,7 +21,7 @@ from vyzn.ai.detector import BaseDetector, MockDetector, YOLOv8Detector
 from vyzn.ai.tracker import IOUTracker
 from vyzn.scoring.engine import ScoringEngine, is_time_after_hours, check_box_intersects_zone
 from vyzn.recording.clip_writer import ClipWriter
-from vyzn.alerts.telegram import TelegramAlertProvider
+from vyzn.alerts.telegram import TelegramAlertProvider, start_telegram_poller, stop_telegram_poller
 from vyzn.alerts.dispatcher import AlertDispatcher
 from vyzn.storage.reaper import StorageReaperDaemon
 from vyzn.storage.cloud_sync import CloudSyncWorker
@@ -32,6 +32,8 @@ from vyzn.privacy.dpdp import PrivacyMasker
 from vyzn.scoring.calibrator import AdaptiveCalibrator
 from vyzn.telemetry.ota_sync import OTASyncWorker
 from vyzn.core.resource_governor import ResourceGovernor
+import cv2
+import numpy as np
 
 logger = logging.getLogger("vyzn.pipeline")
 
@@ -73,7 +75,8 @@ class EdgePipeline:
             db=self.db,
             data_root=self.settings.data_dir,
             raw_retention_hours=self.settings.raw_retention_hours,
-            disk_safety_threshold_pct=self.settings.disk_safety_threshold_pct
+            disk_safety_threshold_pct=self.settings.disk_safety_threshold_pct,
+            max_quota_gb=getattr(self.settings, "max_storage_quota_gb", 20.0)
         )
         self.cloud_sync = CloudSyncWorker(
             db=self.db,
@@ -106,7 +109,9 @@ class EdgePipeline:
         self.active_event_ids: Dict[str, str] = {}
         self.active_event_scores: Dict[str, int] = {}
         self.active_event_start_times: Dict[str, str] = {}
+        self.active_event_first_motion: Dict[str, float] = {}
         self.active_event_last_motion: Dict[str, float] = {}
+        self.active_event_motion_counts: Dict[str, int] = {}
         self.active_event_alert_sent: Dict[str, bool] = {}
         self.active_event_best_candidates: Dict[str, Optional[DetectionCandidate]] = {}
 
@@ -153,6 +158,15 @@ class EdgePipeline:
             daemon=True
         )
         self.worker_thread.start()
+
+        # 4. Start Telegram interactive long-polling worker if configured
+        if self.settings.telegram_bot_token:
+            start_telegram_poller(
+                bot_token=self.settings.telegram_bot_token,
+                db=self.db,
+                calibrator=self.calibrator
+            )
+
         logger.info(f"Pipeline started with {len(self.capture_threads)} capture streams.")
 
     def add_camera_stream(self, cam: CameraConfig):
@@ -177,6 +191,27 @@ class EdgePipeline:
         if self.running:
             thread.start()
             logger.info(f"Dynamically launched live capture thread for camera [{cam.camera_id}].")
+
+    def get_camera_live_jpeg(self, camera_id: str, quality: int = 75) -> Optional[bytes]:
+        """Fetches the latest live JPEG from the camera's capture thread or ring buffer."""
+        for t in self.capture_threads:
+            if getattr(t, "config", None) and t.config.camera_id == camera_id:
+                if hasattr(t, "get_latest_jpeg"):
+                    jpeg = t.get_latest_jpeg(quality=quality)
+                    if jpeg:
+                        return jpeg
+
+        # Fallback to ring buffer
+        if camera_id in self.ring_buffers and self.ring_buffers[camera_id]:
+            frame = self.ring_buffers[camera_id][-1]
+            h, w = frame.shape[:2]
+            if w > 854:
+                frame = cv2.resize(frame, (854, int(854 * h / w)))
+            ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            if ret:
+                return jpeg.tobytes()
+
+        return None
 
     def _inference_worker_loop(self):
         """Sequential inference worker pulling decimated frames from shared queue."""
@@ -282,34 +317,55 @@ class EdgePipeline:
                     event_id = f"ev_{camera_id}_{int(time.time())}"
                     self.active_event_ids[camera_id] = event_id
                     self.active_event_scores[camera_id] = highest_score
-                    self.active_event_start_times[camera_id] = now_dt.isoformat()
+                    self.active_event_first_motion[camera_id] = frame_time
+                    self.active_event_last_motion[camera_id] = frame_time
+                    self.active_event_motion_counts[camera_id] = 1
+                    # Retroactive 10-second pre-roll boundary
+                    start_dt = datetime.fromtimestamp(max(0.0, frame_time - 10.0), timezone.utc)
+                    self.active_event_start_times[camera_id] = start_dt.isoformat()
                     self.active_event_alert_sent[camera_id] = False
                     self.active_event_best_candidates[camera_id] = best_candidate
-                    # Pre-fill event buffer with pre-roll history (~10s = 40 frames)
-                    self.event_buffers[camera_id] = list(self.ring_buffers.get(camera_id, []))
+
+                    # Pre-fill event buffer with 10s pre-roll history from RAM-aware thread ring buffer
+                    pre_roll = []
+                    for t in self.capture_threads:
+                        if getattr(t, "config", None) and t.config.camera_id == camera_id:
+                            if hasattr(t, "get_ring_buffer_copy"):
+                                pre_roll = t.get_ring_buffer_copy()
+                                break
+                    if not pre_roll and camera_id in self.ring_buffers:
+                        pre_roll = list(self.ring_buffers[camera_id])
+
+                    self.event_buffers[camera_id] = list(pre_roll)
+                else:
+                    # Ongoing or re-triggered motion within 90s merge window
+                    self.active_event_last_motion[camera_id] = frame_time
+                    self.active_event_motion_counts[camera_id] = self.active_event_motion_counts.get(camera_id, 0) + 1
 
                 # Append current frame and update state
                 self.event_buffers[camera_id].append(frame)
-                self.active_event_last_motion[camera_id] = frame_time
                 if highest_score > self.active_event_scores[camera_id]:
                     self.active_event_scores[camera_id] = highest_score
                     self.active_event_best_candidates[camera_id] = best_candidate
 
-                # Trigger alert dispatch once per event as soon as threshold is met
+                # Alert dispatched once per event group
                 if should_alert_flag and not self.active_event_alert_sent.get(camera_id, False):
                     self.active_event_alert_sent[camera_id] = True
 
-                # Cap maximum segment duration (24 frames ≈ 6 seconds @ 4 fps)
-                if len(self.event_buffers[camera_id]) >= 24:
-                    self._finalize_event(camera_id)
-
             elif camera_id in self.active_event_ids:
-                # Trailing frames during grace period (motion has paused)
-                self.event_buffers[camera_id].append(frame)
+                # Motion paused: evaluate 10s post-roll and 90s gap debounce
                 last_m_time = self.active_event_last_motion.get(camera_id, frame_time)
+                quiet_duration = frame_time - last_m_time
 
-                # Close event if quiet for > 2.5 seconds or reached segment limit
-                if (frame_time - last_m_time > 2.5) or (len(self.event_buffers[camera_id]) >= 24):
+                # 1. Capture 10 seconds of post-roll after motion pauses
+                post_roll = getattr(self.settings, "post_roll_sec", 10.0)
+                if quiet_duration <= post_roll:
+                    self.event_buffers[camera_id].append(frame)
+
+                # 2. Only finalize if quiet gap >= 90 seconds (merging pauses <= 90s)
+                # or buffer reaches 2400 frames (~10 minutes safety ceiling)
+                inactivity_gap = getattr(self.settings, "event_inactivity_gap_sec", 90.0)
+                if quiet_duration >= inactivity_gap or len(self.event_buffers[camera_id]) >= 2400:
                     self._finalize_event(camera_id)
 
             self.frame_queue.task_done()
@@ -323,12 +379,23 @@ class EdgePipeline:
         frames = self.event_buffers.pop(camera_id, [])
         score = self.active_event_scores.pop(camera_id, 50)
         start_time = self.active_event_start_times.pop(camera_id, datetime.now(timezone.utc).isoformat())
-        self.active_event_last_motion.pop(camera_id, None)
+        first_m_time = self.active_event_first_motion.pop(camera_id, None)
+        last_m_time = self.active_event_last_motion.pop(camera_id, None)
+        motion_pts = self.active_event_motion_counts.pop(camera_id, 1)
         alert_sent = self.active_event_alert_sent.pop(camera_id, False)
         candidate = self.active_event_best_candidates.pop(camera_id, None)
-        end_time = datetime.now(timezone.utc).isoformat()
 
-        if len(frames) < 6:
+        if last_m_time:
+            end_dt = datetime.fromtimestamp(last_m_time + 10.0, timezone.utc)
+            end_time = end_dt.isoformat()
+            duration = round((last_m_time + 10.0) - (first_m_time - 10.0), 1) if first_m_time else round(len(frames) / 4.0, 1)
+        else:
+            end_time = datetime.now(timezone.utc).isoformat()
+            duration = round(len(frames) / 4.0, 1)
+
+        duration = max(2.0, duration)
+
+        if len(frames) < 3:
             return
 
         # Write fMP4 clip and thumbnail
@@ -364,6 +431,18 @@ class EdgePipeline:
             else:
                 zone_n = "main_corridor"
 
+        cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
+        loc_id = getattr(cam_config, "location_id", "loc_primary") or "loc_primary"
+
+        import json
+        meta = {
+            "pre_roll_sec": 10.0,
+            "post_roll_sec": 10.0,
+            "inactivity_gap_sec": 90.0,
+            "motion_points": motion_pts,
+            "fps": 4.0
+        }
+
         record = EventRecord(
             event_group_id=event_id,
             camera_id=camera_id,
@@ -376,12 +455,16 @@ class EdgePipeline:
             file_path=clip_path,
             thumb_path=thumb_path,
             dominant_color=dom_color,
-            zone_name=zone_n
+            zone_name=zone_n,
+            location_id=loc_id,
+            duration_sec=duration,
+            motion_points_count=motion_pts,
+            metadata_json=json.dumps(meta)
         )
 
         # Save to SQLite index
         self.db.insert_event(record)
-        self.db.log_audit("EVENT_RECORDED", event_id, f"Score: {score}, Obj: {obj_type}, Color: {dom_color}, Zone: {zone_n}")
+        self.db.log_audit("EVENT_RECORDED", event_id, f"Score: {score}, Obj: {obj_type}, Color: {dom_color}, Zone: {zone_n}, Duration: {duration}s")
 
         # Dispatch alert if score qualifies
         if alert_sent or score >= self.settings.alert_score_threshold:
@@ -420,16 +503,58 @@ class EdgePipeline:
                 logger.info(f"Dynamically updated {len(zones)} restricted zones for camera {camera_id} (atomic swap).")
                 break
 
+    def add_camera_stream(self, cam: CameraConfig):
+        """Dynamically launches a capture thread for an adopted camera without pipeline restart."""
+        self.remove_camera_stream(cam.camera_id)
+        self.ring_buffers[cam.camera_id] = deque(maxlen=int(cam.target_fps * 10))
+
+        if self.use_synthetic and str(cam.rtsp_url).startswith("sim://"):
+            profile = "night_intruder" if cam.is_night_ir else "walking_person"
+            thread = SyntheticCameraThread(
+                config=cam,
+                output_queue=self.frame_queue,
+                motion_profile=profile
+            )
+        else:
+            thread = RTSPCaptureThread(
+                config=cam,
+                output_queue=self.frame_queue
+            )
+
+        self.capture_threads.append(thread)
+        if self.running:
+            thread.start()
+        logger.info(f"Dynamically launched capture stream for camera '{cam.camera_id}' ({cam.name}).")
+
+    def remove_camera_stream(self, camera_id: str):
+        """Stops and unregisters the capture thread for a removed camera."""
+        for t in list(self.capture_threads):
+            if getattr(t, "config", None) and t.config.camera_id == camera_id:
+                if hasattr(t, "stop"):
+                    t.stop()
+                try:
+                    self.capture_threads.remove(t)
+                except ValueError:
+                    pass
+        self.ring_buffers.pop(camera_id, None)
+        self.event_buffers.pop(camera_id, None)
+        self.active_event_ids.pop(camera_id, None)
+        logger.info(f"Removed capture stream for camera '{camera_id}'.")
+
+    def flush_active_events(self):
+        """Forces immediate finalization of any open active events across all cameras."""
+        for cam_id in list(self.active_event_ids.keys()):
+            try:
+                self._finalize_event(cam_id)
+            except Exception as e:
+                logger.error(f"Error finalizing event for {cam_id} on flush: {e}")
+
     def stop(self):
         """Stops all threads and closes database."""
         self.running = False
 
         # Flush any active events currently in progress before terminating
-        for cam_id in list(self.active_event_ids.keys()):
-            try:
-                self._finalize_event(cam_id)
-            except Exception as e:
-                logger.error(f"Error finalizing event for {cam_id} on stop: {e}")
+        self.flush_active_events()
 
         for t in self.capture_threads:
             if hasattr(t, "stop"):
@@ -441,6 +566,7 @@ class EdgePipeline:
             self.worker_thread.join(timeout=2.0)
 
         self.ota_sync.stop()
+        stop_telegram_poller()
         self.reaper.stop()
         self.cloud_sync.stop()
         self.telemetry.stop()

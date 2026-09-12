@@ -21,15 +21,21 @@ class DeadManWatchdog:
         self.silence_threshold_sec = silence_threshold_sec
         self.sites: Dict[str, Dict[str, Any]] = {}
 
-    def record_heartbeat(self, site_id: str, payload: Dict[str, Any]):
+    def record_heartbeat(self, site_id: str, payload: Dict[str, Any], client_host: str = "127.0.0.1"):
         """Records incoming heartbeat from an edge node."""
         now = time.monotonic()
+        api_port = payload.get("pipeline", {}).get("api_port") or payload.get("api_port", 8000)
+        host = "127.0.0.1" if client_host in ("127.0.0.1", "localhost", "::1", "testclient") else client_host
+        edge_url = f"http://{host}:{api_port}"
+
         self.sites[site_id] = {
             "site_id": site_id,
             "last_seen_monotonic": now,
             "last_seen_utc": payload.get("timestamp"),
             "system": payload.get("system", {}),
             "pipeline": payload.get("pipeline", {}),
+            "edge_url": edge_url,
+            "client_host": client_host,
             "status": "ONLINE"
         }
 

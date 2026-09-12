@@ -1,0 +1,14 @@
+[
+  {
+    "location_id": "loc_primary",
+    "name": "Primary Premises",
+    "address": "Main Building",
+    "owner_email": null
+  },
+  {
+    "location_id": "loc_warehouse",
+    "name": "West Warehouse",
+    "address": "Sector 62, Noida",
+    "owner_email": null
+  }
+]

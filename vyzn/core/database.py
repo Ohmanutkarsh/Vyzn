@@ -91,11 +91,16 @@ class DatabaseWriterWorker(threading.Thread):
             file_path TEXT NOT NULL,           -- Path to .mp4
             thumb_path TEXT NOT NULL,          -- Path to .jpg
             dominant_color TEXT DEFAULT 'unspecified',
-            zone_name TEXT DEFAULT 'general'
+            zone_name TEXT DEFAULT 'general',
+            location_id TEXT DEFAULT 'loc_primary',
+            duration_sec REAL DEFAULT 0.0,
+            motion_points_count INTEGER DEFAULT 0,
+            metadata_json TEXT DEFAULT '{}'
         );
 
         CREATE INDEX IF NOT EXISTS idx_events_camera_time ON events(camera_id, start_time);
         CREATE INDEX IF NOT EXISTS idx_events_synced ON events(synced, score);
+        CREATE INDEX IF NOT EXISTS idx_events_forensic ON events(location_id, object_type, score, start_time);
 
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,6 +132,28 @@ class DatabaseWriterWorker(threading.Thread):
             conn.execute("ALTER TABLE events ADD COLUMN zone_name TEXT DEFAULT 'general';")
         except sqlite3.OperationalError:
             pass
+        try:
+            conn.execute("ALTER TABLE events ADD COLUMN location_id TEXT DEFAULT 'loc_primary';")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE events ADD COLUMN duration_sec REAL DEFAULT 0.0;")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE events ADD COLUMN motion_points_count INTEGER DEFAULT 0;")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("ALTER TABLE events ADD COLUMN metadata_json TEXT DEFAULT '{}';")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_location ON events(location_id);")
+        except sqlite3.OperationalError:
+            pass
+        conn.commit()
         conn.commit()
 
 
@@ -163,8 +190,9 @@ class EventDatabase:
             event_group_id, camera_id, start_time, end_time,
             object_type, confidence, score, status,
             starred, synced, user_triage, file_path, thumb_path,
-            dominant_color, zone_name
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            dominant_color, zone_name, location_id, duration_sec,
+            motion_points_count, metadata_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             event.event_group_id, event.camera_id, event.start_time, event.end_time,
@@ -172,7 +200,11 @@ class EventDatabase:
             event.starred, event.synced, getattr(event, "user_triage", "unreviewed"),
             event.file_path, event.thumb_path,
             getattr(event, "dominant_color", "unspecified"),
-            getattr(event, "zone_name", "general")
+            getattr(event, "zone_name", "general"),
+            getattr(event, "location_id", "loc_primary"),
+            getattr(event, "duration_sec", 0.0),
+            getattr(event, "motion_points_count", 0),
+            getattr(event, "metadata_json", "{}")
         )
         self.writer.queue.put((sql, params, callback))
 
@@ -184,6 +216,11 @@ class EventDatabase:
         """Updates user triage status ('confirmed_threat', 'false_positive', 'unreviewed')."""
         sql = "UPDATE events SET user_triage = ? WHERE event_group_id = ?"
         self.writer.queue.put((sql, (triage, event_group_id), None))
+
+    def update_event_star(self, event_group_id: str, starred: int = 1):
+        """Updates event starred status (0 or 1) to safeguard against reaper auto-deletion."""
+        sql = "UPDATE events SET starred = ? WHERE event_group_id = ?"
+        self.writer.queue.put((sql, (starred, event_group_id), None))
 
     def get_triage_statistics(self) -> Dict[str, Any]:
         """Returns aggregate metrics on owner triage decisions and empirical false alarm rate."""
@@ -319,6 +356,10 @@ class EventDatabase:
             d = dict(row)
             d.setdefault("dominant_color", "unspecified")
             d.setdefault("zone_name", "general")
+            d.setdefault("location_id", "loc_primary")
+            d.setdefault("duration_sec", 0.0)
+            d.setdefault("motion_points_count", 0)
+            d.setdefault("metadata_json", "{}")
             return EventRecord(**d)
         finally:
             conn.close()
@@ -332,15 +373,20 @@ class EventDatabase:
         zone: Optional[str] = None,
         object_type: Optional[str] = None,
         user_triage: Optional[str] = None,
+        location_id: Optional[str] = None,
         limit: int = 50
     ) -> List[EventRecord]:
-        """Queries events matching criteria including appearance attributes."""
+        """Queries events matching criteria including appearance attributes and location."""
         query = "SELECT * FROM events WHERE score >= ?"
         params: List[Any] = [min_score]
 
         if camera_id and camera_id.lower() != "all":
             query += " AND camera_id = ?"
             params.append(camera_id)
+
+        if location_id and location_id.lower() != "all":
+            query += " AND (location_id = ? OR location_id IS NULL OR location_id = 'loc_primary')"
+            params.append(location_id)
 
         if color and color.lower() != "all":
             query += " AND LOWER(dominant_color) = ?"
@@ -371,8 +417,130 @@ class EventDatabase:
                 d = dict(r)
                 d.setdefault("dominant_color", "unspecified")
                 d.setdefault("zone_name", "general")
+                d.setdefault("location_id", "loc_primary")
+                d.setdefault("duration_sec", 0.0)
+                d.setdefault("motion_points_count", 0)
+                d.setdefault("metadata_json", "{}")
                 results.append(EventRecord(**d))
             return results
+        finally:
+            conn.close()
+
+    def search_forensic_events(
+        self,
+        location_id: Optional[str] = None,
+        camera_id: Optional[str] = None,
+        object_type: Optional[str] = None,
+        color: Optional[str] = None,
+        zone: Optional[str] = None,
+        min_score: int = 0,
+        max_score: int = 100,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        free_text: Optional[str] = None,
+        user_triage: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> Dict[str, Any]:
+        """
+        Executes multi-dimensional forensic investigation search over historical event archive.
+        Supports compound filtering by location, camera, classification, date range, score, and free-text.
+        """
+        where_clauses = ["score >= ? AND score <= ?"]
+        params: List[Any] = [min_score, max_score]
+
+        if location_id and location_id.lower() != "all":
+            where_clauses.append("(location_id = ? OR location_id IS NULL OR location_id = 'loc_primary')")
+            params.append(location_id)
+
+        if camera_id and camera_id.lower() != "all":
+            where_clauses.append("camera_id = ?")
+            params.append(camera_id)
+
+        if object_type and object_type.lower() != "all":
+            where_clauses.append("LOWER(object_type) = ?")
+            params.append(object_type.lower())
+
+        if color and color.lower() != "all":
+            where_clauses.append("LOWER(dominant_color) = ?")
+            params.append(color.lower())
+
+        if zone and zone.lower() != "all":
+            where_clauses.append("LOWER(zone_name) = ?")
+            params.append(zone.lower())
+
+        if date_from:
+            where_clauses.append("start_time >= ?")
+            params.append(date_from)
+
+        if date_to:
+            where_clauses.append("start_time <= ?")
+            params.append(date_to)
+
+        if user_triage and user_triage.lower() != "all":
+            where_clauses.append("user_triage = ?")
+            params.append(user_triage)
+
+        if free_text and free_text.strip():
+            term = f"%{free_text.strip().lower()}%"
+            where_clauses.append("(LOWER(camera_id) LIKE ? OR LOWER(object_type) LIKE ? OR LOWER(zone_name) LIKE ? OR LOWER(metadata_json) LIKE ?)")
+            params.extend([term, term, term, term])
+
+        where_sql = " AND ".join(where_clauses)
+        count_sql = f"SELECT COUNT(*) FROM events WHERE {where_sql}"
+        data_sql = f"SELECT * FROM events WHERE {where_sql} ORDER BY start_time DESC LIMIT ? OFFSET ?"
+
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(count_sql, params)
+            total_matched = cursor.fetchone()[0]
+
+            data_params = list(params) + [limit, offset]
+            cursor.execute(data_sql, data_params)
+            rows = cursor.fetchall()
+            results = []
+            for r in rows:
+                d = dict(r)
+                d.setdefault("dominant_color", "unspecified")
+                d.setdefault("zone_name", "general")
+                d.setdefault("location_id", "loc_primary")
+                d.setdefault("duration_sec", 0.0)
+                d.setdefault("motion_points_count", 0)
+                d.setdefault("metadata_json", "{}")
+                results.append(EventRecord(**d))
+
+            return {
+                "status": "success",
+                "total_matched": total_matched,
+                "count": len(results),
+                "limit": limit,
+                "offset": offset,
+                "events": results
+            }
+        finally:
+            conn.close()
+
+    def purge_synthetic_events(self) -> int:
+        """Removes all synthetic / mock camera events and unlinks associated temporary files."""
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT file_path, thumb_path FROM events WHERE camera_id IN ('cam_corridor', 'cam_cash_counter', 'cam_shutter_night', 'cam_test_01', 'cam_test_02') OR file_path LIKE '%fake%' OR object_type = 'synthetic'"
+            )
+            rows = cursor.fetchall()
+            import os
+            for fp, tp in rows:
+                if fp and os.path.exists(fp):
+                    try: os.unlink(fp)
+                    except Exception: pass
+                if tp and os.path.exists(tp):
+                    try: os.unlink(tp)
+                    except Exception: pass
+            sql = "DELETE FROM events WHERE camera_id IN ('cam_corridor', 'cam_cash_counter', 'cam_shutter_night', 'cam_test_01', 'cam_test_02') OR file_path LIKE '%fake%' OR object_type = 'synthetic'"
+            self.writer.queue.put((sql, (), None))
+            return len(rows)
         finally:
             conn.close()
 

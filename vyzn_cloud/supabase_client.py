@@ -48,9 +48,70 @@ LOCAL_DEV_USERS = {
         "password_hash": "kirana123",
         "full_name": "Sharma Kirana Store Owner",
         "role": "shopkeeper",
-        "tenant_id": "tenant_delhi_001"
+        "tenant_id": "tenant_delhi_001",
+        "phone": None,
+        "phone_verified": False
+    },
+    "owner@vyzn.ai": {
+        "user_id": "usr_owner_001",
+        "email": "owner@vyzn.ai",
+        "password_hash": "owner123",
+        "full_name": "Premises Owner",
+        "role": "resident",
+        "tenant_id": "tenant_owner_001",
+        "phone": "+91 98765 43210",
+        "phone_verified": True
     }
 }
+
+_PHONE_OTP_STORE: Dict[str, Dict[str, Any]] = {}
+
+
+def send_phone_otp(email: str, phone_number: str) -> Dict[str, Any]:
+    """Generates and stores a 6-digit verification OTP for phone authentication."""
+    phone_clean = phone_number.strip().replace(" ", "").replace("-", "")
+    import random
+    otp = f"{random.randint(100000, 999999)}"
+    _PHONE_OTP_STORE[email] = {
+        "otp": otp,
+        "phone": phone_clean,
+        "expires_at": time.time() + 300
+    }
+    logger.info(f"[AUTH] Generated phone verification OTP {otp} for {email} ({phone_clean})")
+    return {
+        "status": "otp_sent",
+        "email": email,
+        "phone": phone_clean,
+        "dev_otp": otp,
+        "expires_in_sec": 300
+    }
+
+
+def verify_phone_otp(email: str, phone_number: str, otp: str) -> Dict[str, Any]:
+    """Validates submitted OTP and sets phone_verified=True on user account."""
+    record = _PHONE_OTP_STORE.get(email)
+    if not record:
+        raise HTTPException(status_code=400, detail="No OTP requested for this account or it has expired.")
+
+    if time.time() > record["expires_at"]:
+        _PHONE_OTP_STORE.pop(email, None)
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new code.")
+
+    if record["otp"] != otp.strip():
+        raise HTTPException(status_code=400, detail="Invalid OTP code entered.")
+
+    phone_clean = record["phone"]
+    if email in LOCAL_DEV_USERS:
+        LOCAL_DEV_USERS[email]["phone"] = phone_clean
+        LOCAL_DEV_USERS[email]["phone_verified"] = True
+
+    _PHONE_OTP_STORE.pop(email, None)
+    return {
+        "status": "verified",
+        "email": email,
+        "phone": phone_clean,
+        "phone_verified": True
+    }
 
 
 def is_supabase_configured() -> bool:
@@ -72,7 +133,9 @@ def generate_dev_token(user_info: Dict[str, Any], expires_in_sec: int = 86400) -
             "tenant_id": user_info.get("tenant_id", "tenant_default")
         },
         "user_metadata": {
-            "full_name": user_info.get("full_name", user_info["email"])
+            "full_name": user_info.get("full_name", user_info["email"]),
+            "phone": user_info.get("phone"),
+            "phone_verified": user_info.get("phone_verified", False)
         },
         "iat": now,
         "exp": now + expires_in_sec,
@@ -117,9 +180,11 @@ def verify_supabase_jwt(
         return {
             "user_id": payload.get("sub"),
             "email": payload.get("email"),
-            "role": payload.get("app_metadata", {}).get("role", "shopkeeper"),
+            "role": payload.get("app_metadata", {}).get("role", "resident"),
             "tenant_id": payload.get("app_metadata", {}).get("tenant_id"),
-            "full_name": payload.get("user_metadata", {}).get("full_name")
+            "full_name": payload.get("user_metadata", {}).get("full_name"),
+            "phone": payload.get("user_metadata", {}).get("phone"),
+            "phone_verified": payload.get("user_metadata", {}).get("phone_verified", False)
         }
     except jwt.ExpiredSignatureError:
         logger.warning("Supabase JWT expired")

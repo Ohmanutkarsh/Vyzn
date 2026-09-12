@@ -32,7 +32,10 @@ from tests.test_pipeline_smoke import test_pipeline_synthetic_smoke
 from tests.test_api import test_api_endpoints_and_dashboard_serving
 from tests.test_whatsapp import (
     test_whatsapp_simulation_delivery,
-    test_whatsapp_interactive_payload_structure
+    test_whatsapp_interactive_payload_structure,
+    test_whatsapp_utility_template_structure_out_of_session,
+    test_whatsapp_session_tracker_and_in_session_interactive,
+    test_mobile_viewer_token_generation_and_validation
 )
 from tests.test_cloud_sync import test_cloud_sync_worker_marks_synced
 from tests.test_zones_api import test_zones_and_snapshot_api
@@ -106,7 +109,19 @@ from tests.test_appearance_and_forensics import (
     test_appearance_attribute_extraction_on_crops,
     test_database_attribute_query_filtering,
     test_forensic_pack_generation_and_manifest,
-    test_bandwidth_settings_api
+    test_bandwidth_settings_api,
+    test_forensic_search_endpoint
+)
+from tests.test_telegram_live_engine import (
+    test_telegram_alert_payload_and_simulation,
+    test_telegram_worker_callbacks,
+    test_telegram_api_settings_and_test_ping,
+    test_cloud_fleet_reverse_proxy
+)
+from tests.test_onboarding_and_stolen_flow import (
+    test_account_lockout_after_five_failed_attempts,
+    test_interruption_proof_onboarding_and_go_live_gate,
+    test_stolen_device_flow_and_replacement_wizard
 )
 
 
@@ -127,6 +142,9 @@ def run_all():
         ("test_api_endpoints_and_dashboard_serving", lambda: with_tmp_path(test_api_endpoints_and_dashboard_serving)),
         ("test_whatsapp_simulation_delivery", lambda: test_whatsapp_simulation_delivery()),
         ("test_whatsapp_interactive_payload_structure", lambda: test_whatsapp_interactive_payload_structure()),
+        ("test_whatsapp_utility_template_structure_out_of_session", lambda: test_whatsapp_utility_template_structure_out_of_session()),
+        ("test_whatsapp_session_tracker_and_in_session_interactive", lambda: test_whatsapp_session_tracker_and_in_session_interactive()),
+        ("test_mobile_viewer_token_generation_and_validation", lambda: test_mobile_viewer_token_generation_and_validation()),
         ("test_cloud_sync_worker_marks_synced", lambda: with_tmp_path(test_cloud_sync_worker_marks_synced)),
         ("test_zones_and_snapshot_api", lambda: with_tmp_path(test_zones_and_snapshot_api)),
         ("test_dead_man_watchdog_detects_silence", lambda: test_dead_man_watchdog_detects_silence()),
@@ -176,6 +194,14 @@ def run_all():
         ("test_database_attribute_query_filtering", lambda: test_database_attribute_query_filtering()),
         ("test_forensic_pack_generation_and_manifest", lambda: test_forensic_pack_generation_and_manifest()),
         ("test_bandwidth_settings_api", lambda: test_bandwidth_settings_api()),
+        ("test_telegram_alert_payload_and_simulation", lambda: test_telegram_alert_payload_and_simulation()),
+        ("test_telegram_worker_callbacks", lambda: with_tmp_path(test_telegram_worker_callbacks)),
+        ("test_telegram_api_settings_and_test_ping", lambda: with_tmp_path(test_telegram_api_settings_and_test_ping)),
+        ("test_cloud_fleet_reverse_proxy", lambda: test_cloud_fleet_reverse_proxy()),
+        ("test_account_lockout_after_five_failed_attempts", lambda: test_account_lockout_after_five_failed_attempts()),
+        ("test_interruption_proof_onboarding_and_go_live_gate", lambda: test_interruption_proof_onboarding_and_go_live_gate()),
+        ("test_stolen_device_flow_and_replacement_wizard", lambda: test_stolen_device_flow_and_replacement_wizard()),
+        ("test_forensic_search_endpoint", lambda: test_forensic_search_endpoint()),
     ]
 
 

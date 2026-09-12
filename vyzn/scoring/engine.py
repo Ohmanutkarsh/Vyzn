@@ -53,9 +53,11 @@ def check_box_intersects_zone(box: List[float], zone: ZonePolygon) -> bool:
 def is_time_after_hours(dt: datetime, schedule: BusinessHours) -> bool:
     """
     Determines if given datetime is outside the configured business hours window.
+    If schedule is disabled, evaluates natural daytime vs night cycle (night: 22:00 to 06:00).
     """
     if not schedule.enabled:
-        return True  # If no business hours configured, treat all hours as after-hours
+        hour = dt.hour
+        return hour >= 22 or hour < 6
 
     # Convert to local hour / minute
     current_minutes = dt.hour * 60 + dt.minute
@@ -73,7 +75,11 @@ def is_time_after_hours(dt: datetime, schedule: BusinessHours) -> bool:
 
 class ScoringEngine:
     """
-    Calculates normalized [0, 100] event scores and evaluates alert dispatch conditions.
+    4-Tier Enterprise Video Surveillance Risk & Severity Scoring Engine:
+    Tier 1: Normal Activity (0 - 35 pts) -> Daytime public motion, transit. Zero alerts.
+    Tier 2: Elevated Activity (36 - 65 pts) -> Daytime dwell, boundary proximity. Audit indexed.
+    Tier 3: Suspicious Activity (66 - 84 pts) -> Prolonged loitering, soft perimeter breach. Amber UI badge.
+    Tier 4: Critical Threat (85 - 100 pts) -> Hard Geofence violation, after-hours intrusion. Automatic Telegram alert.
     """
 
     CLASS_WEIGHTS = {
@@ -83,8 +89,20 @@ class ScoringEngine:
         "unclassified": 0
     }
 
-    def __init__(self, alert_threshold: int = 70):
+    def __init__(self, alert_threshold: int = 85):
         self.alert_threshold = alert_threshold
+
+    @staticmethod
+    def get_severity_tier(score: int) -> Dict[str, str]:
+        """Returns industry-standard 4-tier risk classification."""
+        if score >= 85:
+            return {"tier": "critical", "label": "Critical Threat", "color": "#ef4444", "badge_class": "badge-critical"}
+        elif score >= 66:
+            return {"tier": "suspicious", "label": "Suspicious Activity", "color": "#f59e0b", "badge_class": "badge-suspicious"}
+        elif score >= 36:
+            return {"tier": "elevated", "label": "Elevated Activity", "color": "#38bdf8", "badge_class": "badge-elevated"}
+        else:
+            return {"tier": "normal", "label": "Normal Activity", "color": "#94a3b8", "badge_class": "badge-normal"}
 
     def evaluate(
         self,
@@ -117,32 +135,34 @@ class ScoringEngine:
 
         subtotal_123 = l1 + l2 + l3
 
-        # Layer 4: Nuisance Penalty vs Inviolable Threat Floor + Adaptive Camera Bias
+        # Layer 4: Nuisance Penalty vs Threat Floor + Restricted Zone Bonus
         if is_valid_detection:
-            # Confirmed human/vehicle threat in restricted zone or after hours
-            # MUST NEVER be suppressed below the dispatch threshold regardless of camera dampening.
-            if candidate.object_type in ["person", "vehicle"] and gate_l0_passed:
-                threat_floor = max(50, self.alert_threshold)
-            else:
-                threat_floor = 30  # Non-priority floor (animals, daytime public) maintains >=20pt buffer below threshold
+            zone_bonus = 15 if candidate.is_in_restricted_zone else 0
 
-            subtotal_1234 = max(threat_floor, subtotal_123)
+            # Verified human/vehicle intruder after hours or in restricted zone
+            if candidate.object_type in ["person", "vehicle"] and gate_l0_passed:
+                threat_floor = max(self.alert_threshold, 70)
+            else:
+                threat_floor = 30  # Daytime public transit floor maintains buffer below alert threshold
+
+            subtotal_1234 = max(threat_floor, subtotal_123 + zone_bonus)
             l4_adjustment = subtotal_1234 - subtotal_123
         else:
             threat_floor = 0
-            # Unclassified motion penalty plus camera-specific adaptive bias (<= 0)
             effective_penalty = -35 + min(0, camera_bias)
             subtotal_1234 = max(0, subtotal_123 + effective_penalty)
             l4_adjustment = effective_penalty
 
-        # Layer 5: Persistence Bonus (0-15 pts, +3 pts per tracked second)
+        # Layer 5: Loitering / Persistence Bonus (0-15 pts, +3 pts per tracked second)
         l5 = min(15, round(candidate.track_duration_sec * 3))
 
         # Final clipped score [0, 100]
         final_score = min(100, max(0, subtotal_1234 + l5))
 
-        # Alert criteria
+        # Alert criteria: Requires qualifying final score AND Layer 0 gate passage
         should_alert = (final_score >= self.alert_threshold) and gate_l0_passed
+
+        tier_info = self.get_severity_tier(final_score)
 
         breakdown = {
             "l1_motion": l1,
@@ -156,7 +176,9 @@ class ScoringEngine:
             "final_score": final_score,
             "gate_l0_passed": gate_l0_passed,
             "should_alert": should_alert,
-            "is_valid_detection": is_valid_detection
+            "is_valid_detection": is_valid_detection,
+            "severity_tier": tier_info["tier"],
+            "severity_label": tier_info["label"]
         }
 
         return final_score, should_alert, breakdown

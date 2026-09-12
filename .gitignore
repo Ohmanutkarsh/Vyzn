@@ -1,5 +1,7 @@
 __pycache__/
 *.py[cod]
+*.pyc
+*.pyo
 *.class
 data/
 *.db
@@ -10,3 +12,6 @@ data/
 env/
 venv/
 *.last_known_good.yaml
+node_modules/
+.vercel/
+*.log

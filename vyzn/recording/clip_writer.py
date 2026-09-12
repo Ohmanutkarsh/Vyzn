@@ -36,12 +36,12 @@ class ClipWriter:
         self,
         camera_id: str,
         event_group_id: str,
-        frames: List[np.ndarray],
+        frames: List[np.ndarray | bytes],
         fps: float = 4.0,
         thumb_frame: Optional[np.ndarray] = None
     ) -> tuple[str, str]:
         """
-        Encodes a list of collected frames into a fragmented MP4 file using FFmpeg pipe.
+        Encodes a list of collected frames (numpy arrays or JPEG byte buffers) into an MP4 file.
         Returns (clip_path, thumb_path).
         """
         event_dir = self.get_event_dir(camera_id, event_group_id)
@@ -52,11 +52,25 @@ class ClipWriter:
             logger.warning(f"No frames supplied for event {event_group_id}")
             return str(clip_path), str(thumb_path)
 
+        # Normalize frames: decode JPEG bytes to BGR arrays if needed
+        decoded_frames: List[np.ndarray] = []
+        for f in frames:
+            if isinstance(f, bytes):
+                dec = cv2.imdecode(np.frombuffer(f, np.uint8), cv2.IMREAD_COLOR)
+                if dec is not None:
+                    decoded_frames.append(dec)
+            elif isinstance(f, np.ndarray):
+                decoded_frames.append(f)
+
+        if not decoded_frames:
+            logger.warning(f"No valid frames decoded for event {event_group_id}")
+            return str(clip_path), str(thumb_path)
+
         # Save thumbnail
-        best_thumb = thumb_frame if thumb_frame is not None else frames[len(frames) // 2]
+        best_thumb = thumb_frame if thumb_frame is not None else decoded_frames[len(decoded_frames) // 2]
         cv2.imwrite(str(thumb_path), best_thumb, [cv2.IMWRITE_JPEG_QUALITY, 85])
 
-        h, w = frames[0].shape[:2]
+        h, w = decoded_frames[0].shape[:2]
         ffmpeg_exe = FFmpegUtil.get_executable()
 
         # Build FFmpeg command with fragmented MP4 flags
@@ -73,7 +87,7 @@ class ClipWriter:
             "-crf", "26",
             "-pix_fmt", "yuv420p",
             "-f", "mp4",
-            "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+            "-movflags", "+faststart",
             str(clip_path)
         ]
 
@@ -84,7 +98,7 @@ class ClipWriter:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            for f in frames:
+            for f in decoded_frames:
                 # Ensure frame matches dimensions
                 if f.shape[:2] != (h, w):
                     f = cv2.resize(f, (w, h))
@@ -92,11 +106,11 @@ class ClipWriter:
 
             proc.stdin.close()
             proc.wait(timeout=10.0)
-            logger.info(f"Recorded fMP4 event clip: {clip_path} ({len(frames)} frames)")
+            logger.info(f"Recorded MP4 event clip: {clip_path} ({len(decoded_frames)} frames)")
         except Exception as e:
             logger.error(f"FFmpeg encoding error for event {event_group_id}: {e}")
             # Fallback to cv2.VideoWriter if subprocess fails
-            self._fallback_cv2_write(clip_path, frames, fps, (w, h))
+            self._fallback_cv2_write(clip_path, decoded_frames, fps, (w, h))
 
         return str(clip_path), str(thumb_path)
 

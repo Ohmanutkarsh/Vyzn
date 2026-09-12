@@ -25,6 +25,10 @@ class EventRecord:
     thumb_path: str = ""                # Path to .jpg
     dominant_color: str = "unspecified" # 'red' | 'blue' | 'black' | 'white' | etc.
     zone_name: str = "general"          # Intersected zone or 'general'
+    location_id: str = "loc_primary"    # Associated property location
+    duration_sec: float = 0.0           # Event duration in seconds
+    motion_points_count: int = 0        # Count of distinct motion occurrences
+    metadata_json: str = "{}"           # Additional forensic and detection metadata
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -43,6 +47,10 @@ class EventRecord:
             "thumb_path": self.thumb_path,
             "dominant_color": self.dominant_color,
             "zone_name": self.zone_name,
+            "location_id": self.location_id,
+            "duration_sec": self.duration_sec,
+            "motion_points_count": self.motion_points_count,
+            "metadata_json": self.metadata_json,
         }
 
 

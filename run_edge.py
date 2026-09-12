@@ -28,14 +28,30 @@ logger = logging.getLogger("vyzn.main")
 
 def build_synthetic_settings(num_cameras: int, data_dir: Path, demo_mode: bool = False) -> EdgeSettings:
     settings = EdgeSettings(
-        site_id="site_demo_hub" if demo_mode else "site_nagpur_01",
-        site_name="Academic Project Evaluation Demo" if demo_mode else "Nagpur Commercial Hub",
+        site_id="site_demo_hub" if demo_mode else "site_primary_01",
+        site_name="My Primary Location",
         data_dir=data_dir,
         db_path=data_dir / "index.db",
         alert_score_threshold=70,
-        raw_retention_hours=0.02 if demo_mode else 72  # ~1 minute in demo mode
+        raw_retention_hours=0.02 if demo_mode else 72
     )
 
+    # 1. Load persistent user cameras if configured
+    cfg_file = Path("./config/cameras.json")
+    if cfg_file.exists():
+        try:
+            import json
+            with open(cfg_file, "r") as f:
+                saved = json.load(f)
+                if saved and isinstance(saved, list) and len(saved) > 0:
+                    cameras = [CameraConfig(**item) for item in saved]
+                    logger.info(f"Loaded {len(cameras)} persistent cameras from config/cameras.json")
+                    settings.cameras = cameras
+                    return settings
+        except Exception as e:
+            logger.warning(f"Error reading config/cameras.json: {e}")
+
+    # 2. Check for physical USB or integrated webcam
     import cv2, os
     webcam_available = False
     try:
@@ -49,52 +65,23 @@ def build_synthetic_settings(num_cameras: int, data_dir: Path, demo_mode: bool =
         webcam_available = False
 
     cameras = []
-    # Camera 1: Physical Camera if available, otherwise synthetic
     if webcam_available:
         cameras.append(CameraConfig(
-            camera_id="cam_corridor",
-            name="Main Entrance (Live Webcam 0)",
+            camera_id="cam_webcam_0",
+            name="Laptop / USB Camera (Device 0)",
             rtsp_url="0",
             target_fps=4.0,
             is_night_ir=False,
             business_hours=BusinessHours(enabled=False)
         ))
         logger.info("[LIVE] Auto-detected physical Webcam 0. Configured as Camera 1 live feed.")
-    else:
+    elif num_cameras > 0:
         cameras.append(CameraConfig(
-            camera_id="cam_corridor",
-            name="Main Store Corridor",
+            camera_id="cam_main",
+            name="Primary Entrance Camera",
             rtsp_url="sim://corridor",
             target_fps=4.0,
             is_night_ir=False,
-            business_hours=BusinessHours(enabled=False)
-        ))
-
-    # Camera 2: Cash Counter with Restricted Polygon Zone
-    if num_cameras >= 2:
-        cameras.append(CameraConfig(
-            camera_id="cam_cash_counter",
-            name="Cash Drawer Zone",
-            rtsp_url="sim://cash_counter",
-            target_fps=4.0,
-            is_night_ir=False,
-            business_hours=BusinessHours(enabled=True, start_hour=9, end_hour=21),
-            restricted_zones=[
-                ZonePolygon(
-                    name="cash_drawer_box",
-                    points=[[0.6, 0.4], [0.85, 0.4], [0.85, 0.7], [0.6, 0.7]]
-                )
-            ]
-        ))
-
-    # Camera 3: Night Shutter (IR Monochrome)
-    if num_cameras >= 3:
-        cameras.append(CameraConfig(
-            camera_id="cam_shutter_night",
-            name="Rear Shutter (Night IR)",
-            rtsp_url="sim://shutter_night",
-            target_fps=4.0,
-            is_night_ir=True,
             business_hours=BusinessHours(enabled=False)
         ))
 

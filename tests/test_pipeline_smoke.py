@@ -19,7 +19,9 @@ def test_pipeline_synthetic_smoke(tmp_path: Path):
         data_dir=data_dir,
         db_path=data_dir / "index.db",
         alert_score_threshold=65,
-        telemetry_interval_sec=5
+        telemetry_interval_sec=5,
+        event_inactivity_gap_sec=2.0,
+        post_roll_sec=1.0
     )
 
     settings.cameras = [
@@ -46,6 +48,7 @@ def test_pipeline_synthetic_smoke(tmp_path: Path):
         pipeline.start()
         # Run pipeline for 7 seconds to allow synthetic motion and events to process
         time.sleep(7.0)
+        pipeline.flush_active_events()
 
         # Verify SQLite index has recorded events
         events = []

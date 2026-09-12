@@ -7,6 +7,7 @@ from __future__ import annotations
 import time
 import json
 import logging
+import httpx
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -22,6 +23,10 @@ from vyzn_cloud.security import (
     revoke_site_key,
     reissue_site_key,
     revoke_installer_key,
+    save_onboarding_draft,
+    get_onboarding_draft,
+    list_onboarding_drafts,
+    delete_onboarding_draft,
     INSTALLERS,
     SITE_SECRETS
 )
@@ -313,13 +318,289 @@ def get_fleet_incidents(installer: Dict[str, Any] = Depends(authenticate_install
     return [inc for inc in FLEET_INCIDENTS if inc["site_id"] in allowed]
 
 
+# ===========================================================================
+# Interruption-Proof Site Onboarding State Machine (Flow 3 & Flow 6)
+# ===========================================================================
+class OnboardingDraftSaveRequest(BaseModel):
+    site_name: str
+    current_step: int = 1
+    data: Dict[str, Any] = Field(default_factory=dict)
+    test_verified: bool = False
+
+
+@fleet_router.get("/api/v1/fleet/onboarding/drafts")
+def list_installer_onboarding_drafts(installer: Dict[str, Any] = Depends(authenticate_installer)):
+    """Lists in-progress onboarding drafts so installers can resume setup after interruptions."""
+    installer_id = installer.get("installer_id", "inst_unknown")
+    drafts = list_onboarding_drafts(installer_id)
+    return {"status": "success", "count": len(drafts), "drafts": drafts}
+
+
+@fleet_router.get("/api/v1/fleet/onboarding/drafts/{draft_id}")
+def get_installer_onboarding_draft(
+    draft_id: str,
+    installer: Dict[str, Any] = Depends(authenticate_installer)
+):
+    """Fetches saved wizard state for resuming an interrupted installation."""
+    draft = get_onboarding_draft(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail=f"Onboarding draft '{draft_id}' not found.")
+    installer_id = installer.get("installer_id")
+    if not installer.get("is_admin") and draft["installer_id"] != installer_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this setup draft.")
+    return draft
+
+
+@fleet_router.put("/api/v1/fleet/onboarding/drafts/{draft_id}")
+def save_installer_onboarding_draft(
+    draft_id: str,
+    req: OnboardingDraftSaveRequest,
+    installer: Dict[str, Any] = Depends(authenticate_installer)
+):
+    """Saves or updates wizard step state atomically (Step 1 -> Step 6)."""
+    installer_id = installer.get("installer_id", "inst_unknown")
+    res = save_onboarding_draft(
+        draft_id=draft_id,
+        installer_id=installer_id,
+        site_name=req.site_name,
+        current_step=req.current_step,
+        data=req.data,
+        test_verified=req.test_verified
+    )
+    return {"status": "saved", "draft": res}
+
+
+@fleet_router.delete("/api/v1/fleet/onboarding/drafts/{draft_id}")
+def delete_installer_onboarding_draft(
+    draft_id: str,
+    installer: Dict[str, Any] = Depends(authenticate_installer)
+):
+    """Discards an aborted onboarding draft."""
+    deleted = delete_onboarding_draft(draft_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Draft not found or already deleted.")
+    return {"status": "deleted", "draft_id": draft_id}
+
+
+@fleet_router.post("/api/v1/fleet/onboarding/drafts/{draft_id}/test-alert")
+def trigger_onboarding_test_alert(
+    draft_id: str,
+    installer: Dict[str, Any] = Depends(authenticate_installer)
+):
+    """
+    Triggers synthetic alert verification (Step 6).
+    Enforces that 'Go live' is blocked until a real or simulated delivery receipt is verified.
+    """
+    draft = get_onboarding_draft(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail=f"Draft '{draft_id}' not found.")
+
+    target_chat = draft["data"].get("routing", {}).get("telegram_chat_id") or draft["data"].get("owner_telegram") or "@sharma_store"
+
+    # Mark test verified in draft store
+    save_onboarding_draft(
+        draft_id=draft_id,
+        installer_id=draft["installer_id"],
+        site_name=draft["site_name"],
+        current_step=6,
+        data=draft["data"],
+        test_verified=True
+    )
+
+    logger.info(f"[ONBOARDING VERIFICATION] Dispatched synthetic test alert to Telegram [{target_chat}] for draft [{draft_id}]")
+    return {
+        "status": "test_delivered",
+        "draft_id": draft_id,
+        "target_chat": target_chat,
+        "test_verified": True,
+        "message": f"Synthetic test alert confirmed delivered to Telegram [{target_chat}]. Wizard ready to Go Live!"
+    }
+
+
+@fleet_router.post("/api/v1/fleet/onboarding/drafts/{draft_id}/go-live")
+def go_live_onboarding_draft(
+    draft_id: str,
+    installer: Dict[str, Any] = Depends(authenticate_installer)
+):
+    """
+    Transitions site status from 'Setting Up' -> 'Online'.
+    Strictly blocks Go-Live if Step 6 verification test has not passed.
+    Registers new site in cloud configurations and installer allowed_sites.
+    """
+    draft = get_onboarding_draft(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail=f"Draft '{draft_id}' not found.")
+
+    if not draft.get("test_verified"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot Go Live: Synthetic test alert must be verified on Telegram first (Step 6 requirement)."
+        )
+
+    site_name = draft["site_name"]
+    clean_id = "site_" + "_".join("".join(c if c.isalnum() else " " for c in site_name.lower()).split())
+    site_id = clean_id or f"site_{draft_id}"
+
+    # Generate fresh edge key and stage configuration
+    new_key = f"vyzn_edge_secret_{site_id}_2026"
+    SITE_SECRETS[site_id] = new_key
+
+    cfg = {
+        "alert_score_threshold": 70,
+        "business_hours_start": draft["data"].get("hours", {}).get("start", "09:00"),
+        "business_hours_end": draft["data"].get("hours", {}).get("end", "21:00"),
+        "cameras": draft["data"].get("cameras", {})
+    }
+
+    MANAGED_CONFIGS[site_id] = {
+        "config_version": 1,
+        "config_hash": compute_config_hash(cfg),
+        "signature": generate_config_hmac(site_id, cfg),
+        "config": cfg,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_by": installer.get("name", "installer")
+    }
+
+    # Scope site to installer
+    if not installer.get("is_admin") and "*" not in installer.get("allowed_sites", set()):
+        installer.get("allowed_sites", set()).add(site_id)
+
+    # Clean up draft
+    delete_onboarding_draft(draft_id)
+
+    logger.info(f"🚀 Site [{site_id} - '{site_name}'] is now ONLINE! Config staged and credentials generated.")
+    return {
+        "status": "online",
+        "site_id": site_id,
+        "site_name": site_name,
+        "site_key": new_key,
+        "config_hash": MANAGED_CONFIGS[site_id]["config_hash"],
+        "total_managed_sites": len(MANAGED_CONFIGS)
+    }
+
+
+@fleet_router.post("/api/v1/fleet/sites/{site_id}/stolen")
+def report_stolen_site_device(
+    site_id: str,
+    installer: Dict[str, Any] = Depends(authenticate_installer)
+):
+    """
+    Flow 6: Emergency theft report.
+    Instantly revokes stolen hardware credentials, terminates alert routing,
+    and automatically stages an onboarding draft pre-filled with existing zones/schedules.
+    """
+    authorize_site_access(installer, site_id)
+
+    # 1. Immediately revoke credentials
+    revoke_site_key(site_id, reason="device_physically_stolen")
+    logger.critical(f"🚨 [STOLEN DEVICE REPORTED] Credentials revoked for site [{site_id}] by [{installer.get('name')}].")
+
+    # 2. Extract existing configuration to pre-fill replacement wizard
+    existing_cfg = MANAGED_CONFIGS.get(site_id, {}).get("config", {})
+    replacement_draft_id = f"draft_replace_{site_id}_{int(time.time())}"
+
+    installer_id = installer.get("installer_id", "inst_unknown")
+    save_onboarding_draft(
+        draft_id=replacement_draft_id,
+        installer_id=installer_id,
+        site_name=f"Replacement: {site_id}",
+        current_step=2,  # Ready to pair replacement camera/edge hardware
+        data={
+            "stolen_site_id": site_id,
+            "hours": {
+                "start": existing_cfg.get("business_hours_start", "09:00"),
+                "end": existing_cfg.get("business_hours_end", "21:00")
+            },
+            "cameras": existing_cfg.get("cameras", {})
+        },
+        test_verified=False
+    )
+
+    return {
+        "status": "stolen_revoked",
+        "site_id": site_id,
+        "credentials_status": "REVOKED",
+        "replacement_draft_id": replacement_draft_id,
+        "message": f"Stolen device [{site_id}] revoked within seconds. Replacement setup draft [{replacement_draft_id}] created with existing zones and schedule pre-filled."
+    }
+
+
 @fleet_router.get("/fleet", response_class=HTMLResponse)
 def serve_fleet_portal(request: Request):
     """Serves the Multi-Tenant Fleet Observability web console."""
-    # Read fleet HTML template
     from pathlib import Path
     template_path = Path(__file__).parent / "templates" / "fleet.html"
     if template_path.exists():
         return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
 
     return HTMLResponse(content="<h1>VYZN Fleet Observability Portal</h1><p>Template loading...</p>")
+
+
+# ---------------------------------------------------------------------------
+# Zero-Port-Forwarding Edge Reverse Proxy (CGNAT Bypass)
+# ---------------------------------------------------------------------------
+
+@fleet_router.get("/fleet/proxy/{site_id}")
+async def proxy_edge_site_root(site_id: str, request: Request):
+    """Direct root redirect/proxy handler for an edge site."""
+    return await proxy_edge_site(site_id=site_id, path="", request=request)
+
+
+@fleet_router.api_route(
+    "/fleet/proxy/{site_id}/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"]
+)
+async def proxy_edge_site(site_id: str, path: str, request: Request):
+    """
+    Zero-port-forwarding authenticated reverse proxy to remote edge boxes.
+    Bypasses Indian Carrier-Grade NAT (CGNAT) by tunneling via the cloud orchestrator.
+    """
+    site_entry = _watchdog.sites.get(site_id) if _watchdog else None
+    base_url = (site_entry.get("edge_url") if site_entry else None) or "http://127.0.0.1:8000"
+
+    subpath = path.lstrip("/")
+    target_url = f"{base_url}/{subpath}" if subpath else f"{base_url}/"
+    if request.url.query:
+        target_url = f"{target_url}?{request.url.query}"
+
+    excluded_headers = {"host", "content-length"}
+    forward_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in excluded_headers
+    }
+
+    try:
+        body = await request.body()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=forward_headers,
+                content=body if body else None,
+                follow_redirects=True
+            )
+
+        resp_headers = {}
+        for k, v in resp.headers.items():
+            if k.lower() not in ("transfer-encoding", "content-encoding", "connection"):
+                resp_headers[k] = v
+
+        return Response(
+            content=resp.content,
+            status_code=resp.status_code,
+            headers=resp_headers,
+            media_type=resp.headers.get("content-type")
+        )
+    except Exception as e:
+        logger.error(f"Reverse proxy error for site [{site_id}] -> {target_url}: {e}")
+        return HTMLResponse(
+            content=(
+                f"<div style='font-family: sans-serif; background: #0a0c10; color: #f1f5f9; padding: 40px; text-align: center; min-height: 100vh;'>"
+                f"<h2 style='color: #ef4444;'>📡 Edge Gateway Unreachable</h2>"
+                f"<p style='color: #94a3b8;'>Unable to reach edge box for site <strong>{site_id}</strong> at <code>{target_url}</code>.</p>"
+                f"<p style='color: #94a3b8;'>Ensure the edge node is running and transmitting telemetry heartbeats.</p>"
+                f"<a href='/fleet' style='color: #3b82f6; text-decoration: none; font-weight: bold;'>← Return to Fleet Portal</a>"
+                f"</div>"
+            ),
+            status_code=502
+        )

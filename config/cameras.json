@@ -1,0 +1,25 @@
+[
+  {
+    "camera_id": "cam_webcam_0",
+    "name": "Laptop Integrated Camera",
+    "rtsp_url": "0",
+    "enabled": true,
+    "location_id": "loc_primary",
+    "target_fps": 4.0,
+    "capture_fps": 15.0,
+    "ai_inference_fps": 4.0,
+    "downscale_width": 640,
+    "downscale_height": 360,
+    "is_night_ir": false,
+    "owner_email": "tapise.utkarsh@gmail.com",
+    "business_hours": {
+      "enabled": true,
+      "start_hour": 9,
+      "start_minute": 0,
+      "end_hour": 21,
+      "end_minute": 0
+    },
+    "restricted_zones": [],
+    "privacy_zones": []
+  }
+]
