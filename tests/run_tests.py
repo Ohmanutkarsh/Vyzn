@@ -105,6 +105,7 @@ from tests.test_phone_otp_and_supabase import (
     test_phone_verification_start_and_verify,
     test_supabase_status_endpoint
 )
+from tests.test_isolation_and_security import test_multi_tenant_isolation_and_security_gate
 
 
 def run_all():
@@ -171,6 +172,7 @@ def run_all():
         ("test_email_login_and_otp_dispatch", lambda: with_tmp_path(test_email_login_and_otp_dispatch)),
         ("test_phone_verification_start_and_verify", lambda: with_tmp_path(test_phone_verification_start_and_verify)),
         ("test_supabase_status_endpoint", lambda: with_tmp_path(test_supabase_status_endpoint)),
+        ("test_multi_tenant_isolation_and_security_gate", lambda: test_multi_tenant_isolation_and_security_gate()),
     ]
 
     passed = 0

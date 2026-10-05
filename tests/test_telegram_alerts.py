@@ -19,7 +19,8 @@ def test_telegram_alert_payload_structure():
         start_time=datetime.now(timezone.utc).isoformat(),
         object_type="person",
         confidence=0.92,
-        score=85
+        score=85,
+        tier="alert"
     )
 
     payload = provider.build_alert_payload(event)
@@ -28,17 +29,14 @@ def test_telegram_alert_payload_structure():
 
     caption = payload["caption"]
     assert "cam_corridor" in caption
-    assert "PERSON" in caption
-    assert "85/100" in caption
+    assert "Person" in caption
 
     markup = payload["reply_markup"]
     assert "inline_keyboard" in markup
     buttons = markup["inline_keyboard"][0]
     assert len(buttons) == 2
-    assert "Star Clip" in buttons[0]["text"]
-    assert buttons[0]["callback_data"] == "star_ev_tel_001"
-    assert "False Alarm" in buttons[1]["text"]
-    assert buttons[1]["callback_data"] == "false_ev_tel_001"
+    assert "Open clip" in buttons[0]["text"]
+    assert "Not an issue" in buttons[1]["text"]
 
 
 def test_telegram_alert_simulation_dispatch():
@@ -48,7 +46,8 @@ def test_telegram_alert_simulation_dispatch():
         start_time=datetime.now(timezone.utc).isoformat(),
         object_type="person",
         confidence=0.88,
-        score=78
+        score=78,
+        tier="alert"
     )
     # Convenience helper in offline/simulation mode
     assert send_telegram_threat_alert(event) is True

@@ -4,13 +4,14 @@ Eliminates database lock contention across concurrent capture and sync workers.
 """
 
 from __future__ import annotations
+import os
 import sqlite3
 import time
 import threading
 import queue
 import logging
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any, Callable, Union, Tuple
 from datetime import datetime, timezone
 from vyzn.core.events import EventRecord
 
@@ -242,12 +243,37 @@ class DatabaseWriterWorker(threading.Thread):
             pass
 
         try:
+            conn.execute("ALTER TABLE events ADD COLUMN owner_email TEXT;")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
             conn.execute("ALTER TABLE telegram_links ADD COLUMN chat_id TEXT;")
         except sqlite3.OperationalError:
             pass
 
         try:
             conn.execute("ALTER TABLE users ADD COLUMN phone_verified INTEGER DEFAULT 0;")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN security_pin TEXT DEFAULT '202600';")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN full_name TEXT;")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'shopkeeper';")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_owner ON events(owner_email);")
         except sqlite3.OperationalError:
             pass
 
@@ -267,8 +293,8 @@ class EventDatabase:
     Reads use read-only connections directly.
     """
 
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
+    def __init__(self, db_path: Union[Path, str]):
+        self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.writer = DatabaseWriterWorker(self.db_path)
         self.writer.start()
@@ -315,8 +341,8 @@ class EventDatabase:
             starred, synced, user_triage, file_path, thumb_path,
             dominant_color, zone_name, location_id, duration_sec,
             motion_points_count, metadata_json,
-            clip_number, expires_at_ms, sha256, tier
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            clip_number, expires_at_ms, sha256, tier, owner_email
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             event.event_group_id, event.camera_id, event.start_time, event.end_time,
@@ -332,7 +358,8 @@ class EventDatabase:
             getattr(event, "clip_number", None),
             getattr(event, "expires_at_ms", None),
             getattr(event, "sha256", None),
-            getattr(event, "tier", "review")
+            getattr(event, "tier", "review"),
+            getattr(event, "owner_email", None)
         )
         self.writer.queue.put((sql, params, callback))
 
@@ -1143,12 +1170,16 @@ class EventDatabase:
             "durationSec": d_sec,
             "duration_seconds": d_sec,
             "filePath": row.get("file_path") or "",
-            "thumbPath": row.get("thumb_path") or ""
+            "thumbPath": row.get("thumb_path") or "",
+            "ownerEmail": row.get("owner_email"),
+            "owner_email": row.get("owner_email")
         }
 
     def query_clips(
         self,
         camera_id: Optional[str] = None,
+        camera_ids: Optional[List[str]] = None,
+        owner_email: Optional[str] = None,
         tier: Optional[str] = None,
         status: Optional[str] = None,
         object_type: Optional[str] = None,
@@ -1164,12 +1195,25 @@ class EventDatabase:
             limit = per_page
             offset = max(0, (page - 1) * per_page)
 
-        where_clauses = ["1=1"]
+        where_clauses = ["status != 'deleted'"]
         params: List[Any] = []
+
+        if camera_ids is not None:
+            if not camera_ids:
+                # User owns no cameras: return empty set immediately
+                where_clauses.append("1=0")
+            else:
+                placeholders = ",".join("?" for _ in camera_ids)
+                where_clauses.append(f"camera_id IN ({placeholders})")
+                params.extend(camera_ids)
 
         if camera_id and camera_id.lower() != "all":
             where_clauses.append("camera_id = ?")
             params.append(camera_id)
+
+        if owner_email:
+            where_clauses.append("owner_email = ?")
+            params.append(owner_email)
 
         if tier and tier.lower() != "all":
             where_clauses.append("tier = ?")
@@ -1251,7 +1295,11 @@ class EventDatabase:
         finally:
             conn.close()
 
-    def get_unreviewed_flags(self, limit: int = 10) -> Dict[str, Any]:
+    def get_unreviewed_flags(
+        self,
+        limit: int = 10,
+        camera_ids: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """
         Retrieves unreviewed flags for Overview.
         Order: Alert first, then Review, newest first within each.
@@ -1260,32 +1308,41 @@ class EventDatabase:
         now_ms = int(time.time() * 1000)
         twelve_hours_ms = 12 * 3600 * 1000
 
+        cam_clause = ""
+        cam_params: List[Any] = []
+        if camera_ids is not None:
+            if not camera_ids:
+                return {"flags": [], "total": 0, "totalWaiting": 0, "expires_soon_count": 0, "expiringSoonCount": 0}
+            placeholders = ",".join("?" for _ in camera_ids)
+            cam_clause = f" AND camera_id IN ({placeholders})"
+            cam_params = list(camera_ids)
+
         conn = self._get_read_conn()
         try:
             cursor = conn.cursor()
             # Total waiting
-            cursor.execute("SELECT COUNT(*) FROM events WHERE (user_triage = 'unreviewed' OR user_triage IS NULL)")
+            cursor.execute(f"SELECT COUNT(*) FROM events WHERE status != 'deleted' AND (user_triage = 'unreviewed' OR user_triage IS NULL){cam_clause}", cam_params)
             total_waiting = cursor.fetchone()[0]
 
             # Expiring within 12h: expires_at_ms <= now_ms + twelve_hours_ms
             sixty_hours_ago_iso = datetime.fromtimestamp((now_ms - 60 * 3600 * 1000) / 1000.0, timezone.utc).isoformat()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT COUNT(*) FROM events
-                WHERE (user_triage = 'unreviewed' OR user_triage IS NULL)
+                WHERE status != 'deleted' AND (user_triage = 'unreviewed' OR user_triage IS NULL){cam_clause}
                 AND (
                     (expires_at_ms IS NOT NULL AND expires_at_ms <= ?)
                     OR (expires_at_ms IS NULL AND start_time <= ?)
                 )
-            """, (now_ms + twelve_hours_ms, sixty_hours_ago_iso))
+            """, cam_params + [now_ms + twelve_hours_ms, sixty_hours_ago_iso])
             expiring_soon = cursor.fetchone()[0]
 
             # Flags ordered by alert then review, newest first within each
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT * FROM events
-                WHERE (user_triage = 'unreviewed' OR user_triage IS NULL)
+                WHERE status != 'deleted' AND (user_triage = 'unreviewed' OR user_triage IS NULL){cam_clause}
                 ORDER BY (CASE WHEN tier = 'alert' THEN 0 ELSE 1 END), start_time DESC
                 LIMIT ?
-            """, (limit,))
+            """, cam_params + [limit])
             rows = cursor.fetchall()
             flags = [self._row_to_clip_dict(dict(r)) for r in rows]
 
@@ -1298,6 +1355,62 @@ class EventDatabase:
             }
         finally:
             conn.close()
+
+    def delete_clip(self, clip_id_or_number: Union[str, int]) -> bool:
+        """Permanently deletes a clip from SQLite index and local disk storage."""
+        conn = self._get_read_conn()
+        row = None
+        try:
+            cursor = conn.cursor()
+            if isinstance(clip_id_or_number, int) or (isinstance(clip_id_or_number, str) and clip_id_or_number.isdigit()):
+                cursor.execute("SELECT * FROM events WHERE clip_number = ? OR event_group_id = ?", (int(clip_id_or_number), str(clip_id_or_number)))
+            else:
+                cursor.execute("SELECT * FROM events WHERE event_group_id = ?", (str(clip_id_or_number),))
+            r = cursor.fetchone()
+            if r:
+                row = dict(r)
+        finally:
+            conn.close()
+
+        if not row:
+            return False
+
+        ev_id = row["event_group_id"]
+        file_path = row.get("file_path")
+        thumb_path = row.get("thumb_path")
+
+        # Delete physical files from disk
+        for p in (file_path, thumb_path):
+            if p and os.path.exists(p):
+                try:
+                    os.remove(p)
+                except Exception as e:
+                    logger.warning(f"Could not remove physical media file {p}: {e}")
+
+        # Mark deleted in SQLite and remove record
+        now_ms = int(time.time() * 1000)
+        sql_del = "DELETE FROM events WHERE event_group_id = ?"
+        self.writer.queue.put((sql_del, (ev_id,), None))
+
+        # Log to deletion_log table
+        self.log_deletion(
+            clip_number=row.get("clip_number") or 0,
+            camera_id=row.get("camera_id") or "unknown",
+            moment_at_ms=now_ms,
+            tier=row.get("tier") or "review",
+            status="user_deleted",
+            reason="User deleted evidence clip with security verification"
+        )
+        self.log_audit("CLIP_DELETED", ev_id, f"clip_number={row.get('clip_number')}")
+        self.flush()
+        return True
+
+    def update_user_security_pin(self, user_id: str, new_pin: str):
+        """Updates user 6-digit security PIN for critical action gates."""
+        now_ms = int(time.time() * 1000)
+        sql = "UPDATE users SET security_pin = ?, updated_at_ms = ? WHERE id = ?"
+        self.writer.queue.put((sql, (str(new_pin).strip(), now_ms, user_id), None))
+        self.flush()
 
     def update_clip_status(
         self,

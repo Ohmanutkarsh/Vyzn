@@ -45,6 +45,10 @@
       "dest": "/public/clips.html"
     },
     {
+      "src": "/settings",
+      "dest": "/public/settings.html"
+    },
+    {
       "src": "/design",
       "dest": "/public/design.html"
     },

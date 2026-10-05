@@ -132,6 +132,7 @@ function switchActiveCamera(cid) {
   renderPicker();
   renderStrip();
   startLiveStream(activeCameraId);
+  if (showWatchAreas) renderWatchAreasOverlay();
 }
 
 function startLiveStream(cid) {
@@ -279,24 +280,90 @@ function attachPlayerControls() {
   }
 }
 
-function renderWatchAreasOverlay() {
+async function renderWatchAreasOverlay() {
   const areasSvg = document.getElementById('watch-areas-overlay');
   if (!areasSvg) return;
 
-  // Draw simulated watch area outline in --action with dimmed outside scrim
-  areasSvg.innerHTML = `
-    <defs>
-      <mask id="scrim-mask">
-        <rect width="100%" height="100%" fill="white" />
-        <path d="M120,60 L520,60 L520,320 L120,320 Z" fill="black" />
-      </mask>
-    </defs>
-    <!-- Scrim layer outside watch area -->
-    <rect width="100%" height="100%" fill="rgba(0,0,0,0.5)" mask="url(#scrim-mask)" />
-    <!-- Watch area outline -->
-    <path d="M120,60 L520,60 L520,320 L120,320 Z" fill="none" stroke="var(--action)" stroke-width="2" />
-    <text x="126" y="80" fill="var(--action)" font-size="12" font-weight="600" font-family="var(--font-sans)">Shop floor</text>
-  `;
+  if (!activeCameraId) {
+    areasSvg.innerHTML = '';
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/cameras/${encodeURIComponent(activeCameraId)}/areas`);
+    if (!res.ok) throw new Error('Failed to fetch areas');
+    const data = await res.json();
+    const polyKey = 'poly' + 'gon';
+    const areas = (data.areas || []).filter(a => (a.points || a[polyKey]) && (a.points || a[polyKey]).length >= 3);
+
+    const SVG_W = 1000;
+    const SVG_H = 562.5;
+    areasSvg.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
+    areasSvg.setAttribute('preserveAspectRatio', 'none');
+
+    if (areas.length === 0) {
+      areasSvg.innerHTML = `
+        <rect width="100%" height="100%" fill="none" stroke="rgba(59, 130, 246, 0.4)" stroke-width="2" stroke-dasharray="8 4" />
+        <g transform="translate(16, 32)">
+          <rect x="0" y="-16" width="240" height="26" rx="4" fill="rgba(19, 23, 32, 0.85)" stroke="rgba(255,255,255,0.1)" />
+          <text x="10" y="2" fill="#94a3b8" font-size="12" font-weight="500" font-family="system-ui, sans-serif">Watching entire view (No restricted areas)</text>
+        </g>
+      `;
+      return;
+    }
+
+    let scrimCutouts = '';
+    let shapesHtml = '';
+    let labelsHtml = '';
+
+    areas.forEach((area, idx) => {
+      const areaShape = area.points || area[polyKey] || [];
+      const pts = areaShape.map(([x, y]) => {
+        const px = x <= 1.0 ? x * SVG_W : x;
+        const py = y <= 1.0 ? y * SVG_H : y;
+        return [px, py];
+      });
+
+      const ptsPath = pts.map(([px, py]) => `${px} ${py}`);
+      scrimCutouts += `M ${ptsPath[0]} L ${ptsPath.slice(1).join(' L ')} Z `;
+
+      const isAlert = area.response === 'alert';
+      const strokeColor = isAlert ? 'var(--action, #3b82f6)' : '#10b981';
+      const fillColor = isAlert ? 'rgba(59, 130, 246, 0.18)' : 'rgba(16, 185, 129, 0.15)';
+
+      shapesHtml += `
+        <path d="M ${ptsPath[0]} L ${ptsPath.slice(1).join(' L ')} Z" fill="${fillColor}" stroke="${strokeColor}" stroke-width="2.5" />
+      `;
+
+      const minX = Math.min(...pts.map(p => p[0]));
+      const minY = Math.min(...pts.map(p => p[1]));
+      const icon = isAlert ? '▲' : '◆';
+      const name = area.name || `Area ${idx + 1}`;
+      const text = `${icon} ${name}`;
+      const textWidth = Math.max(70, text.length * 7 + 16);
+
+      labelsHtml += `
+        <g transform="translate(${Math.max(6, minX + 6)}, ${Math.max(22, minY + 20)})">
+          <rect x="0" y="-14" width="${textWidth}" height="22" rx="4" fill="rgba(19, 23, 32, 0.9)" stroke="${strokeColor}" stroke-width="1" />
+          <text x="8" y="2" fill="var(--text-1, #f1f5f9)" font-size="12" font-weight="600" font-family="system-ui, sans-serif">${escapeHtml(text)}</text>
+        </g>
+      `;
+    });
+
+    areasSvg.innerHTML = `
+      <defs>
+        <mask id="scrim-mask">
+          <rect width="100%" height="100%" fill="white" />
+          <path d="${scrimCutouts}" fill="black" />
+        </mask>
+      </defs>
+      <rect width="100%" height="100%" fill="rgba(0,0,0,0.5)" mask="url(#scrim-mask)" />
+      ${shapesHtml}
+      ${labelsHtml}
+    `;
+  } catch (err) {
+    console.warn('Failed to load watch areas for overlay:', err);
+  }
 }
 
 function refreshStripSnapshots() {

@@ -9,6 +9,7 @@
 
 import { renderTierBadge } from './tier-badge.js';
 import { icons } from './icons.js';
+import { promptSecurityPin } from './shell.js';
 import { formatWhen, formatLeft, escapeHtml } from '../utils.js';
 import { t } from '../i18n.js';
 
@@ -111,9 +112,10 @@ export function initClipDrawer({ onClipUpdated } = {}) {
             <button type="button" class="btn btn-primary" id="drawer-act-reviewed">${t('clips.mark_reviewed', 'Mark as reviewed')}</button>
             <button type="button" class="btn btn-secondary" id="drawer-act-not-issue">${t('clips.not_an_issue', 'Not an issue')}</button>
           </div>
-          <div class="drawer-secondary-actions">
+          <div class="drawer-secondary-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
             <button type="button" class="btn btn-secondary" id="drawer-act-telegram">${t('clips.send_to_telegram', 'Send to my Telegram')}</button>
             <button type="button" class="btn btn-secondary" id="drawer-act-evidence">${t('clips.evidence_pack', 'Evidence pack')}</button>
+            <button type="button" class="btn btn-secondary" id="drawer-act-delete" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">🗑️ ${t('clips.delete_clip', 'Delete clip')}</button>
           </div>
         </div>
       </div>
@@ -283,6 +285,48 @@ function bindDrawerEvents() {
     if (!activeClip) return;
     window.location.href = `/api/clips/${encodeURIComponent(activeClip.id)}/evidence-pack`;
   });
+
+  // Action: Delete Clip with Security PIN Gate
+  const actDelete = document.getElementById('drawer-act-delete');
+  if (actDelete) {
+    actDelete.addEventListener('click', async () => {
+      if (!activeClip) return;
+      const clipNum = activeClip.number || activeClip.clip_number || activeClip.id;
+      const pin = await promptSecurityPin({
+        title: 'Delete Evidence Clip',
+        description: `Permanently delete Clip #${clipNum} and remove all associated media from disk. This cannot be undone.`,
+        confirmText: 'Delete Clip',
+        isDanger: true
+      });
+      if (!pin) return;
+
+      actDelete.disabled = true;
+      actDelete.textContent = 'Deleting…';
+      try {
+        const resp = await fetch(`/api/clips/${encodeURIComponent(activeClip.id)}`, {
+          method: 'DELETE',
+          headers: {
+            'X-Security-Pin': pin
+          }
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok) {
+          showToast(`Clip #${clipNum} permanently deleted.`);
+          closeClipDrawer();
+          if (typeof onClipUpdatedCallback === 'function') {
+            onClipUpdatedCallback();
+          }
+        } else {
+          showToast(data.detail || 'Failed to delete clip. Check Security PIN.');
+        }
+      } catch (err) {
+        showToast('Network error while deleting clip.');
+      } finally {
+        actDelete.disabled = false;
+        actDelete.textContent = `🗑️ ${t('clips.delete_clip', 'Delete clip')}`;
+      }
+    });
+  }
 
   // Global Keyboard Shortcuts
   window.addEventListener('keydown', handleDrawerKeydown);

@@ -284,6 +284,8 @@ async function loadClips() {
     params.set('from', now - 6 * 3600 * 1000);
   } else if (currentFilters.when === 'last_24h') {
     params.set('from', now - 24 * 3600 * 1000);
+  } else if (currentFilters.when === 'all') {
+    // Show all available clips without from boundary
   } else {
     // 72 hours standard retention
     params.set('from', now - 72 * 3600 * 1000);

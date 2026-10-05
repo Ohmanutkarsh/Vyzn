@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — VYZN</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    .settings-layout {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-6, 24px);
+      padding-bottom: var(--space-12, 48px);
+    }
+    .settings-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-panel, 12px);
+      padding: var(--space-5, 20px) var(--space-6, 24px);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .settings-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-4, 16px);
+      padding-bottom: var(--space-3, 12px);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .settings-card-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-1);
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .settings-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .settings-badge.success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+    }
+    .settings-badge.info {
+      background: rgba(59, 130, 246, 0.15);
+      color: #3b82f6;
+    }
+    .settings-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .settings-row:last-child {
+      border-bottom: none;
+    }
+    .settings-label {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-1);
+    }
+    .settings-sublabel {
+      font-size: 12px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+    .settings-value {
+      font-size: 14px;
+      color: var(--text-2);
+      font-family: var(--font-mono, monospace);
+    }
+    .theme-toggle-group {
+      display: inline-flex;
+      background: var(--bg-2);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 3px;
+    }
+    .theme-toggle-btn {
+      background: none;
+      border: none;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-2);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .theme-toggle-btn.is-active {
+      background: var(--bg-1);
+      color: var(--text-1);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .settings-form-group {
+      margin-top: 14px;
+    }
+    .settings-input-wrap {
+      display: flex;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .settings-input {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-2);
+      color: var(--text-1);
+      font-size: 14px;
+      outline: none;
+      box-sizing: border-box;
+    }
+    .settings-input:focus {
+      border-color: var(--action);
+    }
+    .purge-guarantee-box {
+      background: rgba(59, 130, 246, 0.08);
+      border: 1px solid rgba(59, 130, 246, 0.2);
+      border-radius: 8px;
+      padding: 14px 16px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text-2);
+    }
+    .toast-msg {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-1);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-1);
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      display: none;
+      z-index: 10000;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body class="app-shell">
+
+  <!-- Desktop Sidebar -->
+  <div id="app-sidebar"></div>
+
+  <!-- Main Content Wrapper -->
+  <div class="shell-main-wrapper">
+    <!-- Top Header -->
+    <div id="app-header"></div>
+
+    <!-- Settings Content -->
+    <main class="shell-content" id="main-content">
+      <div class="cameras-header-row" style="margin-bottom: var(--space-6);">
+        <div>
+          <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 4px 0;">Settings & Security</h2>
+          <span style="font-size: 13px; color: var(--text-2);">Account isolation, contact phone, visual theme, and critical operation security.</span>
+        </div>
+      </div>
+
+      <div class="settings-layout">
+        <!-- 1. Account & Multi-Tenant Isolation -->
+        <section class="settings-card" aria-labelledby="card-account-title">
+          <div class="settings-card-header">
+            <h3 class="settings-card-title" id="card-account-title">
+              <span>👤</span> Account & Isolation
+            </h3>
+            <span class="settings-badge success">Isolated Tenant</span>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">User Account</div>
+              <div class="settings-sublabel">Your authenticated session identity</div>
+            </div>
+            <div class="settings-value" id="val-user-email">Loading…</div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Access Role</div>
+              <div class="settings-sublabel">Permissions on this edge system</div>
+            </div>
+            <div class="settings-value" id="val-user-role">Shop Owner</div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Account ID</div>
+              <div class="settings-sublabel">Database tenant identifier</div>
+            </div>
+            <div class="settings-value" id="val-user-id" style="font-size: 12px;">Loading…</div>
+          </div>
+
+          <div style="margin-top: 14px; padding: 10px 14px; background: var(--bg-2); border-radius: 8px; font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 8px;">
+            <span>🛡️</span>
+            <span><strong>Multi-Tenant Guarantee:</strong> Cameras, watch areas, and evidence clips are strictly isolated to your user account. Other accounts cannot view your streams or footage.</span>
+          </div>
+        </section>
+
+        <!-- 2. Phone Number Management -->
+        <section class="settings-card" aria-labelledby="card-phone-title">
+          <div class="settings-card-header">
+            <h3 class="settings-card-title" id="card-phone-title">
+              <span>📱</span> Contact Phone Number
+            </h3>
+            <span class="settings-badge info" id="phone-status-badge">Configured</span>
+          </div>
+
+          <p style="font-size: 13px; color: var(--text-2); margin: 0 0 12px 0;">
+            Add your mobile number (+91) to receive instant WhatsApp and SMS threat dispatch alerts.
+          </p>
+
+          <div class="settings-form-group">
+            <label class="settings-label" for="input-phone-number">Mobile Number (+91)</label>
+            <div class="settings-input-wrap">
+              <input type="tel" class="settings-input" id="input-phone-number" placeholder="+91 98765 43210" maxlength="15" autocomplete="tel">
+              <button type="button" class="btn btn-primary" id="btn-save-phone">Save Number</button>
+            </div>
+            <div id="phone-feedback" style="font-size: 12px; margin-top: 6px; display: none;"></div>
+          </div>
+        </section>
+
+        <!-- 3. Appearance & Theme -->
+        <section class="settings-card" aria-labelledby="card-theme-title">
+          <div class="settings-card-header">
+            <h3 class="settings-card-title" id="card-theme-title">
+              <span>🎨</span> Appearance & Theme
+            </h3>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Interface Theme</div>
+              <div class="settings-sublabel">Select preferred color scheme for dashboard</div>
+            </div>
+            <div class="theme-toggle-group" id="theme-segmented-group">
+              <button type="button" class="theme-toggle-btn" data-theme-val="dark">Dark</button>
+              <button type="button" class="theme-toggle-btn" data-theme-val="light">Light</button>
+              <button type="button" class="theme-toggle-btn" data-theme-val="system">System</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 4. Critical Action Security Gate (Security PIN) -->
+        <section class="settings-card" aria-labelledby="card-sec-title">
+          <div class="settings-card-header">
+            <h3 class="settings-card-title" id="card-sec-title">
+              <span>🔐</span> Extra Security Gate (6-Digit PIN)
+            </h3>
+            <span class="settings-badge success">Enforced</span>
+          </div>
+
+          <p style="font-size: 13px; color: var(--text-2); margin: 0 0 16px 0; line-height: 1.5;">
+            To protect your store and evidence, destructive and administrative operations (<strong>adding cameras</strong>, <strong>deleting cameras</strong>, and <strong>deleting video clips</strong>) require confirmation with your 6-digit Security PIN.
+          </p>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div>
+              <label class="settings-label" for="input-current-pin" style="display: block; margin-bottom: 6px;">Current PIN</label>
+              <input type="password" class="settings-input" id="input-current-pin" placeholder="Default: 202600" maxlength="8" inputmode="numeric" style="width: 100%;">
+            </div>
+            <div>
+              <label class="settings-label" for="input-new-pin" style="display: block; margin-bottom: 6px;">New 6-Digit PIN</label>
+              <input type="password" class="settings-input" id="input-new-pin" placeholder="e.g. 583921" maxlength="8" inputmode="numeric" style="width: 100%;">
+            </div>
+          </div>
+
+          <div style="margin-top: 14px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 12px; color: var(--text-3);">Default factory PIN: <strong>202600</strong></span>
+            <button type="button" class="btn btn-secondary" id="btn-update-pin">Update Security PIN</button>
+          </div>
+          <div id="pin-feedback" style="font-size: 12px; margin-top: 8px; display: none;"></div>
+        </section>
+
+        <!-- 5. 72-Hour Hard Purge & Storage Status -->
+        <section class="settings-card" aria-labelledby="card-purge-title">
+          <div class="settings-card-header">
+            <h3 class="settings-card-title" id="card-purge-title">
+              <span>⏳</span> 72-Hour Hard Purge & Edge Storage
+            </h3>
+            <span class="settings-badge info">Active</span>
+          </div>
+
+          <div class="purge-guarantee-box">
+            <span style="font-size: 20px;">🛡️</span>
+            <div>
+              <strong>72-Hour Privacy Hard Purge Guarantee:</strong> All continuous video recordings and motion evidence clips are preserved on local encrypted NVMe storage for exactly 72 hours, after which they are permanently shredded automatically.
+            </div>
+          </div>
+
+          <div class="settings-row" style="margin-top: 14px;">
+            <div>
+              <div class="settings-label">Edge Disk Free Space</div>
+              <div class="settings-sublabel">Local solid-state video buffer headroom</div>
+            </div>
+            <div class="settings-value" id="val-disk-free">Calculating…</div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Ring Buffer Retention</div>
+              <div class="settings-sublabel">Maximum age before automatic purge</div>
+            </div>
+            <div class="settings-value">72 hours</div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <div id="app-bottom-nav"></div>
+  </div>
+
+  <div id="toast-notification" class="toast-msg"></div>
+
+  <script type="module" src="/static/settings.js"></script>
+</body>
+</html>

@@ -33,6 +33,7 @@ class EventRecord:
     expires_at_ms: Optional[int] = None # 72-hour hard purge epoch millisecond
     sha256: Optional[str] = None        # SHA-256 integrity hash of media clip
     tier: str = "review"                # 'alert' | 'review'
+    owner_email: Optional[str] = None   # User tenant owner email
 
     @property
     def event_id(self) -> str:
@@ -63,6 +64,7 @@ class EventRecord:
             "expires_at_ms": self.expires_at_ms,
             "sha256": self.sha256,
             "tier": self.tier,
+            "owner_email": self.owner_email,
         }
 
 

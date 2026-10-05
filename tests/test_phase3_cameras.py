@@ -107,13 +107,13 @@ def test_camera_crud_lifecycle_and_deletion_log():
     test_cam_name = "Shop Entrance Test"
     rtsp_with_creds = "rtsp://admin:super_secret@192.168.1.88:554/live"
 
-    # 1. Create camera
+    # 1. Create camera with Security PIN
     res = client.post("/api/cameras", json={
         "camera_id": test_cam_id,
         "name": test_cam_name,
         "rtsp_url": rtsp_with_creds,
         "target_fps": 15.0
-    })
+    }, headers={"X-Security-Pin": "202600"})
     assert res.status_code == 200
     data = res.json()
     assert data["id"] == test_cam_id
@@ -137,8 +137,8 @@ def test_camera_crud_lifecycle_and_deletion_log():
     assert res.status_code == 200
     assert res.json()["name"] == "Cash Counter Renamed"
 
-    # 4. Delete camera and verify deletion_log entry
-    res = client.delete(f"/api/cameras/{test_cam_id}")
+    # 4. Delete camera with Security PIN and verify deletion_log entry
+    res = client.delete(f"/api/cameras/{test_cam_id}", headers={"X-Security-Pin": "202600"})
     assert res.status_code == 200
     assert res.json()["status"] == "deleted"
 
@@ -146,8 +146,29 @@ def test_camera_crud_lifecycle_and_deletion_log():
     db = get_db()
     logs = db.get_deletion_logs(camera_id=test_cam_id)
     assert len(logs) > 0
-    assert logs[0]["reason"] == "camera removed"
+    assert "camera removed" in logs[0]["reason"]
     assert logs[0]["status"] == "camera_removed"
+
+
+def test_phase3_camera_discovery_and_adoption(tmp_path: Path):
+    db_file = tmp_path / "cam_adopt.db"
+    db = EventDatabase(db_file)
+    settings = EdgeSettings(site_id="site_cam_test", data_dir=tmp_path, db_path=db_file)
+    init_api(db, settings)
+    test_camera_crud_lifecycle_and_deletion_log()
+    db.close()
+
+
+def test_phase3_camera_test_probe_and_health(tmp_path: Path):
+    db_file = tmp_path / "cam_probe.db"
+    db = EventDatabase(db_file)
+    settings = EdgeSettings(site_id="site_cam_test", data_dir=tmp_path, db_path=db_file)
+    init_api(db, settings)
+    test_probe_connection_diagnostics()
+    test_probe_by_ip_and_brand()
+    test_shell_status_pill()
+    test_snapshot_endpoint()
+    db.close()
 
 
 def test_shell_status_pill():

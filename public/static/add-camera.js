@@ -1,4 +1,4 @@
-import { initShell } from './components/shell.js';
+import { initShell, promptSecurityPin } from './components/shell.js';
 import { t, initI18n } from './i18n.js';
 import { escapeHtml } from './utils.js';
 
@@ -300,13 +300,25 @@ function attachStep3Events() {
   if (btnSave) {
     btnSave.addEventListener('click', async () => {
       const camName = nameInput ? nameInput.value.trim() || 'Camera 1' : 'Camera 1';
+
+      const pin = await promptSecurityPin({
+        title: 'Add Camera',
+        description: `Adopt ${camName} and register it to your account. This action requires your 6-digit Security PIN.`,
+        confirmText: 'Save Camera',
+        isDanger: false
+      });
+      if (!pin) return;
+
       btnSave.disabled = true;
       btnSave.textContent = 'Saving…';
 
       try {
         const res = await fetch('/api/cameras', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Security-Pin': pin
+          },
           body: JSON.stringify({
             name: camName,
             rtsp_url: testedStreamUrl || '0',
@@ -314,7 +326,10 @@ function attachStep3Events() {
           })
         });
 
-        if (!res.ok) throw new Error('Save failed');
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Save failed');
+        }
         const data = await res.json();
         createdCameraId = data.id || data.camera_id;
 
@@ -326,7 +341,7 @@ function attachStep3Events() {
         const areasLink = document.getElementById('btn-go-to-areas');
         if (areasLink) areasLink.href = `/areas/${encodeURIComponent(createdCameraId)}`;
       } catch (err) {
-        alert('Failed to save camera. Try again.');
+        alert(err.message || 'Failed to save camera. Try again.');
       } finally {
         btnSave.disabled = false;
         btnSave.textContent = 'Save camera';

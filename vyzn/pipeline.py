@@ -4,6 +4,8 @@ Binds capture threads, MOG2 gating, shared inference worker, scoring, recording,
 """
 
 from __future__ import annotations
+import os
+import json
 import time
 import queue
 import threading
@@ -388,20 +390,23 @@ class EdgePipeline:
                             daemon=True
                         ).start()
 
+                # Responsive clipping: when event reaches 60 frames (~15 seconds @ 4 fps), finalize clip segment
+                if len(self.event_buffers[camera_id]) >= 60:
+                    self._finalize_event(camera_id)
+
             elif camera_id in self.active_event_ids:
-                # Motion paused: evaluate 10s post-roll and 90s gap debounce
+                # Motion paused: evaluate 3s post-roll and 4s gap debounce
                 last_m_time = self.active_event_last_motion.get(camera_id, frame_time)
                 quiet_duration = frame_time - last_m_time
 
-                # 1. Capture 10 seconds of post-roll after motion pauses
-                post_roll = getattr(self.settings, "post_roll_sec", 10.0)
+                # 1. Capture 3 seconds of post-roll after motion pauses
+                post_roll = getattr(self.settings, "post_roll_sec", 3.0)
                 if quiet_duration <= post_roll:
                     self.event_buffers[camera_id].append(frame)
 
-                # 2. Only finalize if quiet gap >= 90 seconds (merging pauses <= 90s)
-                # or buffer reaches 2400 frames (~10 minutes safety ceiling)
-                inactivity_gap = getattr(self.settings, "event_inactivity_gap_sec", 90.0)
-                if quiet_duration >= inactivity_gap or len(self.event_buffers[camera_id]) >= 2400:
+                # 2. Finalize if quiet gap >= 4.0 seconds or buffer reaches 60 frames
+                inactivity_gap = getattr(self.settings, "event_inactivity_gap_sec", 4.0)
+                if quiet_duration >= inactivity_gap or len(self.event_buffers[camera_id]) >= 60:
                     self._finalize_event(camera_id)
 
             self.frame_queue.task_done()
@@ -574,7 +579,8 @@ class EdgePipeline:
             clip_number=clip_num,
             expires_at_ms=expires_at_ms,
             sha256=sha256_hash,
-            tier=tier
+            tier=tier,
+            owner_email=getattr(cam_config, "owner_email", None)
         )
 
         # Save to SQLite index

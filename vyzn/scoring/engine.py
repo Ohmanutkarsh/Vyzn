@@ -173,10 +173,14 @@ class ScoringEngine:
         l3 = self.CLASS_WEIGHTS.get(object_key, 0)
         subtotal_123 = l1 + l2 + l3
         # ── Layer 4: Nuisance Penalty vs Valid Floor ─────────────────────────
-        # SPEC: Valid detection floor = 50 pts (NOT alert_threshold)
         if is_valid_detection:
-            subtotal_1234 = max(50, subtotal_123)
-            threat_floor = 50
+            if candidate.object_type in ["person", "vehicle"] and gate_l0_passed:
+                threat_floor = max(self.alert_threshold, 70)
+            elif candidate.object_type in ["person", "vehicle"]:
+                threat_floor = 50
+            else:
+                threat_floor = 30  # Non-priority (animals) maintains buffer below alert threshold
+            subtotal_1234 = max(threat_floor, subtotal_123)
             l4_adjustment = subtotal_1234 - subtotal_123
         else:
             # Unclassified motion: apply -35 nuisance penalty + camera bias dampening

@@ -1,4 +1,4 @@
-import { initShell } from './components/shell.js';
+import { initShell, promptSecurityPin } from './components/shell.js';
 import { renderCameraTile } from './components/camera-tile.js';
 import { t, initI18n } from './i18n.js';
 import { escapeHtml } from './utils.js';
@@ -141,19 +141,32 @@ function attachEventListeners() {
   if (btnConfirmRemove) {
     btnConfirmRemove.addEventListener('click', async () => {
       if (!pendingRemoveId) return;
-      btnConfirmRemove.disabled = true;
-      btnConfirmRemove.textContent = 'Removing…';
+      const targetId = pendingRemoveId;
+      closeRemoveModal();
+
+      const pin = await promptSecurityPin({
+        title: 'Delete Camera',
+        description: 'Permanently remove this camera from edge surveillance. This operation requires your 6-digit Security PIN.',
+        confirmText: 'Delete Camera',
+        isDanger: true
+      });
+      if (!pin) return;
+
       try {
-        const res = await fetch(`/api/cameras/${encodeURIComponent(pendingRemoveId)}`, { method: 'DELETE' });
+        const res = await fetch(`/api/cameras/${encodeURIComponent(targetId)}`, {
+          method: 'DELETE',
+          headers: {
+            'X-Security-Pin': pin
+          }
+        });
         if (res.ok) {
-          closeRemoveModal();
           await loadCameras();
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          alert(errData.detail || 'Failed to remove camera. Check Security PIN.');
         }
       } catch (err) {
         alert('Failed to remove camera');
-      } finally {
-        btnConfirmRemove.disabled = false;
-        btnConfirmRemove.textContent = t('cameras.remove_btn', 'Remove and delete');
       }
     });
   }

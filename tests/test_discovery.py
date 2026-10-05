@@ -54,7 +54,7 @@ def test_camera_discovery_and_adoption_endpoints(tmp_path):
         "password": "Password@123",
         "target_fps": 4.0
     }
-    adopt_res = client.post("/api/v1/cameras/adopt", json=adopt_payload)
+    adopt_res = client.post("/api/v1/cameras/adopt", json=adopt_payload, headers={"X-Security-Pin": "202600"})
     assert adopt_res.status_code == 200
     adopt_data = adopt_res.json()
     assert adopt_data["status"] == "adopted"
