@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#14171A"/>
+  <rect x="20" y="20" width="600" height="320" rx="4" fill="#1B1F23" stroke="#2E353B" stroke-width="1.5"/>
+  <circle cx="320" cy="180" r="36" fill="#23282D" stroke="#3B444B" stroke-width="1.5"/>
+  <polygon points="314,166 332,180 314,194" fill="#8A939A"/>
+  <text x="320" y="240" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="500" fill="#8A939A" text-anchor="middle">VYZN Camera Feed (16:9)</text>
+</svg>

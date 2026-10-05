@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Camera — VYZN</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="app-shell">
+
+  <!-- Desktop Sidebar -->
+  <div id="app-sidebar"></div>
+
+  <!-- Main Content Wrapper -->
+  <div class="shell-main-wrapper">
+    <!-- Top Header -->
+    <div id="app-header"></div>
+
+    <!-- Wizard Content -->
+    <main class="shell-content" id="main-content">
+      <div class="wizard-container">
+        
+        <!-- Step Indicator -->
+        <div class="wizard-stepper" id="wizard-stepper">Step 1 of 3</div>
+
+        <!-- Step 1: Choose Connection Type -->
+        <section class="wizard-step" id="step-1">
+          <h2 class="wizard-step-title" id="step1-title">How is the camera connected?</h2>
+          <div class="choice-cards-stack">
+            <button type="button" class="choice-card" data-choice="ip">
+              <div class="choice-card-title">IP camera or recorder</div>
+              <div class="choice-card-desc">CCTV camera, DVR or NVR. You know its IP address.</div>
+            </button>
+            <button type="button" class="choice-card" data-choice="network">
+              <div class="choice-card-title">Find on my network</div>
+              <div class="choice-card-desc">VYZN looks for cameras and recorders on your shop's network (the local server). Works when this computer is on the same Wi-Fi or network as the cameras.</div>
+            </button>
+            <button type="button" class="choice-card" data-choice="phone">
+              <div class="choice-card-title">Phone or webcam</div>
+              <div class="choice-card-desc">Use a spare phone, or this computer's webcam, as a camera.</div>
+            </button>
+          </div>
+        </section>
+
+        <!-- Step 2: Form & Connection Test -->
+        <section class="wizard-step" id="step-2" style="display: none;">
+          <h2 class="wizard-step-title" id="step2-title">Connect the camera</h2>
+
+          <!-- Path A: IP Camera or Recorder -->
+          <div class="path-section" id="path-ip" style="display: none;">
+            <!-- Simple standard fields -->
+            <div id="ip-standard-fields">
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-3);">
+                <div class="form-group">
+                  <label for="ip-address" class="form-label">IP address</label>
+                  <input type="text" id="ip-address" class="form-input mono-input" placeholder="192.168.1.64" autocomplete="off" />
+                </div>
+                <div class="form-group">
+                  <label for="ip-port" class="form-label">Port</label>
+                  <input type="number" id="ip-port" class="form-input mono-input" value="554" />
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <div class="form-group">
+                  <label for="ip-username" class="form-label">Username</label>
+                  <input type="text" id="ip-username" class="form-input" value="admin" autocomplete="off" />
+                </div>
+                <div class="form-group">
+                  <label for="ip-password" class="form-label">Password</label>
+                  <div style="position: relative;">
+                    <input type="password" id="ip-password" class="form-input" style="width: 100%; padding-right: 36px;" autocomplete="new-password" />
+                    <button type="button" id="btn-toggle-pw" style="position: absolute; right: 8px; top: 10px; background: none; border: none; color: var(--text-3); cursor: pointer;" aria-label="Show password">👁</button>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-3);">
+                <div class="form-group">
+                  <label for="ip-brand" class="form-label">Brand</label>
+                  <select id="ip-brand" class="form-input">
+                    <option value="Hikvision">Hikvision</option>
+                    <option value="CP Plus">CP Plus</option>
+                    <option value="Dahua">Dahua</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div class="form-group" id="group-channel">
+                  <label for="ip-channel" class="form-label">Channel</label>
+                  <input type="number" id="ip-channel" class="form-input mono-input" value="1" min="1" max="32" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Advanced toggle -->
+            <div style="margin-bottom: var(--space-3);">
+              <button type="button" class="btn btn-quiet" id="btn-toggle-advanced" style="font-size: 13px; padding: 4px 0;">Advanced: paste a full stream address</button>
+            </div>
+
+            <!-- Advanced URL input -->
+            <div class="form-group" id="group-full-url" style="display: none;">
+              <label for="ip-full-url" class="form-label">Stream address</label>
+              <input type="text" id="ip-full-url" class="form-input mono-input" placeholder="rtsp://admin:pass@192.168.1.64:554/Streaming/Channels/101" />
+            </div>
+
+            <!-- Live Address Preview -->
+            <div class="address-preview-box">
+              <div class="address-preview-label">Stream address preview</div>
+              <div class="address-preview-text" id="address-preview-text">rtsp://admin:••••@192.168.1.64:554/Streaming/Channels/101</div>
+            </div>
+          </div>
+
+          <!-- Path B: Find on My Network -->
+          <div class="path-section" id="path-network" style="display: none;">
+            <div id="network-scanning-state" style="padding: var(--space-6) 0; text-align: center;">
+              <div class="skeleton" style="height: 6px; width: 100%; margin-bottom: var(--space-4);"></div>
+              <div style="font-size: 15px; color: var(--text-2);">Looking for cameras on your network…</div>
+            </div>
+            <div id="network-found-list" class="choice-cards-stack" style="display: none;"></div>
+            <div id="network-empty-state" class="empty-state" style="display: none;">
+              <p class="empty-state-text">No cameras found. Check that this computer is on the same network as your cameras, or add one by IP address.</p>
+              <div style="display: flex; gap: var(--space-3);">
+                <button type="button" class="btn btn-secondary" id="btn-network-retry">Scan again</button>
+                <button type="button" class="btn btn-primary" id="btn-network-to-ip">Add by IP address</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Path C: Phone or Webcam -->
+          <div class="path-section" id="path-phone" style="display: none;">
+            <div class="choice-card" style="margin-bottom: var(--space-4); cursor: default;">
+              <div class="choice-card-title">Use a smartphone</div>
+              <div style="font-size: 13px; color: var(--text-2); margin-top: 8px; line-height: 1.6;">
+                1. Install the free "IP Webcam" app on Android or "DroidCam" on iOS or Android.<br>
+                2. Connect the phone to the shop Wi-Fi and tap Start server.<br>
+                3. Paste the address shown on the phone below.
+              </div>
+              <div class="form-group" style="margin-top: var(--space-3); margin-bottom: 0;">
+                <label for="phone-stream-url" class="form-label">Phone stream address</label>
+                <input type="text" id="phone-stream-url" class="form-input mono-input" placeholder="http://192.168.1.15:8080/video" />
+              </div>
+            </div>
+
+            <div style="text-align: center; margin: var(--space-3) 0; color: var(--text-3); font-size: 13px;">— or —</div>
+
+            <div class="choice-card" style="cursor: default;">
+              <div class="choice-card-title">This computer's webcam</div>
+              <div class="choice-card-desc" style="margin-bottom: var(--space-3);">Good for trying VYZN. Use a CCTV camera for the shop.</div>
+              <button type="button" class="btn btn-secondary" id="btn-use-webcam">Use this computer's webcam</button>
+            </div>
+          </div>
+
+          <!-- Test Connection Action & Diagnostics Box -->
+          <div style="margin-top: var(--space-6);">
+            <button type="button" class="btn btn-primary" id="btn-test-connection" style="width: 100%;">Test connection</button>
+          </div>
+
+          <!-- Diagnostic Feedback Box -->
+          <div id="test-result-container" style="display: none;">
+            <div class="test-result-box" id="test-result-box">
+              <div id="test-result-message" style="font-size: 14px; font-weight: 500;"></div>
+              <div id="test-result-facts" class="mono-facts" style="margin-top: 4px;"></div>
+              <div class="test-preview-thumb" id="test-preview-thumb" style="display: none;">
+                <img id="test-preview-img" src="" alt="Live camera test preview" />
+              </div>
+              <div style="margin-top: var(--space-4);" id="test-continue-wrap" style="display: none;">
+                <button type="button" class="btn btn-primary" id="btn-step2-continue" style="width: 100%;">Continue</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Step 3: Name it -->
+        <section class="wizard-step" id="step-3" style="display: none;">
+          <h2 class="wizard-step-title" id="step3-title">Name the camera</h2>
+          <div class="form-group">
+            <label for="camera-name-input" class="form-label">Camera name</label>
+            <input type="text" id="camera-name-input" class="form-input" value="Camera 1" autocomplete="off" />
+            <div class="name-chips-row">
+              <button type="button" class="chip-btn" data-suggest="Shop entrance">Shop entrance</button>
+              <button type="button" class="chip-btn" data-suggest="Cash counter">Cash counter</button>
+              <button type="button" class="chip-btn" data-suggest="Godown">Godown</button>
+              <button type="button" class="chip-btn" data-suggest="Back door">Back door</button>
+            </div>
+          </div>
+          <div style="margin-top: var(--space-6);">
+            <button type="button" class="btn btn-primary" id="btn-save-camera" style="width: 100%;">Save camera</button>
+          </div>
+        </section>
+
+        <!-- Success Screen -->
+        <section class="wizard-step" id="step-success" style="display: none; text-align: center; padding: var(--space-8) 0;">
+          <div style="font-size: 40px; margin-bottom: var(--space-3);">✓</div>
+          <h2 class="wizard-step-title" id="success-headline" style="margin-bottom: var(--space-2);">Camera is connected.</h2>
+          <p style="font-size: 15px; color: var(--text-2); margin-bottom: var(--space-6);">Now choose the part of the picture VYZN should watch.</p>
+          <div style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 320px; margin: 0 auto;">
+            <a href="/areas" class="btn btn-primary" id="btn-go-to-areas" style="text-decoration: none;">Choose the area to watch</a>
+            <button type="button" class="btn btn-quiet" id="btn-add-another">Add another camera</button>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <div id="app-bottom-nav"></div>
+  </div>
+
+  <script type="module" src="/static/add-camera.js"></script>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Overview — VYZN</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="app-shell">
+
+  <!-- Desktop Sidebar -->
+  <div id="app-sidebar"></div>
+
+  <!-- Main Content Wrapper -->
+  <div class="shell-main-wrapper">
+    <!-- Top Header -->
+    <div id="app-header"></div>
+
+    <!-- Main Overview Content -->
+    <main class="shell-content" id="main-content">
+
+      <!-- Guided Empty State (when 0 cameras exist) -->
+      <div id="overview-empty-state" class="empty-state" style="display: none; margin-top: var(--space-8);">
+        <div style="font-size: 36px;">📹</div>
+        <div style="font-size: 18px; font-weight: 600; color: var(--text-1);">Add your first camera</div>
+        <p class="empty-state-text">Connect a CCTV camera, a recorder, or a spare phone.</p>
+        <a href="/cameras/new" class="btn btn-primary" style="text-decoration: none; margin-top: var(--space-2);">Add a camera</a>
+      </div>
+
+      <!-- Active Overview Content (when cameras exist) -->
+      <div id="overview-active-content" style="display: none;">
+        <div class="overview-layout">
+          <!-- Main Column: Live Player & Cameras Strip -->
+          <div class="overview-main-col">
+            <!-- Live Camera Section (Section 6.2) -->
+            <section class="live-player-section">
+              <div class="live-player-header">
+                <h2 style="font-size: 18px; font-weight: 600; margin: 0;">Live camera</h2>
+                <!-- Camera Picker: Segmented control up to 4, dropdown beyond -->
+                <div id="camera-picker-container"></div>
+              </div>
+
+              <!-- 16:9 Letterbox Video Frame -->
+              <div class="live-player-frame" id="live-player-frame">
+                <!-- Video / Image Stream element -->
+                <img id="live-stream-img" class="live-video-element" alt="Live Camera Stream" />
+
+                <!-- Watch Areas Canvas / SVG Overlay -->
+                <svg id="watch-areas-overlay" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: none; z-index: 3;"></svg>
+
+                <!-- Top Left Overlay: Camera Name & Live Badge -->
+                <div class="player-overlay-top-left" id="player-top-left">
+                  <span id="player-camera-name">Camera</span>
+                  <div style="display: flex; align-items: center; gap: 4px;" id="badge-live-container">
+                    <span class="live-pulse-dot" id="live-pulse-dot"></span>
+                    <span id="player-status-badge">Live</span>
+                  </div>
+                </div>
+
+                <!-- Top Right Overlay: Controls -->
+                <div class="player-overlay-top-right">
+                  <button type="button" class="player-btn" id="btn-save-picture" title="Save picture" aria-label="Save picture">📷</button>
+                  <button type="button" class="player-btn" id="btn-fullscreen" title="Full screen" aria-label="Full screen">⛶</button>
+                </div>
+
+                <!-- Bottom Overlay: Toggle Watch Areas -->
+                <div class="player-overlay-bottom">
+                  <button type="button" class="btn-toggle-areas" id="btn-toggle-areas">Show watch areas</button>
+                </div>
+
+                <!-- State Overlays: Connecting, Stalled, Offline -->
+                <div class="player-state-overlay" id="player-connecting-overlay" style="display: none;">
+                  <div class="skeleton" style="width: 80px; height: 12px; margin-bottom: 8px;"></div>
+                  <div style="font-size: 15px; font-weight: 500;">Connecting…</div>
+                </div>
+
+                <div class="player-state-overlay" id="player-offline-overlay" style="display: none;">
+                  <div class="offline-card-banner" id="offline-banner-text">Offline since 9:12 pm</div>
+                  <div style="display: flex; gap: var(--space-3); margin-top: var(--space-2);">
+                    <button type="button" class="btn btn-primary" id="btn-player-retry">Try again</button>
+                    <button type="button" class="btn btn-secondary" id="btn-player-why-offline">Why is it offline?</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Cameras Strip (Section 6.2) -->
+            <section class="cameras-strip-section">
+              <div class="strip-title">Cameras</div>
+              <div class="cameras-strip-scroll" id="cameras-strip-list">
+                <!-- Rendered dynamically -->
+              </div>
+            </section>
+          </div>
+
+          <!-- Flags Panel Column (Desktop right 360px, Mobile top) -->
+          <div class="overview-flags-col">
+            <aside class="flags-panel" id="overview-flags-panel" aria-label="Important flags">
+              <div class="flags-header">
+                <span class="flags-title" id="flags-header-title">Flags · 0 waiting</span>
+              </div>
+              <div class="flags-list" id="flags-list-container">
+                <!-- Rendered dynamically -->
+              </div>
+              <div class="flags-expiry-banner" id="flags-expiry-banner" style="display: none;">
+                <span>⏳</span>
+                <span id="flags-expiry-text"></span>
+              </div>
+              <div class="flags-footer" id="flags-footer">
+                <a href="/clips" class="flags-see-all-link" id="flags-see-all-link">See all in Clips</a>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <div id="app-bottom-nav"></div>
+  </div>
+
+  <!-- Troubleshooting Offline Modal / Sheet -->
+  <div class="modal-scrim" id="modal-troubleshooting" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="troubleshoot-title">
+    <div class="modal-card">
+      <h3 class="modal-title" id="troubleshoot-title">Why is this camera offline?</h3>
+      <div class="modal-body">
+        <ul style="padding-left: 20px; margin: 0; line-height: 1.8;">
+          <li>Check that the camera power adapter is plugged in and switched on.</li>
+          <li>Verify that the network cable or Wi-Fi is connected.</li>
+          <li>Check if your router or network switch restarted recently.</li>
+          <li>Try opening the camera's web address in a browser to check if it responds.</li>
+        </ul>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-primary" id="btn-close-troubleshooting">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/overview.js"></script>
+</body>
+</html>

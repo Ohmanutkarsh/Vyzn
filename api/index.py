@@ -468,6 +468,43 @@ def serve_static_file(file_path: str):
             return Response(content=c.read_bytes(), media_type=mime or "application/octet-stream")
     raise HTTPException(status_code=404, detail=f"Static file {file_path} not found")
 
+@app.get("/overview", response_class=HTMLResponse)
+def serve_overview():
+    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "overview.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Overview page not found</h1>")
+
+@app.get("/cameras", response_class=HTMLResponse)
+def serve_cameras():
+    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "cameras.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Cameras page not found</h1>")
+
+@app.get("/cameras/new", response_class=HTMLResponse)
+def serve_add_camera():
+    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "add-camera.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Add Camera page not found</h1>")
+
+@app.get("/areas", response_class=HTMLResponse)
+@app.get("/areas/{camera_id}", response_class=HTMLResponse)
+def serve_areas(camera_id: Optional[str] = None):
+    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "areas.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Areas page not found</h1>")
+
+@app.get("/clips", response_class=HTMLResponse)
+@app.get("/clips/{clip_id}", response_class=HTMLResponse)
+def serve_clips(clip_id: Optional[str] = None):
+    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "clips.html"
+    if p.exists():
+        return HTMLResponse(content=p.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Clips page not found</h1>")
+
 @app.get("/fleet", response_class=HTMLResponse)
 def serve_fleet():
     fleet_file = WORKSPACE_ROOT / "vyzn_cloud" / "templates" / "fleet.html"
@@ -475,9 +512,13 @@ def serve_fleet():
         return HTMLResponse(content=fleet_file.read_text(encoding="utf-8"))
     return HTMLResponse(content="<h1>VYZN Fleet Operations</h1><p>Template not found.</p>")
 
+@app.get("/login", response_class=HTMLResponse)
+@app.get("/login/code", response_class=HTMLResponse)
+@app.get("/setup/phone", response_class=HTMLResponse)
+@app.get("/setup/telegram", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
     index_file = WORKSPACE_ROOT / "frontend" / "dashboard" / "index.html"
     if index_file.exists():
         return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>VYZN Surveillance Console</h1>")
+    return HTMLResponse(content="<h1>VYZN Netra</h1>")

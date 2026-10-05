@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Important clips — VYZN</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="app-shell">
+
+  <!-- Desktop Sidebar -->
+  <div id="app-sidebar"></div>
+
+  <!-- Main Content Wrapper -->
+  <div class="shell-main-wrapper">
+    <!-- Top Header -->
+    <div id="app-header"></div>
+
+    <!-- Main Content -->
+    <main class="shell-content" id="main-content">
+
+      <!-- Page Header -->
+      <div class="clips-page-header">
+        <h1 class="clips-page-title" id="clips-title">Important clips</h1>
+        <span class="clips-count-badge" id="clips-summary-badge">Loading…</span>
+      </div>
+
+      <!-- Mobile Filters Trigger Button -->
+      <div class="mobile-filters-trigger">
+        <button type="button" class="btn btn-secondary" id="btn-open-mobile-filters" style="width: 100%; display: flex; justify-content: space-between; align-items: center;">
+          <span>🔍 Filters</span>
+          <span class="badge" id="mobile-filter-count-badge" style="display: none; background: var(--action); color: #fff; border-radius: 10px; padding: 2px 7px; font-size: 11px;">0</span>
+        </button>
+      </div>
+
+      <!-- Desktop Filters Bar (Section 6.3) -->
+      <section class="clips-filters-bar" id="clips-filters-bar" aria-label="Clip filters">
+        <div class="filter-group">
+          <label class="filter-label" for="filter-camera">Camera</label>
+          <select class="filter-select" id="filter-camera">
+            <option value="all">All</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <span class="filter-label">Importance</span>
+          <div class="filter-segmented" id="filter-importance-group">
+            <button type="button" class="filter-seg-btn is-active" data-val="all">All</button>
+            <button type="button" class="filter-seg-btn" data-val="alert">Alert</button>
+            <button type="button" class="filter-seg-btn" data-val="review">Review</button>
+          </div>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="filter-status">Status</label>
+          <select class="filter-select" id="filter-status">
+            <option value="all">All</option>
+            <option value="unreviewed" selected>Unreviewed</option>
+            <option value="reviewed">Reviewed</option>
+            <option value="not_an_issue">Not an issue</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="filter-what">What</label>
+          <select class="filter-select" id="filter-what">
+            <option value="all">All</option>
+            <option value="person">Person</option>
+            <option value="vehicle">Vehicle</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label class="filter-label" for="filter-when">When</label>
+          <select class="filter-select" id="filter-when">
+            <option value="last_72h" selected>Last 72 h</option>
+            <option value="last_6h">Last 6 h</option>
+            <option value="last_24h">Last 24 h</option>
+          </select>
+        </div>
+
+        <button type="button" class="btn-clear-filters" id="btn-clear-filters">Clear filters</button>
+      </section>
+
+      <!-- Empty State: Zero clips ever recorded -->
+      <div id="clips-zero-empty" class="empty-state" style="display: none; margin-top: var(--space-8);">
+        <div style="font-size: 36px;">🎬</div>
+        <div style="font-size: 18px; font-weight: 600; color: var(--text-1);">No clips yet</div>
+        <p class="empty-state-text" style="max-width: 400px; text-align: center;">VYZN saves a clip when something happens inside a watch area.</p>
+        <a href="/areas" class="btn btn-primary" style="text-decoration: none; margin-top: var(--space-2);">Choose the area to watch</a>
+      </div>
+
+      <!-- Empty State: Filters match nothing -->
+      <div id="clips-no-match-empty" class="empty-state" style="display: none; margin-top: var(--space-8);">
+        <div style="font-size: 32px;">🔍</div>
+        <div style="font-size: 16px; font-weight: 600; color: var(--text-1);">No clips match these filters</div>
+        <button type="button" class="btn btn-secondary" id="btn-empty-clear-filters" style="margin-top: var(--space-2);">Clear filters</button>
+      </div>
+
+      <!-- ClipCard Grid (4 columns desktop, 3 tablet, 1 mobile) -->
+      <section class="clips-grid" id="clips-grid" aria-label="Clips gallery">
+        <!-- Rendered dynamically -->
+      </section>
+
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <div id="app-bottom-nav"></div>
+  </div>
+
+  <!-- Mobile Filters Bottom Sheet -->
+  <div class="modal-scrim" id="modal-mobile-filters" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="mobile-filters-title">
+    <div class="modal-card" style="max-width: 400px; width: 100%;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-3);">
+        <h3 class="modal-title" id="mobile-filters-title">Filters</h3>
+        <button type="button" class="btn btn-quiet" id="btn-close-mobile-filters" style="font-size: 18px;">✕</button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--space-3);">
+        <div>
+          <label class="form-label" for="m-filter-camera">Camera</label>
+          <select class="form-input" id="m-filter-camera">
+            <option value="all">All</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Importance</label>
+          <div class="segmented-control" id="m-filter-importance" style="width: 100%;">
+            <button type="button" class="segmented-option is-selected" data-val="all" style="flex: 1;">All</button>
+            <button type="button" class="segmented-option" data-val="alert" style="flex: 1;">Alert</button>
+            <button type="button" class="segmented-option" data-val="review" style="flex: 1;">Review</button>
+          </div>
+        </div>
+        <div>
+          <label class="form-label" for="m-filter-status">Status</label>
+          <select class="form-input" id="m-filter-status">
+            <option value="all">All</option>
+            <option value="unreviewed" selected>Unreviewed</option>
+            <option value="reviewed">Reviewed</option>
+            <option value="not_an_issue">Not an issue</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" for="m-filter-what">What</label>
+          <select class="form-input" id="m-filter-what">
+            <option value="all">All</option>
+            <option value="person">Person</option>
+            <option value="vehicle">Vehicle</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" for="m-filter-when">When</label>
+          <select class="form-input" id="m-filter-when">
+            <option value="last_72h" selected>Last 72 h</option>
+            <option value="last_6h">Last 6 h</option>
+            <option value="last_24h">Last 24 h</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions" style="margin-top: var(--space-4); display: flex; gap: var(--space-2);">
+        <button type="button" class="btn btn-secondary" id="m-btn-clear-filters" style="flex: 1;">Clear</button>
+        <button type="button" class="btn btn-primary" id="m-btn-apply-filters" style="flex: 1;">Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="vyzn-toast-container" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/static/clips.js"></script>
+</body>
+</html>

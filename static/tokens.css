@@ -1,0 +1,224 @@
+/* ==========================================================================
+   VYZN Design System — Tokens, Themes, and Self-Hosted IBM Plex Typography
+   ========================================================================== */
+
+/* 1. Self-Hosted Typography */
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-mono-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans Devanagari';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-devanagari-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'IBM Plex Sans Devanagari';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/ibm-plex-sans-devanagari-600.woff2') format('woff2');
+}
+
+/* 2. Theme Tokens */
+:root,
+:root[data-theme="dark"] {
+  --bg-canvas: #14171A;
+  --bg-surface: #1B1F23;
+  --bg-raised: #23282D;
+  --border: #2E353B;
+  --border-strong: #3B444B;
+
+  --text-1: #E8EBED;
+  --text-2: #A6AFB6;
+  --text-3: #8A939A;
+
+  --action: #2F6FD6;
+  --action-hover: #3A7BE6;
+  --action-text: #7DB2FF;
+  --on-action: #FFFFFF;
+  --action-tint: #182B49;
+
+  --alert: #F0575D;
+  --alert-bg: #2E1A1C;
+  --alert-border: #6B2A2E;
+
+  --review: #E5A33B;
+  --review-bg: #2B2314;
+  --review-border: #5C4517;
+
+  --ok: #52B788;
+  --ok-bg: #16261E;
+
+  --video-bg: #0E1113;
+  --scrim: rgba(10, 12, 14, 0.62);
+  --focus: #7DB2FF;
+  --shadow-drawer: none;
+
+  /* Font Families */
+  --font-ui: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: 'IBM Plex Mono', SFMono-Regular, Consolas, monospace;
+  --font-devanagari: 'IBM Plex Sans Devanagari', 'IBM Plex Sans', sans-serif;
+
+  /* Spacing Grid (4px base) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* Corner Radii */
+  --radius-video: 4px;
+  /* Typography Scale */
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 16px;
+  --text-lg: 18px;
+  --text-xl: 20px;
+  --text-2xl: 24px;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  /* Elevation Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
+
+  /* Transitions */
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --ease-default: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Semantic Aliases */
+  --fg-default: var(--text-1);
+  --fg-muted: var(--text-2);
+  --fg-dim: var(--text-3);
+  --border-default: var(--border);
+  --border-subtle: var(--border);
+  --border-focus: var(--focus);
+  --ring-focus: rgba(125, 178, 255, 0.25);
+  --status-success-fg: var(--ok);
+  --status-success-bg: var(--ok-bg);
+  --status-error-fg: var(--alert);
+  --status-error-bg: var(--alert-bg);
+  --status-warning-fg: var(--review);
+  --status-warning-bg: var(--review-bg);
+  --font-sans: var(--font-ui);
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-panel);
+}
+
+:root[data-theme="light"] {
+  --bg-canvas: #F1F3F4;
+  --bg-surface: #FFFFFF;
+  --bg-raised: #F7F8F9;
+  --border: #D9DEE2;
+  --border-strong: #BFC6CC;
+
+  --text-1: #14171A;
+  --text-2: #4B555C;
+  --text-3: #5D6770;
+
+  --action: #2F6FD6;
+  --action-hover: #2560C0;
+  --action-text: #2358B0;
+  --on-action: #FFFFFF;
+  --action-tint: #E6EFFC;
+
+  --alert: #C62F38;
+  --alert-bg: #FCECEC;
+  --alert-border: #F0B9BC;
+
+  --review: #9A6200;
+  --review-bg: #FFF4DD;
+  --review-border: #EBCB8A;
+
+  --ok: #186B47;
+  --ok-bg: #E6F4EC;
+
+  --video-bg: #0E1113;
+  --scrim: rgba(20, 23, 26, 0.55);
+  --focus: #2358B0;
+  --shadow-drawer: 0 4px 24px rgba(0, 0, 0, 0.08);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+
+  /* Semantic Aliases (Light) */
+  --fg-default: var(--text-1);
+  --fg-muted: var(--text-2);
+  --fg-dim: var(--text-3);
+  --border-default: var(--border);
+  --border-subtle: var(--border);
+  --border-focus: var(--focus);
+  --ring-focus: rgba(35, 88, 176, 0.2);
+  --status-success-fg: var(--ok);
+  --status-success-bg: var(--ok-bg);
+  --status-error-fg: var(--alert);
+  --status-error-bg: var(--alert-bg);
+  --status-warning-fg: var(--review);
+  --status-warning-bg: var(--review-bg);
+}
+
+/* 3. Base Resets & Layout Primitives */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  background-color: var(--bg-canvas);
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tabular Numerals for counts and times */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Focus Visible */
+*:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
