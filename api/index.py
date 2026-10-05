@@ -1,6 +1,6 @@
 """
 Vercel Serverless Entry Point for VYZN Netra Platform.
-Enables cloud hosting of VYZN Surveillance Dashboard, Fleet Portal, and Mobile Clip Viewer.
+Enables cloud hosting of VYZN Surveillance Dashboard and Mobile Clip Viewer.
 """
 
 import os
@@ -154,108 +154,6 @@ def get_telegram_status():
 def telegram_ping():
     return {"ok": True, "bot_username": "VyznAlertBot", "latency_ms": 42}
 
-@app.get("/api/v1/fleet/sites")
-def fleet_sites(request: Request):
-    return [
-        {
-            "site_id": "site_verma_retail",
-            "name": "Verma Electronics and Hardware (Noida)",
-            "status": "ONLINE",
-            "config_version": 3,
-            "config_hash": "c71ab89f",
-            "edge_url": "https://vyzn.ai/vms/site_verma",
-            "system": {"cpu_usage_pct": 14, "ram_used_mb": 410, "disk_free_pct": 74},
-            "pipeline": {"active_cameras": 3}
-        },
-        {
-            "site_id": "site_sharma_kirana",
-            "name": "Sharma Supermarket (South Delhi)",
-            "status": "ONLINE",
-            "config_version": 2,
-            "config_hash": "f419dc01",
-            "edge_url": "https://vyzn.ai/vms/site_sharma",
-            "system": {"cpu_usage_pct": 21, "ram_used_mb": 520, "disk_free_pct": 68},
-            "pipeline": {"active_cameras": 4}
-        }
-    ]
-
-@app.get("/api/v1/fleet/incidents")
-def fleet_incidents():
-    return [
-        {
-            "site_id": "site_verma_retail",
-            "site_name": "Verma Electronics",
-            "camera_id": "cam_cash_counter",
-            "object_type": "person",
-            "score": 92
-        }
-    ]
-
-@app.get("/api/v1/fleet/onboarding/drafts")
-def list_drafts():
-    return {"status": "success", "count": len(DRAFTS_STORE), "drafts": list(DRAFTS_STORE.values())}
-
-@app.put("/api/v1/fleet/onboarding/drafts/{draft_id}")
-def save_draft(draft_id: str, payload: Dict[str, Any]):
-    payload["draft_id"] = draft_id
-    DRAFTS_STORE[draft_id] = payload
-    return {"status": "saved", "draft": payload}
-
-@app.get("/api/v1/fleet/onboarding/drafts/{draft_id}")
-def get_draft(draft_id: str):
-    if draft_id not in DRAFTS_STORE:
-        raise HTTPException(status_code=404, detail="Draft not found")
-    return DRAFTS_STORE[draft_id]
-
-@app.delete("/api/v1/fleet/onboarding/drafts/{draft_id}")
-def delete_draft(draft_id: str):
-    DRAFTS_STORE.pop(draft_id, None)
-    return {"status": "deleted", "draft_id": draft_id}
-
-@app.post("/api/v1/fleet/onboarding/drafts/{draft_id}/test-alert")
-def test_draft_alert(draft_id: str):
-    if draft_id in DRAFTS_STORE:
-        DRAFTS_STORE[draft_id]["test_verified"] = True
-    return {
-        "status": "test_delivered",
-        "draft_id": draft_id,
-        "target_chat": "987654321",
-        "test_verified": True,
-        "message": "Synthetic test alert verified delivered on Telegram!"
-    }
-
-@app.post("/api/v1/fleet/onboarding/drafts/{draft_id}/go-live")
-def go_live_draft(draft_id: str):
-    d = DRAFTS_STORE.get(draft_id, {})
-    if not d.get("test_verified"):
-        raise HTTPException(status_code=400, detail="Synthetic test alert must be verified on Telegram first.")
-    return {
-        "status": "online",
-        "site_id": "site_" + draft_id,
-        "edge_secret_preview": "vyzn_edge_secret_...",
-        "message": "Site successfully provisioned and deployed online."
-    }
-
-@app.post("/api/v1/fleet/sites/{site_id}/stolen")
-def report_stolen(site_id: str):
-    repl_id = f"draft_repl_{site_id}_{int(time.time())}"
-    DRAFTS_STORE[repl_id] = {
-        "draft_id": repl_id,
-        "site_name": f"Replacement for {site_id}",
-        "current_step": 1,
-        "test_verified": False,
-        "data": {
-            "identity": {"site_name": f"Replacement for {site_id}"},
-            "schedule": {"hours_start": "09:00", "hours_end": "21:00", "threshold": 70}
-        }
-    }
-    return {
-        "status": "stolen_revoked",
-        "site_id": site_id,
-        "message": "Credentials revoked. Replacement draft prepared.",
-        "replacement_draft_id": repl_id
-    }
-
 
 
 # ---------------------------------------------------------------------------
@@ -300,13 +198,13 @@ def login(req: LoginRequest):
     
     # Attempt Supabase or local auth via the cloud module
     try:
-        from vyzn_cloud.supabase_client import sign_in_with_email
+        from vyzn.supabase_client import sign_in_with_email
         result = sign_in_with_email(email, password)
         return result
     except HTTPException:
         raise
     except ImportError:
-        # vyzn_cloud not available in serverless env — use minimal local auth
+        # vyzn module not available in serverless env — use minimal local auth
         LOCAL_DEMO_USERS = {
             "admin@vyzn.ai": {"password": "admin123", "role": "admin", "full_name": "Fleet Admin"},
             "installer@safenet.in": {"password": "safenet123", "role": "installer", "full_name": "SafeNet Installer"},
@@ -504,13 +402,6 @@ def serve_clips(clip_id: Optional[str] = None):
     if p.exists():
         return HTMLResponse(content=p.read_text(encoding="utf-8"))
     return HTMLResponse(content="<h1>Clips page not found</h1>")
-
-@app.get("/fleet", response_class=HTMLResponse)
-def serve_fleet():
-    fleet_file = WORKSPACE_ROOT / "vyzn_cloud" / "templates" / "fleet.html"
-    if fleet_file.exists():
-        return HTMLResponse(content=fleet_file.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>VYZN Fleet Operations</h1><p>Template not found.</p>")
 
 @app.get("/login", response_class=HTMLResponse)
 @app.get("/login/code", response_class=HTMLResponse)

@@ -40,11 +40,6 @@ from tests.test_whatsapp import (
 )
 from tests.test_cloud_sync import test_cloud_sync_worker_marks_synced
 from tests.test_zones_api import test_zones_and_snapshot_api
-from tests.test_cloud_backend import (
-
-    test_dead_man_watchdog_detects_silence,
-    test_cloud_webhook_heartbeat_and_triage
-)
 from tests.test_onnx_detector import (
     test_onnx_detector_initialization_and_fallback,
     test_detector_factory
@@ -65,26 +60,6 @@ from tests.test_adaptive_calibrator import (
     test_hard_floor_inviolability_under_severe_camera_bias,
     test_calibrator_cannot_influence_upstream_detection
 )
-from tests.test_ota_sync import (
-    test_canonical_hash_and_hmac_tamper_detection,
-    test_semantic_geometry_validation,
-    test_wholesale_atomic_zone_swap_and_rollback
-)
-from tests.test_fleet_portal import (
-    test_fleet_portal_authentication_enforcement,
-    test_fleet_tenant_scoping_and_remote_config_dispatch,
-    test_stolen_device_site_key_revocation,
-    test_installer_key_revocation,
-    test_durable_revocation_across_service_restart,
-    test_site_key_reissuance_and_staged_config_resigning,
-    test_fleet_portal_html_rendering
-)
-from tests.test_e2e_fleet_sync import test_end_to_end_fleet_observability_and_ota_closed_loop
-from tests.test_cloud_ingest import (
-    test_cloud_ingest_authentication_enforcement,
-    test_cloud_ingest_snapshot_processing_and_threat_scoring,
-    test_cloud_ingest_json_webhook
-)
 from tests.test_discovery import (
     test_discovery_service_model_and_probing,
     test_camera_discovery_and_adoption_endpoints
@@ -96,8 +71,7 @@ from tests.test_resource_governor import (
 from tests.test_auth_flow import test_phase2_auth_and_telegram_flow
 from tests.test_telegram_alerts import (
     test_telegram_alert_payload_structure,
-    test_telegram_alert_simulation_dispatch,
-    test_telegram_webhook_triage_and_commands
+    test_telegram_alert_simulation_dispatch
 )
 from tests.test_supabase_auth import (
     test_supabase_auth_login_valid,
@@ -114,16 +88,22 @@ from tests.test_appearance_and_forensics import (
     test_bandwidth_settings_api,
     test_forensic_search_endpoint
 )
-from tests.test_telegram_live_engine import (
-    test_telegram_alert_payload_and_simulation,
-    test_telegram_worker_callbacks,
-    test_telegram_api_settings_and_test_ping,
-    test_cloud_fleet_reverse_proxy
+from tests.test_phase3_cameras import (
+    test_phase3_camera_discovery_and_adoption,
+    test_phase3_camera_test_probe_and_health
 )
-from tests.test_onboarding_and_stolen_flow import (
-    test_account_lockout_after_five_failed_attempts,
-    test_interruption_proof_onboarding_and_go_live_gate,
-    test_stolen_device_flow_and_replacement_wizard
+from tests.test_phase4_areas import (
+    test_phase4_area_crud_and_tier_mapping,
+    test_phase4_area_time_window_validation
+)
+from tests.test_phase5_clips import (
+    test_phase5_list_clips_filter_and_pagination,
+    test_phase5_download_clip_and_evidence_pack
+)
+from tests.test_phone_otp_and_supabase import (
+    test_email_login_and_otp_dispatch,
+    test_phone_verification_start_and_verify,
+    test_supabase_status_endpoint
 )
 
 
@@ -151,8 +131,6 @@ def run_all():
         ("test_mobile_viewer_token_generation_and_validation", lambda: test_mobile_viewer_token_generation_and_validation()),
         ("test_cloud_sync_worker_marks_synced", lambda: with_tmp_path(test_cloud_sync_worker_marks_synced)),
         ("test_zones_and_snapshot_api", lambda: with_tmp_path(test_zones_and_snapshot_api)),
-        ("test_dead_man_watchdog_detects_silence", lambda: test_dead_man_watchdog_detects_silence()),
-        ("test_cloud_webhook_heartbeat_and_triage", lambda: test_cloud_webhook_heartbeat_and_triage()),
         ("test_onnx_detector_initialization_and_fallback", lambda: test_onnx_detector_initialization_and_fallback()),
         ("test_detector_factory", lambda: test_detector_factory()),
         ("test_privacy_masker_blur", lambda: test_privacy_masker_blur()),
@@ -167,27 +145,12 @@ def run_all():
         ("test_rolling_window_decays_old_nuisance", lambda: with_tmp_path(test_rolling_window_decays_old_nuisance)),
         ("test_hard_floor_inviolability_under_severe_camera_bias", lambda: test_hard_floor_inviolability_under_severe_camera_bias()),
         ("test_calibrator_cannot_influence_upstream_detection", lambda: test_calibrator_cannot_influence_upstream_detection()),
-        ("test_canonical_hash_and_hmac_tamper_detection", lambda: test_canonical_hash_and_hmac_tamper_detection()),
-        ("test_semantic_geometry_validation", lambda: test_semantic_geometry_validation()),
-        ("test_wholesale_atomic_zone_swap_and_rollback", lambda: with_tmp_path(test_wholesale_atomic_zone_swap_and_rollback)),
-        ("test_fleet_portal_authentication_enforcement", lambda: test_fleet_portal_authentication_enforcement()),
-        ("test_fleet_tenant_scoping_and_remote_config_dispatch", lambda: test_fleet_tenant_scoping_and_remote_config_dispatch()),
-        ("test_stolen_device_site_key_revocation", lambda: test_stolen_device_site_key_revocation()),
-        ("test_installer_key_revocation", lambda: test_installer_key_revocation()),
-        ("test_durable_revocation_across_service_restart", lambda: test_durable_revocation_across_service_restart()),
-        ("test_site_key_reissuance_and_staged_config_resigning", lambda: test_site_key_reissuance_and_staged_config_resigning()),
-        ("test_fleet_portal_html_rendering", lambda: test_fleet_portal_html_rendering()),
-        ("test_end_to_end_fleet_observability_and_ota_closed_loop", lambda: with_tmp_path(test_end_to_end_fleet_observability_and_ota_closed_loop)),
-        ("test_cloud_ingest_authentication_enforcement", lambda: test_cloud_ingest_authentication_enforcement()),
-        ("test_cloud_ingest_snapshot_processing_and_threat_scoring", lambda: test_cloud_ingest_snapshot_processing_and_threat_scoring()),
-        ("test_cloud_ingest_json_webhook", lambda: test_cloud_ingest_json_webhook()),
         ("test_discovery_service_model_and_probing", lambda: test_discovery_service_model_and_probing()),
         ("test_camera_discovery_and_adoption_endpoints", lambda: with_tmp_path(test_camera_discovery_and_adoption_endpoints)),
         ("test_resource_governor_day_night_transition", lambda: test_resource_governor_day_night_transition()),
         ("test_resource_governor_priority_api_stability", lambda: test_resource_governor_priority_api_stability()),
         ("test_telegram_alert_payload_structure", lambda: test_telegram_alert_payload_structure()),
         ("test_telegram_alert_simulation_dispatch", lambda: test_telegram_alert_simulation_dispatch()),
-        ("test_telegram_webhook_triage_and_commands", lambda: test_telegram_webhook_triage_and_commands()),
         ("test_supabase_auth_login_valid", lambda: with_tmp_path(test_supabase_auth_login_valid)),
         ("test_supabase_auth_login_invalid", lambda: with_tmp_path(test_supabase_auth_login_invalid)),
         ("test_supabase_auth_register_and_profile", lambda: with_tmp_path(test_supabase_auth_register_and_profile)),
@@ -198,19 +161,17 @@ def run_all():
         ("test_database_attribute_query_filtering", lambda: test_database_attribute_query_filtering()),
         ("test_forensic_pack_generation_and_manifest", lambda: test_forensic_pack_generation_and_manifest()),
         ("test_bandwidth_settings_api", lambda: test_bandwidth_settings_api()),
-        ("test_telegram_alert_payload_and_simulation", lambda: test_telegram_alert_payload_and_simulation()),
-        ("test_telegram_worker_callbacks", lambda: with_tmp_path(test_telegram_worker_callbacks)),
-        ("test_telegram_api_settings_and_test_ping", lambda: with_tmp_path(test_telegram_api_settings_and_test_ping)),
-        ("test_cloud_fleet_reverse_proxy", lambda: test_cloud_fleet_reverse_proxy()),
-        ("test_account_lockout_after_five_failed_attempts", lambda: test_account_lockout_after_five_failed_attempts()),
-        ("test_interruption_proof_onboarding_and_go_live_gate", lambda: test_interruption_proof_onboarding_and_go_live_gate()),
-        ("test_stolen_device_flow_and_replacement_wizard", lambda: test_stolen_device_flow_and_replacement_wizard()),
         ("test_forensic_search_endpoint", lambda: test_forensic_search_endpoint()),
+        ("test_phase3_camera_discovery_and_adoption", lambda: with_tmp_path(test_phase3_camera_discovery_and_adoption)),
+        ("test_phase3_camera_test_probe_and_health", lambda: with_tmp_path(test_phase3_camera_test_probe_and_health)),
+        ("test_phase4_area_crud_and_tier_mapping", lambda: with_tmp_path(test_phase4_area_crud_and_tier_mapping)),
+        ("test_phase4_area_time_window_validation", lambda: with_tmp_path(test_phase4_area_time_window_validation)),
+        ("test_phase5_list_clips_filter_and_pagination", lambda: with_tmp_path(test_phase5_list_clips_filter_and_pagination)),
+        ("test_phase5_download_clip_and_evidence_pack", lambda: with_tmp_path(test_phase5_download_clip_and_evidence_pack)),
+        ("test_email_login_and_otp_dispatch", lambda: with_tmp_path(test_email_login_and_otp_dispatch)),
+        ("test_phone_verification_start_and_verify", lambda: with_tmp_path(test_phone_verification_start_and_verify)),
+        ("test_supabase_status_endpoint", lambda: with_tmp_path(test_supabase_status_endpoint)),
     ]
-
-
-    from vyzn_cloud.security import _reset_security_state
-    _reset_security_state()
 
     passed = 0
     failed = 0

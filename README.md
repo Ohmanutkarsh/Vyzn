@@ -1,12 +1,10 @@
 # VYZN AI — Edge-to-Cloud Intelligent Video Surveillance & Shoplifting Defense System
 
-[![Tests](https://img.shields.io/badge/tests-75%2F75%20passing-brightgreen.svg)](#test-suite)
-[![Architecture](https://img.shields.io/badge/architecture-Edge%20%2B%20Cloud%20Fleet-blue.svg)](#architecture)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#test-suite)
 [![Notifications](https://img.shields.io/badge/alerts-Telegram%20Engine-2CA5E0.svg)](#telegram-alert-engine)
 [![Deployment](https://img.shields.io/badge/deploy-Vercel%20Serverless-black.svg)](#cloud-and-vercel-deployment)
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FOhmanutkarsh%2FVyzn)
 
-**VYZN** is an enterprise-grade AI-powered Video Management System (VMS) engineered for retail theft prevention, multi-store surveillance, and sub-second incident alerting. It pairs local, zero-hardware edge intelligence with a centralized multi-tenant cloud fleet console and instant Telegram incident triage.
+**VYZN** is an enterprise-grade AI-powered Video Management System (VMS) engineered for retail theft prevention, local edge surveillance, and sub-second incident alerting. It pairs local, zero-hardware edge intelligence with Supabase cloud user sync and instant Telegram incident triage.
 
 ---
 
@@ -25,18 +23,12 @@
 ### 3. Telegram Incident Engine & Instant Triage
 - **Sub-Second Alerts**: Delivers MP4 video evidence clips, annotated detection keyframes, and threat assessments directly to store managers via Telegram bot.
 - **Interactive Inline Actions**:
-  - ⭐ **Star Clip**: Permanently preserves critical evidence against storage reaper pruning.
+  - ⭐ **Star Clip**: Permanently preserves critical evidence against 72-hour storage reaper pruning.
   - ❌ **False Alarm**: Suppresses redundant pings, lowers camera sensitivity temporarily, and logs feedback for calibration.
-  - 🚨 **Declare Stolen Items**: Immediate 3-step modal flow to capture missing SKU, quantity, value, and dispatch digital PDF police incident dossiers.
 
 ### 4. Forensic Visual Appearance Search
-- **Cross-Camera Re-Identification**: Search for suspects across multiple camera feeds by color histogram (clothing upper/lower profile), bounding box size, and timestamp ranges.
-- **One-Click Forensic Export**: Generates tamper-evident timestamped evidence bundles with cryptographic hash signatures.
-
-### 5. Multi-Store Fleet Command & 2D Floorplan
-- **Multi-Tenant Dashboard**: Seamlessly toggle between multiple retail branch locations.
-- **Interactive Floorplan**: Real-time 2D spatial layout highlighting active camera fields of view and blinking threat markers.
-- **Bandwidth QoS & Edge Governance**: Automatic adaptive stream resolution scaling (1080p -> 720p -> thumbnail) under constrained uplink conditions.
+- **Cross-Camera Re-Identification**: Search for suspects across multiple camera feeds by color histogram, bounding box size, and timestamp ranges.
+- **One-Click Evidence Pack**: Generates tamper-evident timestamped evidence bundles with cryptographic hash signatures.
 
 ---
 
@@ -51,14 +43,11 @@ graph TD
         YOLO --> DB[(SQLite Local DB)]
         YOLO --> CW[Evidence Clip Writer]
         YOLO --> TG[Telegram Alert Bot]
-        CW -->|Sync Event & Video| SYNC[Cloud Sync Telemetry]
     end
 
-    subgraph "VYZN Cloud / Vercel Serverless"
-        SYNC --> API[Cloud Ingest API / Supabase]
-        API --> WATCHDOG[Fleet Health Watchdog]
-        API --> FLEET_UI[Fleet Command Center]
-        API --> DASHBOARD[Live Web Console]
+    subgraph "Cloud & Auth"
+        DB -.->|User & Audit Sync| SUPA[Supabase Cloud Database]
+        APP[Web Browser / Mobile] -->|HTTP / WS| VYZN[VYZN Dashboard Console :8000]
     end
 ```
 
@@ -68,30 +57,30 @@ graph TD
 
 ```
 ├── api/                     # Vercel Serverless Python entrypoints
-│   ├── index.py             # Serverless FastAPI gateway for Cloud Fleet & Dashboard
+│   ├── index.py             # Serverless FastAPI gateway for Dashboard
 │   └── requirements.txt     # Lightweight cloud dependencies
 ├── config/                  # Zones, cameras, and store locations schema
-├── frontend/dashboard/      # Single-page modern dashboard UI
-│   ├── index.html           # Live cameras, forensic search, zone editor, alerts
-│   ├── styles.css           # Clean dark-mode industrial design system
-│   └── app.js               # Reactive WebSocket/polling client controller
-├── tests/                   # Complete automated test suite (75 tests)
+├── frontend/dashboard/      # Modern v1.1 Web App (Auth, Overview, Cameras, Areas, Clips)
+│   ├── index.html           # Auth entrypoint with session router
+│   ├── overview.html        # Unified overview & activity stream
+│   ├── cameras.html         # Camera grid and management
+│   ├── areas.html           # Watch areas and tier configuration
+│   └── clips.html           # 72-hour clips & forensic player
+├── public/                  # Static assets & distribution build
+├── static/                  # Shared frontend assets & web components
+├── tests/                   # Automated unit & integration test suite
 ├── vyzn/                    # Core Edge VMS Engine
 │   ├── ai/                  # YOLO detection, tracking, appearance vector extraction
-│   ├── alerts/              # Telegram & WhatsApp alert dispatchers
+│   ├── alerts/              # Telegram & alert dispatchers
 │   ├── api/                 # Edge FastAPI endpoints & MJPEG generators
 │   ├── capture/             # RTSP, ONVIF, Phone camera, and synthetic capture
-│   ├── core/                # Configuration, SQLite WAL database, event buses
+│   ├── core/                # Configuration, SQLite WAL database, Supabase sync
 │   ├── motion/              # MOG2 background subtraction gate
 │   ├── recording/           # Rolling ring buffer & MP4 evidence clip writer
 │   ├── scoring/             # Suspicion scoring, calibrator, zone matrix
-│   └── storage/             # Automated disk quota & retention reaper
-├── vyzn_cloud/              # Centralized Multi-Store Cloud Fleet
-│   ├── app.py               # Fleet manager & heartbeat ingest API
-│   ├── fleet_routes.py      # Multi-store telemetry, incident escalation, onboarding
-│   └── templates/fleet.html # Multi-store enterprise command portal
+│   └── storage/             # Automated disk quota & 72-hour retention reaper
 ├── run_edge.py              # Single-command Edge VMS runtime launcher
-├── vercel.json              # Vercel routing & serverless build manifest
+├── vercel.json              # Vercel routing manifest
 └── requirements.txt         # Edge runtime dependencies
 ```
 
@@ -103,26 +92,18 @@ graph TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/Ohmanutkarsh/Vyzn.git
-cd Vyzn
+git clone https://github.com/Ohmanutkarsh/Vyzn-2.git
+cd Vyzn-2
 
 # Install dependencies
 pip install -r requirements.txt
 
 # Launch Edge VMS with Web Console on port 8000
-python run_edge.py --api --port 8000
+python run_edge.py --simulate 3 --api --port 8000
 ```
-Open `http://localhost:8000` to access the edge dashboard.
+Open `http://localhost:8000` to access the VYZN dashboard.
 
-### 2. Multi-Store Cloud Fleet Server
-
-```bash
-# Launch Cloud Fleet Hub on port 9000
-python -m uvicorn vyzn_cloud.app:cloud_app --host 0.0.0.0 --port 9000
-```
-Open `http://localhost:9000/fleet` for the multi-store operational command center.
-
-### 3. Connect a Phone Camera
+### 2. Connect a Phone Camera
 
 1. Navigate to the **Cameras** tab on the dashboard.
 2. Click **+ Connect Phone Camera**.
@@ -141,8 +122,7 @@ VYZN includes pre-configured serverless handlers for instant deployment to Verce
    ```
 2. Import repository into [Vercel](https://vercel.com).
 3. Vercel automatically detects `vercel.json` and provisions:
-   - Root dashboard at `/`
-   - Fleet Command Center at `/fleet`
+   - Root auth & dashboard entry at `/`
    - Real-time cloud API endpoints under `/api/*`
 
 ---

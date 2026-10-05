@@ -36,7 +36,7 @@ from vyzn.alerts.telegram import (
     test_telegram_connection,
     send_telegram_threat_alert
 )
-from vyzn_cloud.supabase_client import (
+from vyzn.supabase_client import (
     sign_in_with_email,
     sign_up_with_email,
     verify_supabase_jwt,
@@ -175,7 +175,7 @@ def get_optional_user(request: Request) -> Optional[Dict[str, Any]]:
         return None
 
     try:
-        from vyzn_cloud.supabase_client import SUPABASE_JWT_SECRET
+        from vyzn.supabase_client import SUPABASE_JWT_SECRET
         import jwt
         payload = jwt.decode(
             token,
@@ -1807,7 +1807,7 @@ def api_auth_verify_phone_otp(req: PhoneOtpVerifyRequest, user: Optional[Dict[st
 @app.get("/api/v1/auth/me")
 def api_auth_me(user: Dict[str, Any] = Security(verify_supabase_jwt)) -> Dict[str, Any]:
     """Returns authenticated user profile, phone status, tenant ID, and assigned role."""
-    from vyzn_cloud.supabase_client import LOCAL_DEV_USERS
+    from vyzn.supabase_client import LOCAL_DEV_USERS
     user_email = user.get("email")
     if user_email and user_email in LOCAL_DEV_USERS:
         dev_u = LOCAL_DEV_USERS[user_email]

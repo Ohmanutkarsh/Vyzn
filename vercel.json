@@ -61,10 +61,6 @@
       "dest": "/public/index.html"
     },
     {
-      "src": "/fleet",
-      "dest": "/fleet.html"
-    },
-    {
       "src": "/",
       "dest": "/public/index.html"
     }

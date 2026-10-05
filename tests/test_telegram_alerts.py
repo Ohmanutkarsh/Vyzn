@@ -9,7 +9,6 @@ from starlette.testclient import TestClient
 
 from vyzn.core.events import EventRecord
 from vyzn.alerts.telegram import TelegramAlertProvider, send_telegram_threat_alert
-from vyzn_cloud.app import cloud_app, triage_log
 
 
 def test_telegram_alert_payload_structure():
@@ -53,66 +52,3 @@ def test_telegram_alert_simulation_dispatch():
     )
     # Convenience helper in offline/simulation mode
     assert send_telegram_threat_alert(event) is True
-
-
-def test_telegram_webhook_triage_and_commands():
-    client = TestClient(cloud_app)
-    triage_log.clear()
-
-    # 1. Simulate shopkeeper tapping [❌ False Alarm] inline button
-    cq_payload = {
-        "update_id": 9991,
-        "callback_query": {
-            "id": "cq_12345",
-            "from": {
-                "id": 987654321,
-                "first_name": "Ramesh",
-                "username": "ramesh_kirana"
-            },
-            "data": "false_ev_tel_001",
-            "message": {
-                "message_id": 101,
-                "date": 1773220000
-            }
-        }
-    }
-
-    res = client.post("/webhook/telegram", json=cq_payload)
-    assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "processed"
-    assert data["type"] == "callback_query"
-    assert data["triage"]["button_id"] == "false_ev_tel_001"
-    assert len(triage_log) == 1
-    assert triage_log[0]["source"] == "telegram"
-    assert triage_log[0]["button_id"] == "false_ev_tel_001"
-
-    # 2. Simulate shopkeeper tapping [⭐ Star Clip]
-    star_payload = {
-        "update_id": 9992,
-        "callback_query": {
-            "id": "cq_12346",
-            "from": {"id": 987654321, "first_name": "Ramesh"},
-            "data": "star_ev_tel_001"
-        }
-    }
-    client.post("/webhook/telegram", json=star_payload)
-    assert len(triage_log) == 2
-    assert triage_log[1]["title"] == "Star Clip"
-
-    # 3. Simulate shopkeeper sending command /status
-    cmd_payload = {
-        "update_id": 9993,
-        "message": {
-            "message_id": 102,
-            "from": {"id": 987654321},
-            "chat": {"id": 987654321},
-            "text": "/status"
-        }
-    }
-    res_cmd = client.post("/webhook/telegram", json=cmd_payload)
-    assert res_cmd.status_code == 200
-    cmd_data = res_cmd.json()
-    assert cmd_data["type"] == "command"
-    assert cmd_data["command"] == "/status"
-    assert "Fleet Status" in cmd_data["reply_text"]

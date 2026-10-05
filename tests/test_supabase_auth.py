@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 from vyzn.api.routes import app, init_api
 from vyzn.core.config import EdgeSettings, CameraConfig
 from vyzn.core.database import EventDatabase
-from vyzn_cloud.supabase_client import (
+from vyzn.supabase_client import (
     sign_in_with_email,
     sign_up_with_email,
     generate_dev_token,
