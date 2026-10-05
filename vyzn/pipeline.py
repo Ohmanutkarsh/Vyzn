@@ -13,13 +13,13 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
 
-from vyzn.core.config import EdgeSettings, CameraConfig
+from vyzn.core.config import EdgeSettings, CameraConfig, ZonePolygon, WatchAreaConfig
 from vyzn.core.events import EventRecord, DetectionCandidate
 from vyzn.core.database import EventDatabase
 from vyzn.motion.mog2_gate import MOG2MotionGate
 from vyzn.ai.detector import BaseDetector, MockDetector, YOLOv8Detector
 from vyzn.ai.tracker import IOUTracker
-from vyzn.scoring.engine import ScoringEngine, is_time_after_hours, check_box_intersects_zone
+from vyzn.scoring.engine import ScoringEngine, is_time_after_hours, check_box_intersects_zone, is_foot_in_polygon
 from vyzn.recording.clip_writer import ClipWriter
 from vyzn.alerts.telegram import TelegramAlertProvider, start_telegram_poller, stop_telegram_poller
 from vyzn.alerts.dispatcher import AlertDispatcher
@@ -115,6 +115,14 @@ class EdgePipeline:
         self.active_event_alert_sent: Dict[str, bool] = {}
         self.active_event_best_candidates: Dict[str, Optional[DetectionCandidate]] = {}
 
+        # Initialize motion gate camera watch areas
+        for cam in self.settings.cameras:
+            areas = getattr(cam, "watch_areas", None)
+            if areas:
+                self.motion_gate.set_camera_areas(cam.camera_id, [a.polygon for a in areas if a.polygon])
+            elif getattr(cam, "restricted_zones", None):
+                self.motion_gate.set_camera_areas(cam.camera_id, [z.points for z in cam.restricted_zones if z.points])
+
         self.worker_thread: Optional[threading.Thread] = None
 
     def start(self):
@@ -169,35 +177,12 @@ class EdgePipeline:
 
         logger.info(f"Pipeline started with {len(self.capture_threads)} capture streams.")
 
-    def add_camera_stream(self, cam: CameraConfig):
-        """Dynamically launches a live capture thread for an adopted camera without pipeline restart."""
-        if cam.camera_id not in self.ring_buffers:
-            self.ring_buffers[cam.camera_id] = deque(maxlen=int(cam.target_fps * 10))
-
-        if self.use_synthetic and str(cam.rtsp_url).startswith("sim://"):
-            profile = "night_intruder" if cam.is_night_ir else "walking_person"
-            thread = SyntheticCameraThread(
-                config=cam,
-                output_queue=self.frame_queue,
-                motion_profile=profile
-            )
-        else:
-            thread = RTSPCaptureThread(
-                config=cam,
-                output_queue=self.frame_queue
-            )
-
-        self.capture_threads.append(thread)
-        if self.running:
-            thread.start()
-            logger.info(f"Dynamically launched live capture thread for camera [{cam.camera_id}].")
-
-    def get_camera_live_jpeg(self, camera_id: str, quality: int = 75) -> Optional[bytes]:
-        """Fetches the latest live JPEG from the camera's capture thread or ring buffer."""
+    def get_camera_live_jpeg(self, camera_id: str, quality: int = 75, max_width: int = 960) -> Optional[bytes]:
+        """Fetches the latest live JPEG from the camera's capture thread or ring buffer capped at max_width."""
         for t in self.capture_threads:
             if getattr(t, "config", None) and t.config.camera_id == camera_id:
                 if hasattr(t, "get_latest_jpeg"):
-                    jpeg = t.get_latest_jpeg(quality=quality)
+                    jpeg = t.get_latest_jpeg(quality=quality, max_width=max_width)
                     if jpeg:
                         return jpeg
 
@@ -205,8 +190,8 @@ class EdgePipeline:
         if camera_id in self.ring_buffers and self.ring_buffers[camera_id]:
             frame = self.ring_buffers[camera_id][-1]
             h, w = frame.shape[:2]
-            if w > 854:
-                frame = cv2.resize(frame, (854, int(854 * h / w)))
+            if w > max_width:
+                frame = cv2.resize(frame, (max_width, int(max_width * h / w)))
             ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if ret:
                 return jpeg.tobytes()
@@ -237,8 +222,23 @@ class EdgePipeline:
                 self.ring_buffers[camera_id].append(frame)
 
 
-            # 1. Motion Pre-Filter (MOG2)
-            has_motion, motion_ratio, _ = self.motion_gate.process_frame(camera_id, frame)
+            # Find camera config
+            cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
+            now_dt = datetime.now(timezone.utc)
+            after_hours = is_time_after_hours(now_dt, cam_config.business_hours) if cam_config else True
+
+            # Extract watch areas
+            watch_polys = None
+            if cam_config and getattr(cam_config, "watch_areas", None):
+                watch_polys = [a.polygon for a in cam_config.watch_areas if a.polygon]
+            elif cam_config and getattr(cam_config, "restricted_zones", None):
+                watch_polys = [z.points for z in cam_config.restricted_zones if z.points]
+
+            # 1. Motion Pre-Filter (MOG2) with watch area masking
+            has_motion, motion_ratio, _ = self.motion_gate.process_frame(camera_id, frame, watch_polygons=watch_polys)
+
+            if self.motion_gate.had_motion_dropped_outside(camera_id):
+                self.db.increment_ignored_moments(camera_id)
 
             # 2. If no motion and no active event, skip deep learning inference
             if not has_motion and camera_id not in self.active_event_ids:
@@ -251,23 +251,39 @@ class EdgePipeline:
             # 4. Update IoU Tracker
             active_tracks = self.tracker.update(detections, timestamp=frame_time)
 
-            # 5. Find camera config
-            cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
-            now_dt = datetime.now(timezone.utc)
-            after_hours = is_time_after_hours(now_dt, cam_config.business_hours) if cam_config else True
-
             # 6. Evaluate Candidate Threat Level
             best_candidate = None
             highest_score = 0
             should_alert_flag = False
 
+            has_configured_areas = bool(cam_config and getattr(cam_config, "watch_areas", None))
+
             if active_tracks:
                 for track in active_tracks:
                     in_restricted_zone = False
-                    if cam_config and cam_config.restricted_zones:
+                    matched_area_name = "general"
+                    track_should_alert = False
+
+                    if has_configured_areas:
+                        for area in cam_config.watch_areas:
+                            if area.schedule == "outside_shop_hours" and not after_hours:
+                                continue
+                            if is_foot_in_polygon(track.box, area.polygon):
+                                # Dwell time gate
+                                if track.duration_sec >= getattr(area, "min_stay_seconds", 0):
+                                    in_restricted_zone = True
+                                    matched_area_name = area.name
+                                    if area.response == "alert":
+                                        track_should_alert = True
+                                break
+                        # If camera has watch areas, but this track's feet are NOT in any area, skip
+                        if not in_restricted_zone:
+                            continue
+                    elif cam_config and getattr(cam_config, "restricted_zones", None):
                         for zone in cam_config.restricted_zones:
                             if check_box_intersects_zone(track.box, zone):
                                 in_restricted_zone = True
+                                matched_area_name = zone.name
                                 break
 
                     candidate = DetectionCandidate(
@@ -280,17 +296,22 @@ class EdgePipeline:
                         is_after_hours=after_hours,
                         is_in_restricted_zone=in_restricted_zone,
                         is_night_ir=is_night_ir,
+                        zone_name=matched_area_name,
                         timestamp=now_dt
                     )
 
                     cam_bias = self.calibrator.get_camera_bias(camera_id)
                     score, alert, breakdown = self.scoring_engine.evaluate(candidate, camera_bias=cam_bias)
+                    if track_should_alert:
+                        alert = True
+                        score = max(score, self.settings.alert_score_threshold + 5)
+
                     if score > highest_score:
                         highest_score = score
                         should_alert_flag = alert
                         best_candidate = candidate
-            elif has_motion:
-                # Unclassified motion
+            elif has_motion and not has_configured_areas:
+                # Unclassified motion (only if no watch areas restricting coverage)
                 candidate = DetectionCandidate(
                     camera_id=camera_id,
                     object_type="unclassified",
@@ -301,6 +322,7 @@ class EdgePipeline:
                     is_after_hours=after_hours,
                     is_in_restricted_zone=False,
                     is_night_ir=is_night_ir,
+                    zone_name="general",
                     timestamp=now_dt
                 )
                 cam_bias = self.calibrator.get_camera_bias(camera_id)
@@ -326,15 +348,20 @@ class EdgePipeline:
                     self.active_event_alert_sent[camera_id] = False
                     self.active_event_best_candidates[camera_id] = best_candidate
 
-                    # Pre-fill event buffer with 10s pre-roll history from RAM-aware thread ring buffer
-                    pre_roll = []
-                    for t in self.capture_threads:
-                        if getattr(t, "config", None) and t.config.camera_id == camera_id:
-                            if hasattr(t, "get_ring_buffer_copy"):
-                                pre_roll = t.get_ring_buffer_copy()
-                                break
-                    if not pre_roll and camera_id in self.ring_buffers:
-                        pre_roll = list(self.ring_buffers[camera_id])
+                    # Always use the pipeline's own ring buffer — it is guaranteed to exist and be current.
+                    # The capture thread ring buffer method is optional and may not exist.
+                    pre_roll = list(self.ring_buffers.get(camera_id, deque()))
+                    if not pre_roll:
+                        # Try capture thread as secondary source
+                        for t in self.capture_threads:
+                            if getattr(t, "config", None) and t.config.camera_id == camera_id:
+                                if hasattr(t, "get_ring_buffer_copy"):
+                                    candidate_roll = t.get_ring_buffer_copy()
+                                    if candidate_roll:
+                                        pre_roll = list(candidate_roll)
+                                        break
+                    # Log pre-roll size so we can verify it in production
+                    logger.debug(f"Pre-roll for {camera_id}: {len(pre_roll)} frames ({len(pre_roll)/4.0:.1f}s)")
 
                     self.event_buffers[camera_id] = list(pre_roll)
                 else:
@@ -348,9 +375,18 @@ class EdgePipeline:
                     self.active_event_scores[camera_id] = highest_score
                     self.active_event_best_candidates[camera_id] = best_candidate
 
-                # Alert dispatched once per event group
+                # Immediately dispatch alert when threshold first crossed — do not wait for finalization
                 if should_alert_flag and not self.active_event_alert_sent.get(camera_id, False):
                     self.active_event_alert_sent[camera_id] = True
+                    # Build a provisional event record for immediate alerting using pre-roll frames
+                    provisional_frames = list(self.event_buffers.get(camera_id, []))
+                    if provisional_frames and best_candidate:
+                        threading.Thread(
+                            target=self._dispatch_immediate_alert,
+                            args=(camera_id, self.active_event_ids[camera_id],
+                                  highest_score, best_candidate, provisional_frames),
+                            daemon=True
+                        ).start()
 
             elif camera_id in self.active_event_ids:
                 # Motion paused: evaluate 10s post-roll and 90s gap debounce
@@ -422,7 +458,10 @@ class EdgePipeline:
             except Exception:
                 pass
 
-            if getattr(candidate, "is_in_restricted_zone", False):
+            candidate_zone = getattr(candidate, "zone_name", "general")
+            if candidate_zone and candidate_zone != "general":
+                zone_n = candidate_zone
+            elif getattr(candidate, "is_in_restricted_zone", False):
                 zone_n = "restricted_vault"
             elif "counter" in camera_id:
                 zone_n = "cash_counter"
@@ -432,7 +471,72 @@ class EdgePipeline:
                 zone_n = "main_corridor"
 
         cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
+        cam_name = getattr(cam_config, "name", camera_id) or camera_id
         loc_id = getattr(cam_config, "location_id", "loc_primary") or "loc_primary"
+
+        # Determine Tier ('alert' or 'review')
+        matched_area = None
+        if cam_config and getattr(cam_config, "watch_areas", None) and candidate:
+            m_id = getattr(candidate, "matched_area_id", None)
+            if m_id:
+                matched_area = next((a for a in cam_config.watch_areas if a.id == m_id), None)
+
+        if matched_area:
+            tier = matched_area.response
+        elif getattr(candidate, "is_in_restricted_zone", False) or score >= self.settings.alert_score_threshold:
+            tier = "alert"
+        else:
+            tier = "review"
+
+        # Generate unique sequential clip number
+        clip_num = self.db.get_next_clip_number()
+
+        # Compute SHA-256 integrity hash of media file
+        import hashlib
+        sha256_hash = ""
+        if clip_path and os.path.exists(clip_path):
+            try:
+                with open(clip_path, "rb") as vf:
+                    sha256_hash = hashlib.sha256(vf.read()).hexdigest()
+            except Exception:
+                sha256_hash = ""
+        if not sha256_hash:
+            sha256_hash = hashlib.sha256(f"{event_id}:{start_time}".encode()).hexdigest()
+
+        # Compute 72-hour automated purge epoch ms
+        try:
+            st_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            start_ms = int(st_dt.timestamp() * 1000)
+        except Exception:
+            start_ms = int(time.time() * 1000)
+        retention_hours = getattr(self.settings, "raw_retention_hours", 72.0)
+        expires_at_ms = start_ms + int(retention_hours * 3600 * 1000)
+
+        # Trigger moment timestamp (3s after start or first motion)
+        trigger_ms = start_ms + 3000
+
+        # Construct structured reasons checklist per Section 6.3
+        reasons = []
+        if getattr(candidate, "is_after_hours", False):
+            reasons.append({"code": "outside_shop_hours", "params": {}})
+        if getattr(candidate, "is_in_restricted_zone", False) or (matched_area and matched_area.response == "alert"):
+            reasons.append({"code": "entered_restricted_area", "params": {"area": zone_n}})
+        if duration >= 10.0:
+            reasons.append({"code": "stayed_in_area", "params": {"seconds": int(duration), "duration": f"{int(duration)} seconds", "area": zone_n}})
+        if obj_type == "person":
+            reasons.append({"code": "person_detected", "params": {"confidence": round(conf, 2), "area": zone_n}})
+        else:
+            reasons.append({"code": "movement", "params": {"area": zone_n}})
+
+        # Detection boxes for 'Show what VYZN saw' overlay
+        boxes = []
+        if candidate and getattr(candidate, "bounding_box", None):
+            boxes.append({
+                "frameIdx": 0,
+                "box": candidate.bounding_box,
+                "cls": obj_type,
+                "conf": round(conf, 2)
+            })
 
         import json
         meta = {
@@ -440,7 +544,14 @@ class EdgePipeline:
             "post_roll_sec": 10.0,
             "inactivity_gap_sec": 90.0,
             "motion_points": motion_pts,
-            "fps": 4.0
+            "fps": 4.0,
+            "reasons": reasons,
+            "trigger_ms": trigger_ms,
+            "camera_name": cam_name,
+            "area_id": getattr(matched_area, "id", None) if matched_area else None,
+            "objects": [{"cls": obj_type, "confidence": round(conf, 2)}],
+            "boxes": boxes,
+            "detector": {"name": "YOLOv8n-VYZN", "version": "8.0.196"}
         }
 
         record = EventRecord(
@@ -459,16 +570,86 @@ class EdgePipeline:
             location_id=loc_id,
             duration_sec=duration,
             motion_points_count=motion_pts,
-            metadata_json=json.dumps(meta)
+            metadata_json=json.dumps(meta),
+            clip_number=clip_num,
+            expires_at_ms=expires_at_ms,
+            sha256=sha256_hash,
+            tier=tier
         )
 
         # Save to SQLite index
         self.db.insert_event(record)
-        self.db.log_audit("EVENT_RECORDED", event_id, f"Score: {score}, Obj: {obj_type}, Color: {dom_color}, Zone: {zone_n}, Duration: {duration}s")
+        self.db.log_audit("EVENT_RECORDED", event_id, f"Score: {score}, Obj: {obj_type}, Color: {dom_color}, Zone: {zone_n}, Duration: {duration}s, Tier: {tier}")
 
-        # Dispatch alert if score qualifies
-        if alert_sent or score >= self.settings.alert_score_threshold:
+        # Dispatch alert ONLY for alert-tier clips (Review tier is never pushed)
+        if not alert_sent and tier == "alert":
             self.dispatcher.dispatch(record, clip_path, thumb_path)
+        elif alert_sent:
+            logger.info(
+                f"[FINAL CLIP] Event {event_id} finalized. Score={score}. "
+                f"Immediate alert already sent. Final clip: {clip_path}"
+            )
+        else:
+            logger.info(
+                f"[FINAL CLIP] Event {event_id} finalized as 'review' tier. "
+                f"Saved to Clips archive; silent per alert-tier rule."
+            )
+
+    def _dispatch_immediate_alert(
+        self,
+        camera_id: str,
+        event_id: str,
+        score: int,
+        candidate,
+        frames: list
+    ):
+        """
+        Dispatches a Telegram/WhatsApp alert immediately when score threshold is crossed.
+        Uses the frames collected so far (pre-roll + current motion frames).
+        The final finalized clip will replace this once the event completes.
+        """
+        try:
+            # Write a provisional clip from what we have so far
+            if len(frames) >= 4:
+                clip_path, thumb_path = self.clip_writer.write_clip_from_frames(
+                    camera_id=camera_id,
+                    event_group_id=event_id + "_live",
+                    frames=frames[-min(len(frames), 80):],  # Use last 20s max
+                    fps=4.0
+                )
+            else:
+                clip_path, thumb_path = None, None
+            obj_type = candidate.object_type if candidate else "person"
+            from vyzn.core.events import EventRecord
+            from datetime import datetime, timezone
+            import json
+            start_time = self.active_event_start_times.get(camera_id,
+                         datetime.now(timezone.utc).isoformat())
+            provisional_record = EventRecord(
+                event_group_id=event_id,
+                camera_id=camera_id,
+                start_time=start_time,
+                end_time=datetime.now(timezone.utc).isoformat(),
+                object_type=obj_type,
+                confidence=candidate.confidence if candidate else 0.85,
+                score=score,
+                status="raw",
+                file_path=clip_path or "",
+                thumb_path=thumb_path or "",
+                dominant_color="unspecified",
+                zone_name="restricted_vault" if getattr(candidate, "is_in_restricted_zone", False) else "general",
+                location_id="loc_primary",
+                duration_sec=round(len(frames) / 4.0, 1),
+                motion_points_count=self.active_event_motion_counts.get(camera_id, 1),
+                metadata_json=json.dumps({"live_alert": True, "pre_roll_sec": 10.0})
+            )
+            self.dispatcher.dispatch(provisional_record, clip_path, thumb_path)
+            logger.info(
+                f"[IMMEDIATE ALERT] Dispatched live alert for {camera_id} "
+                f"event {event_id} with score {score} ({len(frames)} frames)"
+            )
+        except Exception as e:
+            logger.error(f"Immediate alert dispatch failed for {camera_id}: {e}")
 
     def get_telemetry_status(self) -> Dict:
         """Collects live pipeline state for the telemetry daemon."""
@@ -480,13 +661,21 @@ class EdgePipeline:
             "resource_governance": self.resource_governor.get_state()
         }
 
-    def update_camera_zones(self, camera_id: str, zones: List[ZonePolygon]):
-        """Dynamically hot-reloads restricted polygon zones for a camera via atomic replacement."""
+    def update_camera_zones(self, camera_id: str, zones: Optional[List[ZonePolygon]] = None, watch_areas: Optional[List[WatchAreaConfig]] = None):
+        """Dynamically hot-reloads watch areas / restricted zones for a camera via atomic replacement."""
         for idx, cam in enumerate(self.settings.cameras):
             if cam.camera_id == camera_id:
+                updates = {}
+                if zones is not None:
+                    updates["restricted_zones"] = list(zones)
+                if watch_areas is not None:
+                    updates["watch_areas"] = list(watch_areas)
+                    # Sync restricted_zones for backward compatibility
+                    updates["restricted_zones"] = [ZonePolygon(name=a.name, points=a.polygon) for a in watch_areas]
+
                 copy_fn = getattr(cam, "model_copy", getattr(cam, "copy", None))
                 if copy_fn:
-                    new_cam = copy_fn(update={"restricted_zones": list(zones)})
+                    new_cam = copy_fn(update=updates)
                 else:
                     new_cam = CameraConfig(
                         camera_id=cam.camera_id,
@@ -495,12 +684,22 @@ class EdgePipeline:
                         enabled=cam.enabled,
                         target_fps=cam.target_fps,
                         is_night_ir=cam.is_night_ir,
-                        restricted_zones=list(zones)
+                        restricted_zones=updates.get("restricted_zones", cam.restricted_zones),
+                        watch_areas=updates.get("watch_areas", getattr(cam, "watch_areas", []))
                     )
                 new_cameras = list(self.settings.cameras)
                 new_cameras[idx] = new_cam
                 self.settings.cameras = new_cameras
-                logger.info(f"Dynamically updated {len(zones)} restricted zones for camera {camera_id} (atomic swap).")
+
+                # Update motion gate
+                if getattr(new_cam, "watch_areas", None):
+                    self.motion_gate.set_camera_areas(camera_id, [a.polygon for a in new_cam.watch_areas if a.polygon])
+                elif getattr(new_cam, "restricted_zones", None):
+                    self.motion_gate.set_camera_areas(camera_id, [z.points for z in new_cam.restricted_zones if z.points])
+                else:
+                    self.motion_gate.set_camera_areas(camera_id, None)
+
+                logger.info(f"Dynamically updated watch areas for camera {camera_id} (atomic swap).")
                 break
 
     def add_camera_stream(self, cam: CameraConfig):

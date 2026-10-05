@@ -63,14 +63,14 @@ zones:
     camera_id: cam_webcam_0
     description: restricted_zone geofence created via UI studio
     polygon:
-    - - 0.634
-      - 0.622
-    - - 0.616
-      - 0.164
+    - - 0.097
+      - 0.2
+    - - 0.098
+      - 0.903
+    - - 0.398
+      - 0.903
     - - 0.397
-      - 0.183
-    - - 0.35
-      - 0.669
+      - 0.206
     schedule_mode: restricted_all_times
     weight: 25
     zone_type: restricted_zone

@@ -89,3 +89,53 @@ def test_concurrent_multi_thread_writes(tmp_path: Path):
     assert len(events) == num_threads * records_per_thread
 
     db.close()
+
+
+def test_db_write_guard_rejects_pre_2020_timestamps(tmp_path: Path):
+    """Verifies that events with timestamps prior to 2020 (such as 1970 epoch bugs) are rejected by DB write guard."""
+    db_file = tmp_path / "guard_test_index.db"
+    db = EventDatabase(db_file)
+
+    # 1. Event with 1970 timestamp
+    invalid_event = EventRecord(
+        event_group_id="ev_bug_1970",
+        camera_id="cam_webcam_0",
+        start_time="1970-01-01T22:20:21.631756+00:00",
+        end_time="1970-01-01T22:22:09.132884+00:00",
+        object_type="person",
+        confidence=0.88,
+        score=100,
+        status="raw",
+        file_path="/tmp/clip_1970.mp4",
+        thumb_path="/tmp/thumb_1970.jpg"
+    )
+
+    result = db.insert_event(invalid_event)
+    assert result is False, "Database write guard must reject events before year 2020"
+
+    time.sleep(0.2)
+    queried = db.get_event("ev_bug_1970")
+    assert queried is None, "Rejected event must not exist in database"
+
+    # 2. Event with valid current timestamp
+    valid_event = EventRecord(
+        event_group_id="ev_valid_2026",
+        camera_id="cam_webcam_0",
+        start_time="2026-09-30T10:00:00Z",
+        end_time="2026-09-30T10:00:20Z",
+        object_type="person",
+        confidence=0.88,
+        score=85,
+        status="raw",
+        file_path="/tmp/clip_valid.mp4",
+        thumb_path="/tmp/thumb_valid.jpg"
+    )
+
+    db.insert_event(valid_event)
+    time.sleep(0.3)
+    valid_queried = db.get_event("ev_valid_2026")
+    assert valid_queried is not None, "Valid event must be written successfully"
+    assert valid_queried.event_group_id == "ev_valid_2026"
+
+    db.close()
+

@@ -1,8 +1,8 @@
 [
   {
-    "camera_id": "cam_adopted_01",
-    "name": "Entrance CP-PLUS",
-    "rtsp_url": "rtsp://admin:Password@123@192.168.1.150:554/cam/realmonitor?channel=1&subtype=0",
+    "camera_id": "cam_cash_counter",
+    "name": "Cash Counter",
+    "rtsp_url": "sim://cash",
     "enabled": true,
     "location_id": "loc_primary",
     "target_fps": 4.0,
@@ -19,7 +19,30 @@
       "end_hour": 21,
       "end_minute": 0
     },
-    "restricted_zones": [],
-    "privacy_zones": []
+    "restricted_zones": [
+      {
+        "name": "cash_drawer_box_test",
+        "points": [
+          [
+            0.6,
+            0.4
+          ],
+          [
+            0.85,
+            0.4
+          ],
+          [
+            0.85,
+            0.7
+          ],
+          [
+            0.6,
+            0.7
+          ]
+        ]
+      }
+    ],
+    "privacy_zones": [],
+    "watch_areas": []
   }
 ]

@@ -701,25 +701,15 @@
         <button class="modal-tab" id="tab-register">Create Tenant Account</button>
       </div>
 
-      <div class="quick-login-strip">
-        <div class="quick-label">⚡ 1-Click Demo Profiles:</div>
-        <div class="quick-chips-row">
-          <button type="button" class="btn-quick-chip" data-email="owner@vyzn.ai" data-pass="owner123">🏠 Resident / Owner</button>
-          <button type="button" class="btn-quick-chip" data-email="shopkeeper@kirana.in" data-pass="kirana123">🛒 Shopkeeper</button>
-          <button type="button" class="btn-quick-chip" data-email="installer@safenet.in" data-pass="safenet123">🔧 Installer</button>
-          <button type="button" class="btn-quick-chip" data-email="admin@vyzn.ai" data-pass="admin123">👑 Fleet Admin</button>
-        </div>
-      </div>
-
       <!-- Login Form -->
       <form id="form-login" class="auth-form">
         <div class="input-group">
           <label for="login-email">Email Address</label>
-          <input type="email" id="login-email" placeholder="owner@vyzn.ai" value="owner@vyzn.ai" required>
+          <input type="email" id="login-email" placeholder="your@email.com" required>
         </div>
         <div class="input-group">
           <label for="login-password">Password</label>
-          <input type="password" id="login-password" value="owner123" required>
+          <input type="password" id="login-password" placeholder="••••••••" required>
         </div>
         <button type="submit" class="btn-auth-primary" id="btn-submit-login">Sign In with Supabase</button>
       </form>

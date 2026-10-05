@@ -26,7 +26,8 @@ from tests.test_tracker import (
 from tests.test_motion_gate import test_mog2_static_vs_motion
 from tests.test_database import (
     test_database_crud_operations,
-    test_concurrent_multi_thread_writes
+    test_concurrent_multi_thread_writes,
+    test_db_write_guard_rejects_pre_2020_timestamps
 )
 from tests.test_pipeline_smoke import test_pipeline_synthetic_smoke
 from tests.test_api import test_api_endpoints_and_dashboard_serving
@@ -92,6 +93,7 @@ from tests.test_resource_governor import (
     test_resource_governor_day_night_transition,
     test_resource_governor_priority_api_stability
 )
+from tests.test_auth_flow import test_phase2_auth_and_telegram_flow
 from tests.test_telegram_alerts import (
     test_telegram_alert_payload_structure,
     test_telegram_alert_simulation_dispatch,
@@ -138,8 +140,10 @@ def run_all():
         ("test_mog2_static_vs_motion", lambda: test_mog2_static_vs_motion()),
         ("test_database_crud_operations", lambda: with_tmp_path(test_database_crud_operations)),
         ("test_concurrent_multi_thread_writes", lambda: with_tmp_path(test_concurrent_multi_thread_writes)),
+        ("test_db_write_guard_rejects_pre_2020_timestamps", lambda: with_tmp_path(test_db_write_guard_rejects_pre_2020_timestamps)),
         ("test_pipeline_synthetic_smoke", lambda: with_tmp_path(test_pipeline_synthetic_smoke)),
         ("test_api_endpoints_and_dashboard_serving", lambda: with_tmp_path(test_api_endpoints_and_dashboard_serving)),
+        ("test_phase2_auth_and_telegram_flow", lambda: with_tmp_path(test_phase2_auth_and_telegram_flow)),
         ("test_whatsapp_simulation_delivery", lambda: test_whatsapp_simulation_delivery()),
         ("test_whatsapp_interactive_payload_structure", lambda: test_whatsapp_interactive_payload_structure()),
         ("test_whatsapp_utility_template_structure_out_of_session", lambda: test_whatsapp_utility_template_structure_out_of_session()),

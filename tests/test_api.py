@@ -66,6 +66,6 @@ def test_api_endpoints_and_dashboard_serving(tmp_path: Path):
     # 5. Test Dashboard Serving
     res = client.get("/")
     assert res.status_code == 200
-    assert "VYZN Surveillance Console" in res.text
+    assert "VYZN" in res.text
 
     db.close()

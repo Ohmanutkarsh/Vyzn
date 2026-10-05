@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cameras — VYZN</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="app-shell">
+
+  <!-- Desktop Sidebar -->
+  <div id="app-sidebar"></div>
+
+  <!-- Main Content Wrapper -->
+  <div class="shell-main-wrapper">
+    <!-- Top Header -->
+    <div id="app-header"></div>
+
+    <!-- Cameras Content -->
+    <main class="shell-content" id="main-content">
+      <div class="cameras-header-row">
+        <div>
+          <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 4px 0;" id="txt-cameras-title">Cameras</h2>
+          <span style="font-size: 13px; color: var(--text-2);" id="txt-cameras-count">Loading cameras…</span>
+        </div>
+        <div>
+          <a href="/cameras/new" class="btn btn-primary" id="btn-add-camera" style="text-decoration: none;">+ Add camera</a>
+        </div>
+      </div>
+
+      <!-- Cameras Grid / List -->
+      <div class="cameras-grid" id="cameras-grid">
+        <!-- Rendered dynamically -->
+        <div class="skeleton" style="height: 280px; border-radius: var(--radius-panel);"></div>
+        <div class="skeleton" style="height: 280px; border-radius: var(--radius-panel);"></div>
+      </div>
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <div id="app-bottom-nav"></div>
+  </div>
+
+  <!-- Remove Camera Confirmation Modal (Section 6.5) -->
+  <div class="modal-scrim" id="modal-remove" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-remove-title">
+    <div class="modal-card">
+      <h3 class="modal-title" id="modal-remove-title">Remove camera?</h3>
+      <p class="modal-body" id="modal-remove-body">Its saved footage and clips will be deleted now.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="btn-cancel-remove">Cancel</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-remove">Remove and delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Rename Camera Modal -->
+  <div class="modal-scrim" id="modal-rename" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-rename-title">
+    <div class="modal-card">
+      <h3 class="modal-title" id="modal-rename-title">Rename camera</h3>
+      <div class="form-group" style="margin-top: var(--space-3); margin-bottom: 0;">
+        <label for="input-rename-name" class="form-label">Camera name</label>
+        <input type="text" id="input-rename-name" class="form-input" autocomplete="off" />
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="btn-cancel-rename">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-confirm-rename">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/cameras.js"></script>
+</body>
+</html>

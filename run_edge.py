@@ -13,7 +13,13 @@ import logging
 from pathlib import Path
 import uvicorn
 
-from vyzn.core.config import EdgeSettings, CameraConfig, BusinessHours, ZonePolygon
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+from vyzn.core.config import EdgeSettings, CameraConfig, BusinessHours
 from vyzn.pipeline import EdgePipeline
 from vyzn.ai.detector import MockDetector, YOLOv8Detector
 from vyzn.api.routes import app as fastapi_app, init_api

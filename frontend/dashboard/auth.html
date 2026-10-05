@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VYZN — Sign In & Setup</title>
+  <meta name="description" content="Sign in to VYZN AI Retail Surveillance. 72-hour hard purge, zero cloud bandwidth costs.">
+  
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="stylesheet" href="/static/auth.css">
+  
+  <link rel="preload" href="/static/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/ibm-plex-sans-500.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/ibm-plex-sans-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/ibm-plex-mono-400.woff2" as="font" type="font/woff2" crossorigin>
+</head>
+<body class="auth-page">
+  <!-- Top Minimal Header: Wordmark + Theme Switcher -->
+  <header class="auth-header">
+    <a href="/login" class="auth-wordmark">
+      <span>VYZN</span>
+    </a>
+
+    <button id="theme-toggle-btn" class="theme-switch-btn" type="button" aria-label="Toggle theme">
+      ☀️ Light
+    </button>
+  </header>
+
+  <!-- Centered 400px Auth Column -->
+  <main class="auth-main">
+    <div class="auth-card-wrap">
+      <div id="auth-card-content" class="auth-card">
+        <!-- Rendered dynamically by auth.js for S1, S2, S3, S4 -->
+        <div style="text-align: center; padding: var(--space-8); color: var(--fg-muted);">
+          Loading VYZN…
+        </div>
+      </div>
+
+      <!-- Mandatory Spec Retention Rule Notice -->
+      <div class="auth-retention-notice">
+        VYZN keeps footage and clips for 72 hours, then deletes them.
+      </div>
+    </div>
+  </main>
+
+  <script type="module">
+    import { initAuthApp } from '/static/auth.js';
+    window.addEventListener('DOMContentLoaded', () => {
+      initAuthApp();
+    });
+  </script>
+</body>
+</html>

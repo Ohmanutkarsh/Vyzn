@@ -195,6 +195,20 @@ function showToast(message, isSuccess = true) {
   setTimeout(() => toast.remove(), 3500);
 }
 
+function showAuthError(message, targetId) {
+  // Remove any existing auth errors first
+  document.querySelectorAll('.auth-inline-error').forEach(el => el.remove());
+  if (!message) return;
+  const target = document.getElementById(targetId);
+  if (!target) return;
+  const err = document.createElement('div');
+  err.className = 'auth-inline-error';
+  err.textContent = message;
+  err.style.cssText = 'color:#ef4444;font-size:0.78rem;margin-top:5px;font-weight:500;';
+  target.parentNode.insertBefore(err, target.nextSibling);
+  setTimeout(() => err.remove(), 7000);
+}
+
 // ===========================================================================
 // 2. Authentication & Supabase Session Management
 // ===========================================================================
@@ -227,6 +241,8 @@ function applyUserToUI(user) {
     if (dom.btnPhoneModalOpen) dom.btnPhoneModalOpen.textContent = "📱 Link Phone";
   }
 }
+
+const updateUserUI = applyUserToUI;
 
 async function checkAuthSession() {
   if (!state.token) {
@@ -393,24 +409,17 @@ dom.tabRegister.addEventListener("click", () => {
   dom.formLogin.style.display = "none";
 });
 
-// Quick 1-Click Demo Profile Chips
-document.querySelectorAll(".btn-quick-chip").forEach(chip => {
-  chip.addEventListener("click", (e) => {
-    e.preventDefault();
-    const email = chip.getAttribute("data-email");
-    const pass = chip.getAttribute("data-pass");
-    document.getElementById("login-email").value = email;
-    document.getElementById("login-password").value = pass;
-    dom.formLogin.dispatchEvent(new Event("submit"));
-  });
-});
-
 // Login Form Submit
 dom.formLogin.addEventListener("submit", async (e) => {
   e.preventDefault();
   const email = document.getElementById("login-email").value.trim();
   const password = document.getElementById("login-password").value;
-
+  const btn = document.getElementById("btn-submit-login");
+  // Clear previous errors
+  document.querySelectorAll('.auth-inline-error').forEach(el => el.remove());
+  // Loading state
+  btn.disabled = true;
+  btn.textContent = "Signing in...";
   try {
     const res = await fetch("/api/v1/auth/login", {
       method: "POST",
@@ -419,21 +428,23 @@ dom.formLogin.addEventListener("submit", async (e) => {
     });
     const data = await res.json();
     if (res.ok && data.access_token) {
+      localStorage.setItem("vyzn_access_token", data.access_token);
       state.token = data.access_token;
-      state.user = data.user;
-      localStorage.setItem("vyzn_access_token", state.token);
-      applyUserToUI(state.user);
+      updateUserUI(data.user);
       dom.authModal.style.display = "none";
-      showToast(`✅ Signed in as ${state.user.email} (${(state.user.role || 'RESIDENT').toUpperCase()})`);
-      await fetchLocations();
-      await fetchCameras();
-      await fetchIncidents();
-      await fetchClips();
+      showToast(`Welcome back, ${data.user?.full_name || email}!`);
+    } else if (res.status === 404) {
+      showAuthError("No account found with this email address.", "login-email");
+    } else if (res.status === 401) {
+      showAuthError("Incorrect password.", "login-password");
     } else {
-      alert("Authentication error: " + (data.detail || "Invalid credentials"));
+      showAuthError(data.detail || "Sign in failed. Please try again.", "login-password");
     }
   } catch (err) {
-    alert("Network error: " + err.message);
+    showAuthError("Connection error. Please check your network and try again.", "btn-submit-login");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Sign In";
   }
 });
 

@@ -15,3 +15,5 @@ venv/
 node_modules/
 .vercel/
 *.log
+scratch/
+

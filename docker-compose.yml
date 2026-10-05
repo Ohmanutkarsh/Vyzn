@@ -23,10 +23,12 @@ services:
       - "8000:8000"   # Web Dashboard & REST API
     volumes:
       - ./data/clips:/data/clips
-      - ./config:/app/config:ro
+      - ./config:/app/config
     environment:
-      - VYZN_SITE_ID=site_docker_deploy
-      - PYTHONUNBUFFERED=1
+      VYZN_SITE_ID: site_docker_deploy
+      PYTHONUNBUFFERED: "1"
+      VYZN_TELEGRAM_BOT_TOKEN: ${VYZN_TELEGRAM_BOT_TOKEN:-}
+      VYZN_TELEGRAM_CHAT_ID: ${VYZN_TELEGRAM_CHAT_ID:-}
     depends_on:
       - go2rtc
     networks:

@@ -16,6 +16,17 @@ class ZonePolygon(BaseModel):
     points: List[List[float]] = Field(default_factory=list)
 
 
+class WatchAreaConfig(BaseModel):
+    id: str
+    camera_id: str
+    name: str = "Area 1"
+    polygon: List[List[float]] = Field(default_factory=list)  # Normalized [[x, y], ...]
+    response: str = "alert"  # 'alert' | 'review'
+    min_stay_seconds: int = 0  # 0 | 10 | 30 | 60
+    schedule: str = "always"  # 'always' | 'outside_shop_hours'
+    version: int = 1
+
+
 class BusinessHours(BaseModel):
     enabled: bool = True
     start_hour: int = 9   # 09:00 (9 AM)
@@ -47,6 +58,7 @@ class CameraConfig(BaseModel):
     business_hours: BusinessHours = Field(default_factory=BusinessHours)
     restricted_zones: List[ZonePolygon] = Field(default_factory=list)
     privacy_zones: List[ZonePolygon] = Field(default_factory=list)
+    watch_areas: List[WatchAreaConfig] = Field(default_factory=list)
 
 
 

@@ -29,6 +29,14 @@ class EventRecord:
     duration_sec: float = 0.0           # Event duration in seconds
     motion_points_count: int = 0        # Count of distinct motion occurrences
     metadata_json: str = "{}"           # Additional forensic and detection metadata
+    clip_number: Optional[int] = None   # Monotonically increasing human-readable clip ID
+    expires_at_ms: Optional[int] = None # 72-hour hard purge epoch millisecond
+    sha256: Optional[str] = None        # SHA-256 integrity hash of media clip
+    tier: str = "review"                # 'alert' | 'review'
+
+    @property
+    def event_id(self) -> str:
+        return self.event_group_id
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -51,6 +59,10 @@ class EventRecord:
             "duration_sec": self.duration_sec,
             "motion_points_count": self.motion_points_count,
             "metadata_json": self.metadata_json,
+            "clip_number": self.clip_number,
+            "expires_at_ms": self.expires_at_ms,
+            "sha256": self.sha256,
+            "tier": self.tier,
         }
 
 
@@ -66,6 +78,8 @@ class DetectionCandidate:
     is_after_hours: bool
     is_in_restricted_zone: bool
     is_night_ir: bool = False
+    zone_name: str = "general"
+    matched_area_id: Optional[str] = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 

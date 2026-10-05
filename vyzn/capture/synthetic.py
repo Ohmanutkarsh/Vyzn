@@ -123,7 +123,7 @@ class SyntheticCameraThread(threading.Thread):
                     cv2.rectangle(frame, (ix, iy), (ix + 35, iy + 70), (120, 120, 120), -1)
 
             # Timestamp and queue push
-            now = time.monotonic()
+            now = time.time()
             self.last_frame_timestamp = now
             with self._latest_lock:
                 self.latest_frame = frame

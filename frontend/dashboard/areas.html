@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Watch areas — VYZN</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="app-shell">
+
+  <!-- Desktop Sidebar -->
+  <div id="app-sidebar"></div>
+
+  <!-- Main Content Wrapper -->
+  <div class="shell-main-wrapper">
+    <!-- Top Header -->
+    <div id="app-header"></div>
+
+    <!-- Main Content Container (either Picker or Editor) -->
+    <main class="shell-content" id="main-content" style="max-width: 1400px; margin: 0 auto; width: 100%;">
+      <!-- Dynamically populated by areas.js -->
+      <div class="skeleton" style="height: 480px; border-radius: var(--radius-interactive);"></div>
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <div id="app-bottom-nav"></div>
+  </div>
+
+  <!-- Delete Area Confirmation Modal -->
+  <div class="modal-scrim" id="modal-delete-area" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="modal-del-title">
+    <div class="modal-card">
+      <h3 class="modal-title" id="modal-del-title">Delete area?</h3>
+      <p class="modal-body" id="modal-del-body">This watch area will be removed.</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" id="btn-cancel-del">Cancel</button>
+        <button type="button" class="btn btn-danger" id="btn-confirm-del">Delete area</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" style="position: fixed; bottom: 84px; right: 24px; z-index: 1000; pointer-events: none;"></div>
+
+  <script type="module" src="/static/areas.js"></script>
+</body>
+</html>
