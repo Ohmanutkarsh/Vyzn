@@ -546,6 +546,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow-x: hidden;
 }
 
 .shell-header {
@@ -797,6 +798,8 @@
   max-width: 1440px;
   width: 100%;
   margin: 0 auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 /* 11. Cameras Screen (S5) & Grid */
@@ -946,204 +949,233 @@
 
 /* 13. Add Camera Wizard (S6) */
 .wizard-container {
-  max-width: 600px;
+  max-width: 720px;
+  width: 100%;
   margin: 0 auto;
-  padding: var(--space-6) 0;
+  padding: 40px 20px 60px 20px;
+  box-sizing: border-box;
+}
+
+.wizard-step-marker {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748B;
+  margin-bottom: 8px;
+  display: block;
 }
 
 .wizard-stepper {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--text-3);
-  margin-bottom: var(--space-2);
+  color: #64748B;
+  margin-bottom: 8px;
   text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: block;
 }
 
 .wizard-step-title {
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-1);
-  margin: 0 0 var(--space-6) 0;
+  font-size: 32px;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin: 0 0 8px 0;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
-.choice-cards-stack {
+.wizard-subhead {
+  font-size: 15px;
+  font-weight: 400;
+  color: #94A3B8;
+  margin: 0 0 32px 0;
+  line-height: 1.5;
+}
+
+/* Redesigned Option Cards (Vertical Stack) */
+.choice-cards-stack,
+.option-cards-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: 16px;
+  width: 100%;
 }
 
+.option-card,
 .choice-card {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 18px 20px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.005) 100%), var(--bg-surface);
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 14px;
+  padding: 20px;
+  background: #141416;
+  border: 1px solid #27272A;
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.2s ease;
   text-align: left;
+  width: 100%;
+  box-sizing: border-box;
   position: relative;
-  overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+.option-card:hover,
 .choice-card:hover {
-  border-color: rgba(56, 189, 248, 0.4);
-  background: linear-gradient(135deg, rgba(56, 189, 248, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%), var(--bg-raised);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 28px -6px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(56, 189, 248, 0.25);
+  background: #18181B;
+  border-color: #3F3F46;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
+/* Left Icon (48px) */
+.option-icon-box,
 .choice-icon-wrap {
   width: 48px;
   height: 48px;
-  border-radius: 12px;
+  background: #27272A;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: transform 180ms ease;
+  color: #E2E8F0;
+  transition: transform 0.2s ease, border-color 0.2s ease;
 }
 
+.option-card:hover .option-icon-box,
 .choice-card:hover .choice-icon-wrap {
-  transform: scale(1.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: scale(1.04);
 }
 
-.icon-cyan {
-  background: rgba(14, 165, 233, 0.12);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.25);
-  box-shadow: 0 0 16px rgba(14, 165, 233, 0.15);
-}
-
-.icon-emerald {
-  background: rgba(16, 185, 129, 0.12);
-  color: #34d399;
-  border: 1px solid rgba(52, 211, 153, 0.25);
-  box-shadow: 0 0 16px rgba(16, 185, 129, 0.15);
-}
-
-.icon-purple {
-  background: rgba(139, 92, 246, 0.12);
-  color: #a78bfa;
-  border: 1px solid rgba(167, 139, 250, 0.25);
-  box-shadow: 0 0 16px rgba(139, 92, 246, 0.15);
-}
-
+/* Middle Text & Badges (Flexible) */
+.option-card-body,
 .choice-card-body {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
+.option-title-row,
 .choice-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
+.option-card-title,
 .choice-card-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
-  color: var(--text-1);
+  color: #FFFFFF;
+  margin: 0;
 }
 
+/* Badges */
+.option-badge,
 .choice-chip {
-  font-size: 10px;
-  font-weight: 600;
-  padding: 2px 7px;
-  border-radius: 9999px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.chip-cyan {
-  background: rgba(14, 165, 233, 0.15);
-  color: #38bdf8;
-  border: 1px solid rgba(56, 189, 248, 0.3);
-}
-
-.chip-emerald {
-  background: rgba(16, 185, 129, 0.15);
-  color: #34d399;
-  border: 1px solid rgba(52, 211, 153, 0.3);
-}
-
-.chip-purple {
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
-  border: 1px solid rgba(167, 139, 250, 0.3);
-}
-
-.choice-card-desc {
-  font-size: 13px;
-  color: var(--text-2);
-  line-height: 1.45;
-}
-
-.choice-card-tags {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.choice-tag {
   font-size: 11px;
-  color: var(--text-3);
-  background: rgba(255, 255, 255, 0.04);
-  padding: 1px 6px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  letter-spacing: 0.02em;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.4;
 }
 
+.badge-blue,
+.chip-cyan {
+  color: #3B82F6;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.badge-green,
+.chip-emerald {
+  color: #10B981;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.badge-purple,
+.chip-purple {
+  color: #8B5CF6;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+}
+
+.option-card-desc,
+.choice-card-desc {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #94A3B8;
+  margin: 4px 0 10px 0;
+}
+
+.option-card-tags,
+.choice-card-tags {
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: #64748B;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Right Arrow (24px) */
+.option-arrow,
 .choice-card-chevron {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--text-3);
+  color: #71717A;
   flex-shrink: 0;
-  transition: all 180ms ease;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.2s ease;
 }
 
+.option-card:hover .option-arrow,
 .choice-card:hover .choice-card-chevron {
-  transform: translateX(4px);
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-1);
-  border-color: rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+  transform: translateX(3px);
 }
 
-.wizard-stepper-pill {
-  display: inline-flex;
+/* Stepper Progress (Bottom Indicator) */
+.wizard-progress-section {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 4px 12px;
-  border-radius: 9999px;
-  margin-bottom: var(--space-3);
+  gap: 16px;
+  margin-top: 36px;
+  width: 100%;
 }
 
-.wizard-stepper-pill .step-accent {
-  color: #38bdf8;
+.wizard-progress-track {
+  flex: 1;
+  height: 4px;
+  background: #27272A;
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
 }
 
-.wizard-subhead {
-  font-size: 13px;
-  color: var(--text-2);
-  margin-top: -8px;
-  margin-bottom: var(--space-5);
-  line-height: 1.5;
+.wizard-progress-fill {
+  height: 100%;
+  background: #3B82F6;
+  border-radius: 2px;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.wizard-progress-count {
+  font-size: 12px;
+  font-weight: 500;
+  color: #64748B;
+  font-family: var(--font-mono, monospace);
+  flex-shrink: 0;
 }
 
 

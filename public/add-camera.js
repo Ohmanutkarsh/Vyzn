@@ -25,12 +25,37 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function setWizardStep(stepNum, stepperText) {
   const stepper = document.getElementById('wizard-stepper');
-  if (stepper) stepper.textContent = stepperText;
+  if (stepper) stepper.textContent = stepperText.toUpperCase();
+
+  const fill = document.getElementById('wizard-progress-fill');
+  const count = document.getElementById('wizard-progress-count');
+  const progressSec = document.getElementById('wizard-progress-section');
+
+  if (stepNum === 'step-1') {
+    if (fill) fill.style.width = '33.33%';
+    if (count) count.textContent = '1/3';
+    if (progressSec) progressSec.style.display = 'flex';
+    if (stepper) stepper.style.display = 'block';
+  } else if (stepNum === 'step-2') {
+    if (fill) fill.style.width = '66.66%';
+    if (count) count.textContent = '2/3';
+    if (progressSec) progressSec.style.display = 'flex';
+    if (stepper) stepper.style.display = 'block';
+  } else if (stepNum === 'step-3') {
+    if (fill) fill.style.width = '100%';
+    if (count) count.textContent = '3/3';
+    if (progressSec) progressSec.style.display = 'flex';
+    if (stepper) stepper.style.display = 'block';
+  } else if (stepNum === 'step-success') {
+    if (progressSec) progressSec.style.display = 'none';
+    if (stepper) stepper.style.display = 'none';
+  }
 
   document.querySelectorAll('.wizard-step').forEach(el => el.style.display = 'none');
   const target = document.getElementById(stepNum);
   if (target) target.style.display = 'block';
 }
+
 
 function attachStep1Events() {
   document.querySelectorAll('[data-choice]').forEach(card => {

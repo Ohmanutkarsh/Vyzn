@@ -24,93 +24,80 @@
     <main class="shell-content" id="main-content">
       <div class="wizard-container">
         
-        <!-- Step Indicator -->
-        <div class="wizard-stepper" id="wizard-stepper">Step 1 of 3</div>
+        <!-- Step Indicator (Single clean marker) -->
+        <div class="wizard-stepper" id="wizard-stepper">STEP 1 OF 3</div>
 
         <!-- Step 1: Choose Connection Type -->
         <section class="wizard-step" id="step-1">
-          <div class="wizard-stepper-pill"><span class="step-accent">Step 1</span> of 3</div>
-          <h2 class="wizard-step-title" id="step1-title" style="margin-bottom: 8px;">How is the camera connected?</h2>
+          <h1 class="wizard-step-title" id="step1-title">How is the camera connected?</h1>
           <p class="wizard-subhead">Select a connection method to stream footage into VYZN.</p>
 
-          <div class="choice-cards-stack">
-            <!-- Direct IP Card -->
-            <button type="button" class="choice-card" data-choice="ip">
-              <div class="choice-icon-wrap icon-cyan">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <div class="choice-cards-stack option-cards-stack">
+            <!-- Card 1: Direct IP -->
+            <button type="button" class="option-card choice-card" data-choice="ip">
+              <div class="option-icon-box">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
                   <circle cx="12" cy="13" r="4"></circle>
                 </svg>
               </div>
-              <div class="choice-card-body">
-                <div class="choice-title-row">
-                  <span class="choice-card-title">IP camera or recorder</span>
-                  <span class="choice-chip chip-cyan">Direct RTSP</span>
+              <div class="option-card-body">
+                <div class="option-title-row">
+                  <span class="option-card-title">IP camera or recorder</span>
+                  <span class="option-badge badge-blue">Direct RTSP</span>
                 </div>
-                <div class="choice-card-desc">CCTV camera, DVR or NVR. Connect directly using its local IP address and credentials.</div>
-                <div class="choice-card-tags">
-                  <span class="choice-tag">Hikvision</span>
-                  <span class="choice-tag">CP Plus</span>
-                  <span class="choice-tag">Dahua</span>
-                  <span class="choice-tag">ONVIF / NVR</span>
-                </div>
+                <div class="option-card-desc">CCTV camera, DVR or NVR. Connect directly using its local IP address and credentials.</div>
+                <div class="option-card-tags">Hikvision • CP Plus • Dahua • ONVIF / NVR</div>
               </div>
-              <div class="choice-card-chevron">
+              <div class="option-arrow">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7"/>
                 </svg>
               </div>
             </button>
 
-            <!-- Network Scan Card -->
-            <button type="button" class="choice-card" data-choice="network">
-              <div class="choice-icon-wrap icon-emerald">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <!-- Card 2: Find on Network -->
+            <button type="button" class="option-card choice-card" data-choice="network">
+              <div class="option-icon-box">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
                   <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
                   <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
-                  <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                  <circle cx="12" cy="20" r="1"></circle>
                 </svg>
               </div>
-              <div class="choice-card-body">
-                <div class="choice-title-row">
-                  <span class="choice-card-title">Find on my network</span>
-                  <span class="choice-chip chip-emerald">Auto-Discovery</span>
+              <div class="option-card-body">
+                <div class="option-title-row">
+                  <span class="option-card-title">Find on my network</span>
+                  <span class="option-badge badge-green">Auto-Discovery</span>
                 </div>
-                <div class="choice-card-desc">VYZN scans your shop's Wi-Fi and local network for active CCTV feeds automatically.</div>
-                <div class="choice-card-tags">
-                  <span class="choice-tag">Zero Setup</span>
-                  <span class="choice-tag">Auto-Detect</span>
-                  <span class="choice-tag">Local Subnet</span>
-                </div>
+                <div class="option-card-desc">VYZN scans your shop's Wi-Fi and local network for active CCTV feeds automatically.</div>
+                <div class="option-card-tags">Zero Setup • Auto-Detect • Local Subnet</div>
               </div>
-              <div class="choice-card-chevron">
+              <div class="option-arrow">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7"/>
                 </svg>
               </div>
             </button>
 
-            <!-- Phone / Webcam Card -->
-            <button type="button" class="choice-card" data-choice="phone">
-              <div class="choice-icon-wrap icon-purple">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <!-- Card 3: Phone or Webcam -->
+            <button type="button" class="option-card choice-card" data-choice="phone">
+              <div class="option-icon-box">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
                   <line x1="12" y1="18" x2="12.01" y2="18"></line>
                 </svg>
               </div>
-              <div class="choice-card-body">
-                <div class="choice-title-row">
-                  <span class="choice-card-title">Phone or webcam</span>
-                  <span class="choice-chip chip-purple">Instant Test</span>
+              <div class="option-card-body">
+                <div class="option-title-row">
+                  <span class="option-card-title">Phone or webcam</span>
+                  <span class="option-badge badge-purple">Instant Test</span>
                 </div>
-                <div class="choice-card-desc">Use a spare phone running IP Webcam, or this computer's webcam for instant testing.</div>
-                <div class="choice-card-tags">
-                  <span class="choice-tag">Computer Webcam</span>
-                  <span class="choice-tag">Android / iOS App</span>
-                </div>
+                <div class="option-card-desc">Use a spare phone running IP Webcam, or this computer's webcam for instant testing.</div>
+                <div class="option-card-tags">Computer Webcam • Android / iOS App</div>
               </div>
-              <div class="choice-card-chevron">
+              <div class="option-arrow">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M5 12h14M12 5l7 7-7 7"/>
                 </svg>
@@ -276,7 +263,16 @@
           </div>
         </section>
 
+        <!-- Stepper Progress (Bottom Indicator) -->
+        <div class="wizard-progress-section" id="wizard-progress-section">
+          <div class="wizard-progress-track">
+            <div class="wizard-progress-fill" id="wizard-progress-fill" style="width: 33.33%;"></div>
+          </div>
+          <div class="wizard-progress-count" id="wizard-progress-count">1/3</div>
+        </div>
+
       </div>
+
     </main>
 
     <!-- Mobile Bottom Navigation -->
