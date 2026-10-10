@@ -34,6 +34,14 @@ class EventRecord:
     sha256: Optional[str] = None        # SHA-256 integrity hash of media clip
     tier: str = "review"                # 'alert' | 'review'
     owner_email: Optional[str] = None   # User tenant owner email
+    analysis_json: Optional[str] = "{}" # Structured JSON analysis: title, summary, timeline, stats
+    title: Optional[str] = None         # Short plain-English event title
+    summary: Optional[str] = None       # Multi-sentence forensic summary
+    trigger_reason: Optional[str] = None # Exact signal chain reason for clip
+    importance_score: Optional[int] = None # 0-100 forensic score
+    importance_level: Optional[str] = None # 'low' | 'medium' | 'high' | 'critical'
+    parent_event_id: Optional[str] = None # Linked parent event if split or merged
+    part_index: int = 0                 # Part index (0, 1, 2...) for continuous long events
 
     @property
     def event_id(self) -> str:
@@ -65,6 +73,14 @@ class EventRecord:
             "sha256": self.sha256,
             "tier": self.tier,
             "owner_email": self.owner_email,
+            "analysis_json": self.analysis_json,
+            "title": self.title,
+            "summary": self.summary,
+            "trigger_reason": self.trigger_reason,
+            "importance_score": self.importance_score,
+            "importance_level": self.importance_level,
+            "parent_event_id": self.parent_event_id,
+            "part_index": self.part_index,
         }
 
 

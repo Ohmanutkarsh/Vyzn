@@ -127,14 +127,102 @@ VYZN includes pre-configured serverless handlers for instant deployment to Verce
 
 ---
 
+---
+
+## 🎬 Clip Lifecycle State Machine & Forensic Descriptions
+
+VYZN implements an explicit, per-camera state machine (`ClipStateMachine`) resolving both mid-event fragmentation (**P1**) and idle false clips (**P2**) while generating rich, factual event descriptions (**P3**).
+
+```
+                  +----------------------------------------------+
+                  |                     IDLE                     |
+                  |       (Buffering 10s pre-roll ring)          |
+                  +----------------------------------------------+
+                                         |
+                       Motion score >= START_THRESHOLD
+                                         v
+                  +----------------------------------------------+
+                  |                  CANDIDATE                   |
+                  |     (Must confirm within CONFIRM_WINDOW)     |
+                  +----------------------------------------------+
+                         /                                \
+           Failed Confirmation                     Confirmed (or YOLO detection)
+                        v                                  v
+                  +------------+                  +------------------------------+
+                  |    IDLE    |                  |          RECORDING           |
+                  +------------+                  |   (Writing clip, PTS time)   |
+                                                  +------------------------------+
+                                                        ^                 |
+                                          Activity resumes      No activity detected
+                                                        |                 v
+                                                  +------------------------------+
+                                                  |           HANGOVER           |
+                                                  | (10s post-roll quiet timer)  |
+                                                  +------------------------------+
+                                                                  |
+                                                       Quiet for 10 full seconds
+                                                                  v
+                                                  +------------------------------+
+                                                  |          FINALIZING          |
+                                                  | - Atomic .tmp.mp4 rename     |
+                                                  | - FFmpeg +faststart encode   |
+                                                  | - Factual Forensic Summary   |
+                                                  | - SQLite & Cloud Sync (R2)   |
+                                                  | - Telegram alert (once)      |
+                                                  +------------------------------+
+                                                                  |
+                                                                  v
+                                                  +------------------------------+
+                                                  |             IDLE             |
+                                                  |  (90s debounce merge window) |
+                                                  +------------------------------+
+```
+
+### Parameter Tuning Guide
+
+| Problem / Symptom | Parameter to Adjust | Direction | Default |
+| :--- | :--- | :--- | :--- |
+| **Clips cut mid-event (P1)** | `post_roll_sec` (Hangover) | Increase (10s -> 15s) | `10.0` |
+| **Clips cut mid-event (P1)** | `track_lost_tolerance_sec` | Increase (5s -> 8s) | `5.0` |
+| **Clips cut while subject pauses** | `stationary_hold_max_sec` | Increase (60s -> 90s) | `60.0` |
+| **Clips cut mid-event (P1)** | `continue_motion_threshold` | Decrease (0.003 -> 0.002) | `0.003` |
+| **Too sensitive / false clips (P2)** | `start_motion_threshold` | Increase (0.010 -> 0.015) | `0.010` (1.0%) |
+| **Single-frame blips trigger clips** | `confirm_frames` / `confirm_window` | Increase (3/5 -> 4/5) | `3` in `5` |
+| **Short bursts recorded separately** | `merge_gap_sec` (Debounce) | Increase (90s -> 120s) | `90.0` |
+| **Clips run too long** | `post_roll_sec` | Decrease (10s -> 6s) | `10.0` |
+| **Clips exceed max segment** | `max_clip_duration_sec` | Adjust split size | `180.0` |
+
+### Running the Offline Replay Harness
+
+Run the 11-scenario automated verification test suite:
+```bash
+python -m pytest tests/test_clip_lifecycle_and_description.py -v
+```
+
+Replay and evaluate any custom MP4 footage before edge deployment:
+```python
+from vyzn.evaluation.replay_harness import ReplayHarness
+
+harness = ReplayHarness(camera_id="cam_01", write_clips_to_disk=True)
+clips = harness.replay_video_file("test_footage.mp4")
+
+print(f"Generated {len(clips)} validated clips:")
+for clip in clips:
+    print(f"- [{clip.clip_id}] Duration: {clip.duration}s | Trigger: {clip.trigger_reason} | Close: {clip.close_reason}")
+    print(f"  Summary: {clip.analysis.get('summary')}")
+```
+
+---
+
 ## 🧪 Test Suite
 
 Run the full automated test suite verifying edge capture, behavioral scoring, Telegram alerts, and cloud synchronization:
 
 ```bash
-python tests/run_tests.py
+python -m pytest tests/
 ```
-**Results**: `75 passed, 0 failed (100% pass rate)`.
+**Results**: `97 passed, 0 failed (100% pass rate)`.
+
 
 ---
 

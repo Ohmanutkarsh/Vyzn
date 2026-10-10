@@ -38,12 +38,16 @@ class YOLOv8Detector(BaseDetector):
 
     COCO_MAP = {
         0: ("person", "person"),
+        1: ("bicycle", "vehicle"),
         2: ("car", "vehicle"),
         3: ("motorcycle", "vehicle"),
         5: ("bus", "vehicle"),
         7: ("truck", "vehicle"),
         15: ("cat", "animal"),
         16: ("dog", "animal"),
+        24: ("backpack", "object"),
+        26: ("handbag", "object"),
+        28: ("suitcase", "object"),
     }
 
     def __init__(self, model_name: str = "yolov8n.pt", conf_thresh: float = 0.25):

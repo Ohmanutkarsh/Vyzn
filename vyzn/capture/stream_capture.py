@@ -366,11 +366,13 @@ class RTSPCaptureThread(threading.Thread):
                 downscaled = buf_frame
 
                 # Push to queue (drop oldest frame if queue full to avoid memory buildup)
-                epoch_now = time.time()
-                item = (self.config.camera_id, epoch_now, downscaled, self.config.is_night_ir)
+                item = (self.config.camera_id, now_mono, downscaled, self.config.is_night_ir)
                 if self.output_queue.full():
                     try:
                         self.output_queue.get_nowait()
+                        self.dropped_frame_count = getattr(self, "dropped_frame_count", 0) + 1
+                        if self.dropped_frame_count % 100 == 1:
+                            logger.warning(f"[{self.config.camera_id}] Capture buffer full; dropped {self.dropped_frame_count} frames.")
                     except queue.Empty:
                         pass
 

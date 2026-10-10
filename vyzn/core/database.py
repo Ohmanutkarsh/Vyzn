@@ -101,7 +101,16 @@ class DatabaseWriterWorker(threading.Thread):
             clip_number INTEGER,
             expires_at_ms INTEGER,
             sha256 TEXT,
-            tier TEXT DEFAULT 'review'
+            tier TEXT DEFAULT 'review',
+            owner_email TEXT,
+            analysis_json TEXT DEFAULT '{}',
+            title TEXT,
+            summary TEXT,
+            trigger_reason TEXT,
+            importance_score INTEGER,
+            importance_level TEXT,
+            parent_event_id TEXT,
+            part_index INTEGER DEFAULT 0
         );
 
         CREATE INDEX IF NOT EXISTS idx_events_camera_time ON events(camera_id, start_time);
@@ -281,7 +290,28 @@ class DatabaseWriterWorker(threading.Thread):
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_location ON events(location_id);")
         except sqlite3.OperationalError:
             pass
-        conn.commit()
+
+        # Dynamic migrations for forensic analysis & multi-part clips
+        for col_def in [
+            "analysis_json TEXT DEFAULT '{}'",
+            "title TEXT",
+            "summary TEXT",
+            "trigger_reason TEXT",
+            "importance_score INTEGER",
+            "importance_level TEXT",
+            "parent_event_id TEXT",
+            "part_index INTEGER DEFAULT 0",
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE events ADD COLUMN {col_def};")
+            except sqlite3.OperationalError:
+                pass
+
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_parent ON events(parent_event_id);")
+        except sqlite3.OperationalError:
+            pass
+
         conn.commit()
 
 
@@ -341,8 +371,10 @@ class EventDatabase:
             starred, synced, user_triage, file_path, thumb_path,
             dominant_color, zone_name, location_id, duration_sec,
             motion_points_count, metadata_json,
-            clip_number, expires_at_ms, sha256, tier, owner_email
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            clip_number, expires_at_ms, sha256, tier, owner_email,
+            analysis_json, title, summary, trigger_reason,
+            importance_score, importance_level, parent_event_id, part_index
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             event.event_group_id, event.camera_id, event.start_time, event.end_time,
@@ -359,7 +391,15 @@ class EventDatabase:
             getattr(event, "expires_at_ms", None),
             getattr(event, "sha256", None),
             getattr(event, "tier", "review"),
-            getattr(event, "owner_email", None)
+            getattr(event, "owner_email", None),
+            getattr(event, "analysis_json", "{}"),
+            getattr(event, "title", None),
+            getattr(event, "summary", None),
+            getattr(event, "trigger_reason", None),
+            getattr(event, "importance_score", None),
+            getattr(event, "importance_level", None),
+            getattr(event, "parent_event_id", None),
+            getattr(event, "part_index", 0),
         )
         self.writer.queue.put((sql, params, callback))
 
@@ -1130,6 +1170,29 @@ class EventDatabase:
         thumb_url = f"/api/clips/{ev_id}/thumb"
         video_url = f"/api/clips/{ev_id}/video"
 
+        # Parse analysis JSON if present
+        analysis = {}
+        raw_analysis = row.get("analysis_json") or "{}"
+        if isinstance(raw_analysis, str):
+            try:
+                import json
+                analysis = json.loads(raw_analysis)
+            except Exception:
+                analysis = {}
+        elif isinstance(raw_analysis, dict):
+            analysis = raw_analysis
+
+        title = row.get("title") or analysis.get("title") or "Movement detected in area"
+        summary = row.get("summary") or analysis.get("summary") or "Activity registered and recorded."
+        trig_reason = row.get("trigger_reason") or analysis.get("trigger_reason") or (reasons[0].get("code") if reasons else "Movement detected")
+        imp_score = row.get("importance_score") or analysis.get("importance", {}).get("score", row.get("score") or 40)
+        imp_level = row.get("importance_level") or analysis.get("importance", {}).get("level", "medium" if imp_score < 70 else "high")
+        timeline = analysis.get("timeline", [])
+        movement = analysis.get("movement", [])
+        stats = analysis.get("stats", {})
+        parent_id = row.get("parent_event_id")
+        part_idx = row.get("part_index") or 0
+
         return {
             "id": ev_id,
             "number": clip_num,
@@ -1172,7 +1235,22 @@ class EventDatabase:
             "filePath": row.get("file_path") or "",
             "thumbPath": row.get("thumb_path") or "",
             "ownerEmail": row.get("owner_email"),
-            "owner_email": row.get("owner_email")
+            "owner_email": row.get("owner_email"),
+            "title": title,
+            "summary": summary,
+            "triggerReason": trig_reason,
+            "trigger_reason": trig_reason,
+            "importance": analysis.get("importance", {"score": imp_score, "level": imp_level, "reasons": []}),
+            "importanceScore": imp_score,
+            "importanceLevel": imp_level,
+            "timeline": timeline,
+            "movement": movement,
+            "stats": stats,
+            "parentEventId": parent_id,
+            "parent_event_id": parent_id,
+            "partIndex": part_idx,
+            "part_index": part_idx,
+            "analysis": analysis
         }
 
     def query_clips(

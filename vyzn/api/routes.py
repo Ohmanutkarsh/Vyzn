@@ -473,6 +473,17 @@ def get_clip_detail(clip_id: str):
     return clip
 
 
+@app.get("/api/clips/{clip_id}/analysis")
+def get_clip_analysis(clip_id: str):
+    """Retrieves full structured forensic analysis JSON for the clip."""
+    db = get_db()
+    clip = db.get_clip_by_id(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    return clip.get("analysis") or {}
+
+
+
 @app.patch("/api/clips/{clip_id}")
 async def update_clip(clip_id: str, payload: ClipStatusUpdate):
     """Updates clip status (reviewed, not_an_issue, unreviewed) and feedback."""
@@ -548,6 +559,7 @@ def push_clip_to_telegram(clip_id: str, request: Request):
 
 
 @app.get("/api/clips/{clip_id}/evidence-pack")
+@app.get("/api/clips/{clip_id}/export")
 def download_clip_evidence_pack(clip_id: str):
     """Generates Section 6.3 Evidence Pack ZIP bundle."""
     db = get_db()
@@ -604,6 +616,28 @@ def get_clip_thumbnail_file(clip_id: str):
     if placeholder.exists():
         return FileResponse(str(placeholder), media_type="image/jpeg")
     raise HTTPException(status_code=404, detail="Thumbnail not found")
+
+
+@app.get("/api/clips/{clip_id}/keyframe_{idx}.jpg")
+def get_clip_keyframe_file(clip_id: str, idx: int):
+    """Serves clip keyframe image."""
+    db = get_db()
+    clip = db.get_clip_by_id(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    fp = clip.get("filePath")
+    if fp:
+        parent_dir = Path(fp).parent
+        kf_path = parent_dir / f"keyframe_{idx}.jpg"
+        if kf_path.exists():
+            return FileResponse(str(kf_path), media_type="image/jpeg")
+
+    tp = clip.get("thumbPath")
+    if tp and os.path.exists(tp):
+        return FileResponse(tp, media_type="image/jpeg")
+    raise HTTPException(status_code=404, detail="Keyframe not found")
+
 
 
 @app.get("/api/events/{event_id}")

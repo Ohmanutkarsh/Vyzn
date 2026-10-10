@@ -1,12 +1,13 @@
 """
 Pure NumPy lightweight IoU Tracker with 30-frame occlusion coasting.
 Replaces fragile centroid matching without requiring deep learning Re-ID overhead.
+Supports trajectory logging, stationary hold tracking, and direction analysis.
 """
 
 from __future__ import annotations
 import time
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 import numpy as np
 from vyzn.ai.detector import Detection
 
@@ -21,10 +22,40 @@ class Track:
     last_seen_time: float
     frames_seen: int = 1
     missed_frames: int = 0
+    trajectory: List[Tuple[float, float, float]] = field(default_factory=list) # [(t, cx, cy), ...]
+    stationary_since: Optional[float] = None
+    is_stationary: bool = False
 
     @property
     def duration_sec(self) -> float:
         return max(0.0, self.last_seen_time - self.start_time)
+
+    @property
+    def centroid(self) -> Tuple[float, float]:
+        cx = (self.box[0] + self.box[2]) / 2.0
+        cy = (self.box[1] + self.box[3]) / 2.0
+        return cx, cy
+
+    def get_travel_direction(self) -> str:
+        """Determines primary direction of movement based on trajectory."""
+        if len(self.trajectory) < 2:
+            return "stationary"
+        first = self.trajectory[0]
+        last = self.trajectory[-1]
+        dx = last[1] - first[1]
+        dy = last[2] - first[2]
+        dist = np.sqrt(dx * dx + dy * dy)
+        if dist < 0.05:
+            return "stationary"
+        if abs(dx) > abs(dy):
+            return "left to right" if dx > 0 else "right to left"
+        else:
+            return "top to bottom" if dy > 0 else "bottom to top"
+
+    def get_stationary_duration(self, current_time: float) -> float:
+        if not self.is_stationary or self.stationary_since is None:
+            return 0.0
+        return max(0.0, current_time - self.stationary_since)
 
 
 def calculate_iou(boxA: List[float], boxB: List[float]) -> float:
@@ -60,11 +91,27 @@ class IOUTracker:
         self.next_track_id = 1
         self.tracks: Dict[int, Track] = {}
 
+    def get_alive_tracks(self, max_missed_seconds: float = 5.0, current_time: Optional[float] = None) -> List[Track]:
+        """Returns all tracks that are currently active or coasting within tolerance."""
+        now = current_time or time.monotonic()
+        alive = []
+        for t in self.tracks.values():
+            if now - t.last_seen_time <= max_missed_seconds:
+                alive.append(t)
+        return alive
+
+    def clear(self):
+        """Resets all track memory."""
+        self.tracks.clear()
+        self.next_track_id = 1
+
     def update(self, detections: List[Detection], timestamp: Optional[float] = None) -> List[Track]:
-        now = timestamp or time.monotonic()
+        now = timestamp if timestamp is not None else time.monotonic()
 
         if not self.tracks:
             for det in detections:
+                cx = (det.box[0] + det.box[2]) / 2.0
+                cy = (det.box[1] + det.box[3]) / 2.0
                 self.tracks[self.next_track_id] = Track(
                     track_id=self.next_track_id,
                     box=det.box,
@@ -73,7 +120,8 @@ class IOUTracker:
                     start_time=now,
                     last_seen_time=now,
                     frames_seen=1,
-                    missed_frames=0
+                    missed_frames=0,
+                    trajectory=[(now, cx, cy)]
                 )
                 self.next_track_id += 1
             return list(self.tracks.values())
@@ -102,11 +150,28 @@ class IOUTracker:
 
                 # Update matched track
                 t = self.tracks[tid]
+                old_cx, old_cy = t.centroid
                 t.box = det.box
                 t.confidence = det.confidence
                 t.last_seen_time = now
                 t.frames_seen += 1
                 t.missed_frames = 0
+
+                new_cx, new_cy = t.centroid
+                t.trajectory.append((now, new_cx, new_cy))
+                # Keep trajectory bounded to last 200 points
+                if len(t.trajectory) > 200:
+                    t.trajectory = t.trajectory[-200:]
+
+                # Update stationary detection
+                movement = np.sqrt((new_cx - old_cx) ** 2 + (new_cy - old_cy) ** 2)
+                if movement < 0.015:
+                    if not t.is_stationary:
+                        t.is_stationary = True
+                        t.stationary_since = now
+                else:
+                    t.is_stationary = False
+                    t.stationary_since = None
 
                 unmatched_tracks.discard(tid)
                 unmatched_detections.discard(j)
@@ -129,6 +194,8 @@ class IOUTracker:
         # Initialize new tracks for unmatched detections
         for j in unmatched_detections:
             det = detections[j]
+            cx = (det.box[0] + det.box[2]) / 2.0
+            cy = (det.box[1] + det.box[3]) / 2.0
             self.tracks[self.next_track_id] = Track(
                 track_id=self.next_track_id,
                 box=det.box,
@@ -137,7 +204,8 @@ class IOUTracker:
                 start_time=now,
                 last_seen_time=now,
                 frames_seen=1,
-                missed_frames=0
+                missed_frames=0,
+                trajectory=[(now, cx, cy)]
             )
             self.next_track_id += 1
 

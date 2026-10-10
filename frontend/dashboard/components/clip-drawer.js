@@ -86,11 +86,32 @@ export function initClipDrawer({ onClipUpdated } = {}) {
             <span>${t('clips.show_what_vyzn_saw', 'Show what VYZN saw')}</span>
           </label>
 
-          <!-- Why this clip was saved -->
+          <!-- Top: Title, Summary & Multipart status -->
+          <div class="drawer-header-summary-card" style="padding: 12px 14px; background: rgba(255,255,255,0.03); border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--border);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+              <h3 class="drawer-summary-title" id="drawer-summary-title" style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-1);"></h3>
+              <span id="drawer-importance-badge" style="font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px;"></span>
+            </div>
+            <p class="drawer-summary-desc" id="drawer-summary-desc" style="margin: 0 0 6px 0; font-size: 13px; color: var(--text-2); line-height: 1.4;"></p>
+            <div id="drawer-multipart-panel" style="display: none; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-3);">
+              <span id="drawer-multipart-label">Part 1</span>
+              <button type="button" class="btn btn-quiet" id="drawer-btn-prev-part" style="padding: 2px 8px; font-size: 11px; display: none;">‹ Prev Part</button>
+              <button type="button" class="btn btn-quiet" id="drawer-btn-next-part" style="padding: 2px 8px; font-size: 11px; display: none;">Next Part ›</button>
+            </div>
+          </div>
+
+          <!-- Why this clip was created -->
           <div class="why-saved-card">
             <div style="margin-bottom: 8px;" id="drawer-tier-badge-container"></div>
-            <div class="why-saved-header">${t('clips.why_saved_heading', 'Why this clip was saved')}</div>
+            <div class="why-saved-header">${t('clips.why_saved_heading', 'Why this clip was created')}</div>
+            <div id="drawer-trigger-reason-row" style="margin: 8px 0; font-size: 13px; color: var(--text-1); font-weight: 500;"></div>
             <div class="why-saved-checklist" id="drawer-checklist-container"></div>
+          </div>
+
+          <!-- Middle: Interactive Timeline -->
+          <div class="drawer-timeline-card" style="margin-bottom: 16px;">
+            <h4 style="font-size: 13px; font-weight: 600; color: var(--text-2); margin: 0 0 10px 0; text-transform: uppercase;">Activity Timeline</h4>
+            <div class="drawer-timeline-list" id="drawer-timeline-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; padding-right: 4px;"></div>
           </div>
 
           <!-- Facts Definition List -->
@@ -497,9 +518,91 @@ function renderDrawerContent(clip) {
     marker.style.left = `${triggerPct}%`;
   };
 
+  // Top Summary & Title
+  const summaryTitleEl = document.getElementById('drawer-summary-title');
+  if (summaryTitleEl) {
+    summaryTitleEl.textContent = clip.title || t('clips.drawer_clip_title', { number: clip.number || 1 });
+  }
+
+  const summaryDescEl = document.getElementById('drawer-summary-desc');
+  if (summaryDescEl) {
+    summaryDescEl.textContent = clip.summary || 'Activity recorded and verified by analysis.';
+  }
+
+  // Importance Badge
+  const impBadgeEl = document.getElementById('drawer-importance-badge');
+  if (impBadgeEl) {
+    const imp = clip.importance || {};
+    const impScore = clip.importanceScore != null ? clip.importanceScore : (imp.score || clip.score || 50);
+    const impLevel = clip.importanceLevel || imp.level || (impScore >= 70 ? 'high' : 'medium');
+    impBadgeEl.textContent = `${impLevel.toUpperCase()} (${Math.round(impScore)})`;
+    if (impLevel === 'critical' || impScore >= 85) {
+      impBadgeEl.style.background = 'rgba(239, 68, 68, 0.15)';
+      impBadgeEl.style.color = '#ef4444';
+    } else if (impLevel === 'high' || impScore >= 70) {
+      impBadgeEl.style.background = 'rgba(245, 158, 11, 0.15)';
+      impBadgeEl.style.color = '#f59e0b';
+    } else {
+      impBadgeEl.style.background = 'rgba(56, 189, 248, 0.15)';
+      impBadgeEl.style.color = '#38bdf8';
+    }
+  }
+
+  // Multipart navigation
+  const partPanel = document.getElementById('drawer-multipart-panel');
+  const partLabel = document.getElementById('drawer-multipart-label');
+  const btnPrevPart = document.getElementById('drawer-btn-prev-part');
+  const btnNextPart = document.getElementById('drawer-btn-next-part');
+  const partIdx = clip.partIndex !== undefined ? clip.partIndex : (clip.part_index || 0);
+  const parentId = clip.parentEventId || clip.parent_event_id;
+
+  if (partPanel) {
+    if (parentId || partIdx > 0) {
+      partPanel.style.display = 'flex';
+      const relatedParts = (activeClipList || []).filter(c => {
+        const cParent = c.parentEventId || c.parent_event_id || c.id;
+        const targetParent = parentId || clip.id;
+        return cParent === targetParent || c.id === targetParent;
+      }).sort((a, b) => (a.partIndex || a.part_index || 0) - (b.partIndex || b.part_index || 0));
+
+      const totalParts = Math.max(relatedParts.length, partIdx + 1);
+      partLabel.textContent = `Part ${partIdx + 1} of ${totalParts}`;
+
+      const curRelIdx = relatedParts.findIndex(c => c.id === clip.id);
+      if (curRelIdx > 0) {
+        btnPrevPart.style.display = 'inline-block';
+        btnPrevPart.onclick = () => openClipDrawer(relatedParts[curRelIdx - 1], activeClipList);
+      } else {
+        btnPrevPart.style.display = 'none';
+      }
+
+      if (curRelIdx >= 0 && curRelIdx < relatedParts.length - 1) {
+        btnNextPart.style.display = 'inline-block';
+        btnNextPart.onclick = () => openClipDrawer(relatedParts[curRelIdx + 1], activeClipList);
+      } else {
+        btnNextPart.style.display = 'none';
+      }
+    } else {
+      partPanel.style.display = 'none';
+    }
+  }
+
   // Tier Badge
   const tierContainer = document.getElementById('drawer-tier-badge-container');
   tierContainer.innerHTML = renderTierBadge(clip.tier);
+
+  // Trigger reason
+  const trigRow = document.getElementById('drawer-trigger-reason-row');
+  const trigReason = clip.triggerReason || clip.trigger_reason;
+  if (trigRow) {
+    if (trigReason) {
+      const cleanReason = trigReason.replace(/_/g, ' ');
+      trigRow.innerHTML = `<span style="color: #38bdf8; font-weight: 600;">Trigger:</span> ${escapeHtml(cleanReason.charAt(0).toUpperCase() + cleanReason.slice(1))}`;
+      trigRow.style.display = 'block';
+    } else {
+      trigRow.style.display = 'none';
+    }
+  }
 
   // Reasons Checklist
   const checklist = document.getElementById('drawer-checklist-container');
@@ -531,6 +634,45 @@ function renderDrawerContent(clip) {
       item.innerHTML = `<span class="why-saved-check-icon">✓</span><span>${text}</span>`;
       checklist.appendChild(item);
     });
+  }
+
+  // Interactive Timeline
+  const tlContainer = document.getElementById('drawer-timeline-list');
+  if (tlContainer) {
+    tlContainer.innerHTML = '';
+    const timeline = (clip.analysis && clip.analysis.timeline) || clip.timeline || [];
+    if (timeline.length === 0) {
+      tlContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-3); font-style: italic; padding: 4px 0;">Continuous motion observed throughout clip.</div>`;
+    } else {
+      timeline.forEach((pt) => {
+        const offsetSec = Number(pt.t_offset_sec != null ? pt.t_offset_sec : (pt.offset_sec || 0));
+        const itemEl = document.createElement('div');
+        itemEl.className = 'drawer-timeline-item';
+        itemEl.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; cursor: pointer; border: 1px solid var(--border); transition: background 0.15s ease;';
+
+        const offsetFormatted = `${Math.floor(offsetSec / 60)}:${(Math.floor(offsetSec % 60) < 10 ? '0' : '')}${Math.floor(offsetSec % 60)}`;
+        const actionText = pt.action || pt.description || pt.note || 'Movement registered';
+        const classesText = Array.isArray(pt.classes) ? pt.classes.join(', ') : (pt.classes || pt.object || '');
+
+        itemEl.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-family: var(--font-mono); font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-weight: 600;">⏱️ ${offsetFormatted}</span>
+            <span style="font-size: 12px; color: var(--text-1); font-weight: 500;">${escapeHtml(actionText)}</span>
+          </div>
+          ${classesText ? `<span style="font-size: 11px; color: var(--text-3);">${escapeHtml(classesText)}</span>` : ''}
+        `;
+
+        itemEl.addEventListener('mouseenter', () => { itemEl.style.background = 'rgba(255,255,255,0.08)'; });
+        itemEl.addEventListener('mouseleave', () => { itemEl.style.background = 'rgba(255,255,255,0.03)'; });
+
+        itemEl.addEventListener('click', () => {
+          video.currentTime = Math.max(0, offsetSec);
+          video.play().catch(() => {});
+        });
+
+        tlContainer.appendChild(itemEl);
+      });
+    }
   }
 
   // Facts Definition List

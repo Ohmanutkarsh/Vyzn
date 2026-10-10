@@ -23,6 +23,8 @@ from vyzn.ai.detector import BaseDetector, MockDetector, YOLOv8Detector
 from vyzn.ai.tracker import IOUTracker
 from vyzn.scoring.engine import ScoringEngine, is_time_after_hours, check_box_intersects_zone, is_foot_in_polygon
 from vyzn.recording.clip_writer import ClipWriter
+from vyzn.recording.state_machine import ClipStateMachine, ClipState, FinalizedClipSegment
+from vyzn.recording.description_engine import ClipDescriptionEngine
 from vyzn.alerts.telegram import TelegramAlertProvider, start_telegram_poller, stop_telegram_poller
 from vyzn.alerts.dispatcher import AlertDispatcher
 from vyzn.storage.reaper import StorageReaperDaemon
@@ -117,6 +119,10 @@ class EdgePipeline:
         self.active_event_alert_sent: Dict[str, bool] = {}
         self.active_event_best_candidates: Dict[str, Optional[DetectionCandidate]] = {}
 
+        # Explicit Clip State Machines & Alert tracking
+        self.state_machines: Dict[str, ClipStateMachine] = {}
+        self.dispatched_alert_events: set = set()
+
         # Initialize motion gate camera watch areas
         for cam in self.settings.cameras:
             areas = getattr(cam, "watch_areas", None)
@@ -124,8 +130,32 @@ class EdgePipeline:
                 self.motion_gate.set_camera_areas(cam.camera_id, [a.polygon for a in areas if a.polygon])
             elif getattr(cam, "restricted_zones", None):
                 self.motion_gate.set_camera_areas(cam.camera_id, [z.points for z in cam.restricted_zones if z.points])
+            if getattr(cam, "osd_exclude_polygon", None):
+                self.motion_gate.set_osd_polygons(cam.camera_id, [cam.osd_exclude_polygon])
 
         self.worker_thread: Optional[threading.Thread] = None
+
+    def _get_or_create_state_machine(self, camera_id: str) -> ClipStateMachine:
+        if camera_id not in self.state_machines:
+            cam_cfg = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
+            target_fps = float(getattr(cam_cfg, "ai_inference_fps", getattr(cam_cfg, "target_fps", 4.0)) or 4.0)
+            self.state_machines[camera_id] = ClipStateMachine(
+                camera_id=camera_id,
+                start_motion_threshold=getattr(cam_cfg, "start_motion_threshold", None) or self.settings.start_motion_threshold,
+                continue_motion_threshold=getattr(cam_cfg, "continue_motion_threshold", None) or self.settings.continue_motion_threshold,
+                confirm_window=self.settings.confirm_window_frames,
+                confirm_frames=self.settings.confirm_frames,
+                pre_roll_sec=getattr(cam_cfg, "pre_roll_sec", None) or self.settings.pre_roll_sec,
+                post_roll_sec=getattr(cam_cfg, "post_roll_sec", None) or self.settings.post_roll_sec,
+                merge_gap_sec=getattr(cam_cfg, "merge_gap_sec", None) or self.settings.merge_gap_sec,
+                max_clip_duration_sec=getattr(cam_cfg, "max_clip_duration_sec", None) or self.settings.max_clip_duration_sec,
+                min_motion_only_sec=self.settings.min_motion_only_seconds,
+                track_lost_tolerance_sec=self.settings.track_lost_tolerance_sec,
+                stationary_hold_max_sec=self.settings.stationary_hold_max_sec,
+                stream_gap_tolerance_sec=self.settings.stream_gap_tolerance_sec,
+                target_fps=target_fps
+            )
+        return self.state_machines[camera_id]
 
     def start(self):
         """Launches capture streams, inference worker, and support daemons."""
@@ -223,9 +253,7 @@ class EdgePipeline:
             if camera_id in self.ring_buffers:
                 self.ring_buffers[camera_id].append(frame)
 
-
-            # Find camera config
-            cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
+            sm = self._get_or_create_state_machine(camera_id)
             now_dt = datetime.now(timezone.utc)
             after_hours = is_time_after_hours(now_dt, cam_config.business_hours) if cam_config else True
 
@@ -236,267 +264,139 @@ class EdgePipeline:
             elif cam_config and getattr(cam_config, "restricted_zones", None):
                 watch_polys = [z.points for z in cam_config.restricted_zones if z.points]
 
-            # 1. Motion Pre-Filter (MOG2) with watch area masking
-            has_motion, motion_ratio, _ = self.motion_gate.process_frame(camera_id, frame, watch_polygons=watch_polys)
+            # Extract OSD exclusion polygon if configured
+            osd_polys = None
+            if cam_config and getattr(cam_config, "osd_exclude_polygon", None):
+                osd_polys = [cam_config.osd_exclude_polygon]
+
+            # 1. Hardened MOG2 Motion Pre-Filter
+            has_motion, motion_ratio, _ = self.motion_gate.process_frame(
+                camera_id, frame, watch_polygons=watch_polys, osd_polygons=osd_polys
+            )
 
             if self.motion_gate.had_motion_dropped_outside(camera_id):
                 self.db.increment_ignored_moments(camera_id)
 
-            # 2. If no motion and no active event, skip deep learning inference
-            if not has_motion and camera_id not in self.active_event_ids:
-                self.frame_queue.task_done()
-                continue
+            # Check alive coasting tracks
+            alive_tracks = self.tracker.get_alive_tracks(
+                max_missed_seconds=self.settings.track_lost_tolerance_sec,
+                current_time=frame_time
+            )
 
-            # 3. Run Object Detection on motion frame
-            detections = self.detector.detect(frame)
+            # 2. Skip deep learning inference if completely idle
+            should_run_ai = has_motion or (sm.state != ClipState.IDLE) or (len(alive_tracks) > 0)
 
-            # 4. Update IoU Tracker
-            active_tracks = self.tracker.update(detections, timestamp=frame_time)
-
-            # 6. Evaluate Candidate Threat Level
-            best_candidate = None
-            highest_score = 0
-            should_alert_flag = False
-
-            has_configured_areas = bool(cam_config and getattr(cam_config, "watch_areas", None))
-
-            if active_tracks:
-                for track in active_tracks:
-                    in_restricted_zone = False
-                    matched_area_name = "general"
-                    track_should_alert = False
-
-                    if has_configured_areas:
-                        for area in cam_config.watch_areas:
-                            if area.schedule == "outside_shop_hours" and not after_hours:
-                                continue
-                            if is_foot_in_polygon(track.box, area.polygon):
-                                # Dwell time gate
-                                if track.duration_sec >= getattr(area, "min_stay_seconds", 0):
-                                    in_restricted_zone = True
-                                    matched_area_name = area.name
-                                    if area.response == "alert":
-                                        track_should_alert = True
-                                break
-                        # If camera has watch areas, but this track's feet are NOT in any area, skip
-                        if not in_restricted_zone:
-                            continue
-                    elif cam_config and getattr(cam_config, "restricted_zones", None):
-                        for zone in cam_config.restricted_zones:
-                            if check_box_intersects_zone(track.box, zone):
-                                in_restricted_zone = True
-                                matched_area_name = zone.name
-                                break
-
-                    candidate = DetectionCandidate(
-                        camera_id=camera_id,
-                        object_type=track.label,
-                        confidence=track.confidence,
-                        motion_ratio=motion_ratio,
-                        track_duration_sec=track.duration_sec,
-                        bounding_box=track.box,
-                        is_after_hours=after_hours,
-                        is_in_restricted_zone=in_restricted_zone,
-                        is_night_ir=is_night_ir,
-                        zone_name=matched_area_name,
-                        timestamp=now_dt
-                    )
-
-                    cam_bias = self.calibrator.get_camera_bias(camera_id)
-                    score, alert, breakdown = self.scoring_engine.evaluate(candidate, camera_bias=cam_bias)
-                    if track_should_alert:
-                        alert = True
-                        score = max(score, self.settings.alert_score_threshold + 5)
-
-                    if score > highest_score:
-                        highest_score = score
-                        should_alert_flag = alert
-                        best_candidate = candidate
-            elif has_motion and not has_configured_areas:
-                # Unclassified motion (only if no watch areas restricting coverage)
-                candidate = DetectionCandidate(
-                    camera_id=camera_id,
-                    object_type="unclassified",
-                    confidence=0.0,
-                    motion_ratio=motion_ratio,
-                    track_duration_sec=0.0,
-                    bounding_box=[0, 0, 1, 1],
-                    is_after_hours=after_hours,
-                    is_in_restricted_zone=False,
-                    is_night_ir=is_night_ir,
-                    zone_name="general",
-                    timestamp=now_dt
+            detections = []
+            if should_run_ai:
+                detections = self.detector.detect(frame)
+                active_tracks = self.tracker.update(detections, timestamp=frame_time)
+                alive_tracks = self.tracker.get_alive_tracks(
+                    max_missed_seconds=self.settings.track_lost_tolerance_sec,
+                    current_time=frame_time
                 )
-                cam_bias = self.calibrator.get_camera_bias(camera_id)
-                score, alert, _ = self.scoring_engine.evaluate(candidate, camera_bias=cam_bias)
-                highest_score = score
-                best_candidate = candidate
+            else:
+                self.tracker.update([], timestamp=frame_time)
+                alive_tracks = []
 
-            # 7. Event Assembly & Grace Period Logic
-            is_active_motion = (highest_score >= 40 and best_candidate is not None)
+            # Filter tracks to watch areas / ROI if configured
+            in_roi = True
+            has_configured_areas = bool(cam_config and getattr(cam_config, "watch_areas", None))
+            if has_configured_areas:
+                tracks_in_roi = []
+                for trk in alive_tracks:
+                    for area in cam_config.watch_areas:
+                        if area.schedule == "outside_shop_hours" and not after_hours:
+                            continue
+                        if is_foot_in_polygon(trk.box, area.polygon):
+                            tracks_in_roi.append(trk)
+                            break
+                in_roi = has_motion or (len(tracks_in_roi) > 0)
+                alive_tracks = tracks_in_roi
 
-            if is_active_motion:
-                # Start new event if not already tracking one
-                if camera_id not in self.active_event_ids:
-                    event_id = f"ev_{camera_id}_{int(time.time())}"
-                    self.active_event_ids[camera_id] = event_id
-                    self.active_event_scores[camera_id] = highest_score
-                    self.active_event_first_motion[camera_id] = frame_time
-                    self.active_event_last_motion[camera_id] = frame_time
-                    self.active_event_motion_counts[camera_id] = 1
-                    # Retroactive 10-second pre-roll boundary
-                    start_dt = datetime.fromtimestamp(max(0.0, frame_time - 10.0), timezone.utc)
-                    self.active_event_start_times[camera_id] = start_dt.isoformat()
-                    self.active_event_alert_sent[camera_id] = False
-                    self.active_event_best_candidates[camera_id] = best_candidate
+            # 3. Step the Explicit Clip Lifecycle State Machine
+            finalized_segment = sm.step(
+                pts=frame_time,
+                frame_ref=frame,
+                motion_score=motion_ratio,
+                detections=detections,
+                tracks=alive_tracks,
+                in_roi=in_roi
+            )
 
-                    # Always use the pipeline's own ring buffer — it is guaranteed to exist and be current.
-                    # The capture thread ring buffer method is optional and may not exist.
-                    pre_roll = list(self.ring_buffers.get(camera_id, deque()))
-                    if not pre_roll:
-                        # Try capture thread as secondary source
-                        for t in self.capture_threads:
-                            if getattr(t, "config", None) and t.config.camera_id == camera_id:
-                                if hasattr(t, "get_ring_buffer_copy"):
-                                    candidate_roll = t.get_ring_buffer_copy()
-                                    if candidate_roll:
-                                        pre_roll = list(candidate_roll)
-                                        break
-                    # Log pre-roll size so we can verify it in production
-                    logger.debug(f"Pre-roll for {camera_id}: {len(pre_roll)} frames ({len(pre_roll)/4.0:.1f}s)")
+            # Keep active_event_ids mirror updated for legacy callers
+            if sm.current_event_id and sm.state in (ClipState.RECORDING, ClipState.HANGOVER):
+                self.active_event_ids[camera_id] = sm.current_event_id
+            else:
+                self.active_event_ids.pop(camera_id, None)
 
-                    self.event_buffers[camera_id] = list(pre_roll)
-                else:
-                    # Ongoing or re-triggered motion within 90s merge window
-                    self.active_event_last_motion[camera_id] = frame_time
-                    self.active_event_motion_counts[camera_id] = self.active_event_motion_counts.get(camera_id, 0) + 1
-
-                # Append current frame and update state
-                self.event_buffers[camera_id].append(frame)
-                if highest_score > self.active_event_scores[camera_id]:
-                    self.active_event_scores[camera_id] = highest_score
-                    self.active_event_best_candidates[camera_id] = best_candidate
-
-                # Immediately dispatch alert when threshold first crossed — do not wait for finalization
-                if should_alert_flag and not self.active_event_alert_sent.get(camera_id, False):
-                    self.active_event_alert_sent[camera_id] = True
-                    # Build a provisional event record for immediate alerting using pre-roll frames
-                    provisional_frames = list(self.event_buffers.get(camera_id, []))
-                    if provisional_frames and best_candidate:
-                        threading.Thread(
-                            target=self._dispatch_immediate_alert,
-                            args=(camera_id, self.active_event_ids[camera_id],
-                                  highest_score, best_candidate, provisional_frames),
-                            daemon=True
-                        ).start()
-
-                # Responsive clipping: when event reaches 60 frames (~15 seconds @ 4 fps), finalize clip segment
-                if len(self.event_buffers[camera_id]) >= 60:
-                    self._finalize_event(camera_id)
-
-            elif camera_id in self.active_event_ids:
-                # Motion paused: evaluate 3s post-roll and 4s gap debounce
-                last_m_time = self.active_event_last_motion.get(camera_id, frame_time)
-                quiet_duration = frame_time - last_m_time
-
-                # 1. Capture 3 seconds of post-roll after motion pauses
-                post_roll = getattr(self.settings, "post_roll_sec", 3.0)
-                if quiet_duration <= post_roll:
-                    self.event_buffers[camera_id].append(frame)
-
-                # 2. Finalize if quiet gap >= 4.0 seconds or buffer reaches 60 frames
-                inactivity_gap = getattr(self.settings, "event_inactivity_gap_sec", 4.0)
-                if quiet_duration >= inactivity_gap or len(self.event_buffers[camera_id]) >= 60:
-                    self._finalize_event(camera_id)
+            # 4. Finalize segment if completed
+            if finalized_segment and not finalized_segment.is_discarded:
+                self._handle_finalized_segment(finalized_segment, cam_config)
 
             self.frame_queue.task_done()
 
-    def _finalize_event(self, camera_id: str):
-        """Finalizes an event segment, encodes crash-safe fMP4, indexes to SQLite, and dispatches alert."""
-        event_id = self.active_event_ids.pop(camera_id, None)
-        if not event_id:
-            return
-
-        frames = self.event_buffers.pop(camera_id, [])
-        score = self.active_event_scores.pop(camera_id, 50)
-        start_time = self.active_event_start_times.pop(camera_id, datetime.now(timezone.utc).isoformat())
-        first_m_time = self.active_event_first_motion.pop(camera_id, None)
-        last_m_time = self.active_event_last_motion.pop(camera_id, None)
-        motion_pts = self.active_event_motion_counts.pop(camera_id, 1)
-        alert_sent = self.active_event_alert_sent.pop(camera_id, False)
-        candidate = self.active_event_best_candidates.pop(camera_id, None)
-
-        if last_m_time:
-            end_dt = datetime.fromtimestamp(last_m_time + 10.0, timezone.utc)
-            end_time = end_dt.isoformat()
-            duration = round((last_m_time + 10.0) - (first_m_time - 10.0), 1) if first_m_time else round(len(frames) / 4.0, 1)
-        else:
-            end_time = datetime.now(timezone.utc).isoformat()
-            duration = round(len(frames) / 4.0, 1)
-
-        duration = max(2.0, duration)
-
+    def _handle_finalized_segment(
+        self,
+        segment: FinalizedClipSegment,
+        cam_config: Optional[CameraConfig]
+    ):
+        """Processes finalized clip segment, writes fMP4 with faststart, generates forensic analysis, and indexes."""
+        camera_id = segment.camera_id
+        frames = segment.frames
         if len(frames) < 3:
             return
 
-        # Write fMP4 clip and thumbnail
-        clip_path, thumb_path = self.clip_writer.write_clip_from_frames(
+        fps = float(getattr(cam_config, "ai_inference_fps", 4.0) or 4.0)
+        write_result = self.clip_writer.write_clip_from_frames(
             camera_id=camera_id,
-            event_group_id=event_id,
+            event_group_id=segment.event_group_id,
             frames=frames,
-            fps=4.0
+            fps=fps
         )
+        clip_path = write_result.clip_path
+        thumb_path = write_result.thumb_path
 
-        obj_type = candidate.object_type if candidate else "unclassified"
-        conf = candidate.confidence if candidate else 0.0
+        start_dt = datetime.fromtimestamp(segment.start_pts, timezone.utc)
+        start_time = start_dt.isoformat()
+        end_time = datetime.fromtimestamp(segment.end_pts, timezone.utc).isoformat()
+        duration = write_result.duration_sec
 
-        # Extract dominant color and zone attributes
-        dom_color = "unspecified"
-        zone_n = "general"
-        if candidate and frames:
-            mid_idx = len(frames) // 2
-            mid_frame = frames[mid_idx] if mid_idx < len(frames) else frames[0]
-            try:
-                from vyzn.ai.attributes import extract_appearance_attributes
-                attr = extract_appearance_attributes(mid_frame, candidate.bounding_box, candidate.object_type)
-                dom_color = attr.get("dominant_color", "unspecified")
-            except Exception:
-                pass
-
-            candidate_zone = getattr(candidate, "zone_name", "general")
-            if candidate_zone and candidate_zone != "general":
-                zone_n = candidate_zone
-            elif getattr(candidate, "is_in_restricted_zone", False):
-                zone_n = "restricted_vault"
-            elif "counter" in camera_id:
-                zone_n = "cash_counter"
-            elif "shutter" in camera_id:
-                zone_n = "rear_shutter"
-            else:
-                zone_n = "main_corridor"
-
-        cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
         cam_name = getattr(cam_config, "name", camera_id) or camera_id
         loc_id = getattr(cam_config, "location_id", "loc_primary") or "loc_primary"
+        after_hours = is_time_after_hours(start_dt, cam_config.business_hours) if cam_config else True
+        is_night_ir = bool(getattr(cam_config, "is_night_ir", False))
 
-        # Determine Tier ('alert' or 'review')
-        matched_area = None
-        if cam_config and getattr(cam_config, "watch_areas", None) and candidate:
-            m_id = getattr(candidate, "matched_area_id", None)
-            if m_id:
-                matched_area = next((a for a in cam_config.watch_areas if a.id == m_id), None)
+        watch_areas = getattr(cam_config, "watch_areas", None)
+        keyframe_urls = [f"/api/clips/{segment.event_group_id}/keyframe_{i}.jpg" for i in range(len(write_result.keyframe_paths))]
 
-        if matched_area:
-            tier = matched_area.response
-        elif getattr(candidate, "is_in_restricted_zone", False) or score >= self.settings.alert_score_threshold:
-            tier = "alert"
-        else:
-            tier = "review"
+        # Generate rich forensic analysis, timeline, and natural-language summary
+        analysis = ClipDescriptionEngine.generate_analysis(
+            camera_id=camera_id,
+            camera_name=cam_name,
+            start_pts=segment.start_pts,
+            end_pts=segment.end_pts,
+            trigger_pts=segment.trigger_pts,
+            start_wall_dt=start_dt,
+            frame_metas=segment.frame_metas,
+            watch_areas=watch_areas,
+            keyframe_urls=keyframe_urls,
+            is_night_ir=is_night_ir,
+            is_after_hours=after_hours,
+            part_index=segment.part_index,
+            parent_event_id=segment.parent_event_id
+        )
 
-        # Generate unique sequential clip number
+        title = analysis.get("title")
+        summary = analysis.get("summary")
+        trigger_reason = analysis.get("trigger_reason") or segment.trigger_reason
+        imp = analysis.get("importance", {})
+        score = imp.get("score", segment.highest_score)
+        importance_level = imp.get("level", "medium")
+
+        tier = "alert" if (score >= self.settings.alert_score_threshold or segment.is_alert) else "review"
         clip_num = self.db.get_next_clip_number()
 
-        # Compute SHA-256 integrity hash of media file
+        # SHA-256 integrity hash
         import hashlib
         sha256_hash = ""
         if clip_path and os.path.exists(clip_path):
@@ -504,102 +404,109 @@ class EdgePipeline:
                 with open(clip_path, "rb") as vf:
                     sha256_hash = hashlib.sha256(vf.read()).hexdigest()
             except Exception:
-                sha256_hash = ""
+                pass
         if not sha256_hash:
-            sha256_hash = hashlib.sha256(f"{event_id}:{start_time}".encode()).hexdigest()
+            sha256_hash = hashlib.sha256(f"{segment.event_group_id}:{start_time}".encode()).hexdigest()
 
-        # Compute 72-hour automated purge epoch ms
-        try:
-            st_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-            start_ms = int(st_dt.timestamp() * 1000)
-        except Exception:
-            start_ms = int(time.time() * 1000)
+        start_ms = int(start_dt.timestamp() * 1000)
         retention_hours = getattr(self.settings, "raw_retention_hours", 72.0)
         expires_at_ms = start_ms + int(retention_hours * 3600 * 1000)
+        trigger_ms = start_ms + int(max(0.0, segment.trigger_pts - segment.start_pts) * 1000)
 
-        # Trigger moment timestamp (3s after start or first motion)
-        trigger_ms = start_ms + 3000
-
-        # Construct structured reasons checklist per Section 6.3
+        # Legacy reasons compatibility for existing cards and export
         reasons = []
-        if getattr(candidate, "is_after_hours", False):
+        if after_hours:
             reasons.append({"code": "outside_shop_hours", "params": {}})
-        if getattr(candidate, "is_in_restricted_zone", False) or (matched_area and matched_area.response == "alert"):
-            reasons.append({"code": "entered_restricted_area", "params": {"area": zone_n}})
-        if duration >= 10.0:
-            reasons.append({"code": "stayed_in_area", "params": {"seconds": int(duration), "duration": f"{int(duration)} seconds", "area": zone_n}})
-        if obj_type == "person":
-            reasons.append({"code": "person_detected", "params": {"confidence": round(conf, 2), "area": zone_n}})
+        if segment.primary_object == "person":
+            reasons.append({"code": "person_detected", "params": {"confidence": round(segment.max_confidence, 2), "area": cam_name}})
+            if duration >= 10.0:
+                reasons.insert(0, {"code": "stayed_in_area", "params": {"seconds": int(duration), "duration": f"{int(duration)} seconds", "area": cam_name}})
         else:
-            reasons.append({"code": "movement", "params": {"area": zone_n}})
+            reasons.append({"code": "movement", "params": {"area": cam_name}})
 
-        # Detection boxes for 'Show what VYZN saw' overlay
         boxes = []
-        if candidate and getattr(candidate, "bounding_box", None):
-            boxes.append({
-                "frameIdx": 0,
-                "box": candidate.bounding_box,
-                "cls": obj_type,
-                "conf": round(conf, 2)
-            })
+        for m in segment.frame_metas:
+            for d in getattr(m, "detections", []):
+                boxes.append({
+                    "frameIdx": 0,
+                    "box": getattr(d, "box", [0, 0, 1, 1]),
+                    "cls": getattr(d, "label", "object"),
+                    "conf": round(getattr(d, "confidence", 0.0), 2)
+                })
+            if boxes:
+                break
 
-        import json
         meta = {
             "pre_roll_sec": 10.0,
             "post_roll_sec": 10.0,
             "inactivity_gap_sec": 90.0,
-            "motion_points": motion_pts,
-            "fps": 4.0,
+            "motion_points": len(segment.frame_metas),
+            "fps": fps,
             "reasons": reasons,
             "trigger_ms": trigger_ms,
             "camera_name": cam_name,
-            "area_id": getattr(matched_area, "id", None) if matched_area else None,
-            "objects": [{"cls": obj_type, "confidence": round(conf, 2)}],
+            "objects": [{"cls": segment.primary_object, "confidence": round(segment.max_confidence, 2)}],
             "boxes": boxes,
-            "detector": {"name": "YOLOv8n-VYZN", "version": "8.0.196"}
+            "detector": {"name": "YOLOv8n-VYZN", "version": "8.0.196"},
+            "analysis": analysis
         }
 
         record = EventRecord(
-            event_group_id=event_id,
+            event_group_id=segment.event_group_id,
             camera_id=camera_id,
             start_time=start_time,
             end_time=end_time,
-            object_type=obj_type,
-            confidence=conf,
+            object_type=segment.primary_object,
+            confidence=segment.max_confidence,
             score=score,
             status="raw",
             file_path=clip_path,
             thumb_path=thumb_path,
-            dominant_color=dom_color,
-            zone_name=zone_n,
+            dominant_color="unspecified",
+            zone_name="general",
             location_id=loc_id,
             duration_sec=duration,
-            motion_points_count=motion_pts,
+            motion_points_count=len(segment.frame_metas),
             metadata_json=json.dumps(meta),
             clip_number=clip_num,
             expires_at_ms=expires_at_ms,
             sha256=sha256_hash,
             tier=tier,
-            owner_email=getattr(cam_config, "owner_email", None)
+            owner_email=getattr(cam_config, "owner_email", None),
+            analysis_json=json.dumps(analysis),
+            title=title,
+            summary=summary,
+            trigger_reason=trigger_reason,
+            importance_score=score,
+            importance_level=importance_level,
+            parent_event_id=segment.parent_event_id,
+            part_index=segment.part_index
         )
 
-        # Save to SQLite index
         self.db.insert_event(record)
-        self.db.log_audit("EVENT_RECORDED", event_id, f"Score: {score}, Obj: {obj_type}, Color: {dom_color}, Zone: {zone_n}, Duration: {duration}s, Tier: {tier}")
+        self.db.log_audit(
+            "EVENT_RECORDED",
+            segment.event_group_id,
+            f"Score: {score}, Obj: {segment.primary_object}, Title: {title}, Part: {segment.part_index}"
+        )
 
-        # Dispatch alert ONLY for alert-tier clips (Review tier is never pushed)
-        if not alert_sent and tier == "alert":
+        # Telegram Alerting: Fire ONCE per event, not once per fragment!
+        root_event_id = segment.parent_event_id or segment.event_group_id
+        if tier == "alert" and root_event_id not in self.dispatched_alert_events:
+            self.dispatched_alert_events.add(root_event_id)
             self.dispatcher.dispatch(record, clip_path, thumb_path)
-        elif alert_sent:
-            logger.info(
-                f"[FINAL CLIP] Event {event_id} finalized. Score={score}. "
-                f"Immediate alert already sent. Final clip: {clip_path}"
-            )
+            logger.info(f"[ALERT DISPATCHED] Event {segment.event_group_id} alerted to Telegram.")
         else:
-            logger.info(
-                f"[FINAL CLIP] Event {event_id} finalized as 'review' tier. "
-                f"Saved to Clips archive; silent per alert-tier rule."
-            )
+            logger.info(f"[CLIP ARCHIVED] Event {segment.event_group_id} saved to archive (Tier: {tier}).")
+
+    def _finalize_event(self, camera_id: str):
+        """Forces immediate finalization of active event on camera_id (backward-compatibility)."""
+        sm = self.state_machines.get(camera_id)
+        if sm and sm.state in (ClipState.RECORDING, ClipState.HANGOVER):
+            seg = sm._finalize_current_clip(sm.last_frame_pts or time.monotonic(), close_reason="manual_finalize")
+            if seg and not seg.is_discarded:
+                cam_cfg = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
+                self._handle_finalized_segment(seg, cam_cfg)
 
     def _dispatch_immediate_alert(
         self,
@@ -748,7 +655,8 @@ class EdgePipeline:
 
     def flush_active_events(self):
         """Forces immediate finalization of any open active events across all cameras."""
-        for cam_id in list(self.active_event_ids.keys()):
+        target_cams = set(self.active_event_ids.keys()) | set(self.state_machines.keys())
+        for cam_id in target_cams:
             try:
                 self._finalize_event(cam_id)
             except Exception as e:

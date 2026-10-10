@@ -60,6 +60,14 @@ class CameraConfig(BaseModel):
     privacy_zones: List[ZonePolygon] = Field(default_factory=list)
     watch_areas: List[WatchAreaConfig] = Field(default_factory=list)
 
+    # Per-camera lifecycle and motion overrides
+    osd_exclude_polygon: Optional[List[List[float]]] = None  # Normalized [[x,y],...] or None
+    start_motion_threshold: Optional[float] = None
+    continue_motion_threshold: Optional[float] = None
+    pre_roll_sec: Optional[float] = None
+    post_roll_sec: Optional[float] = None
+    merge_gap_sec: Optional[float] = None
+    max_clip_duration_sec: Optional[float] = None
 
 
 class EdgeSettings(BaseSettings):
@@ -81,6 +89,25 @@ class EdgeSettings(BaseSettings):
     pre_roll_sec: float = 10.0
     post_roll_sec: float = 10.0
     event_inactivity_gap_sec: float = 90.0
+
+    # Explicit State Machine & Motion Gate Parameters (Step 1, 2, 5)
+    confirm_window_frames: int = 5
+    confirm_frames: int = 3
+    start_motion_threshold: float = 0.010       # 1.0% of ROI
+    continue_motion_threshold: float = 0.003    # 0.3% of ROI
+    min_contour_area_ratio: float = 0.004       # 0.4% of ROI
+    min_motion_only_seconds: float = 3.0        # Discard clips without detection shorter than 3s
+    merge_gap_sec: float = 90.0                 # 90s debounce merge window
+    max_clip_duration_sec: float = 180.0        # Split long events into linked parts
+    track_lost_tolerance_sec: float = 5.0       # Keep coasting tracks alive up to 5s
+    stationary_hold_max_sec: float = 60.0       # Max stationary duration before static_object_timeout
+    stream_gap_tolerance_sec: float = 5.0       # Tolerate brief stream reconnect gap
+    warmup_frames: int = 150                    # Suppress triggers during initial MOG2 background seeding
+    global_change_ratio: float = 0.60           # Reject auto-exposure/IR switch global spikes
+    mog2_learning_rate: float = 0.004           # Slow background update rate to avoid fast absorption
+    yolo_conf_start: float = 0.35
+    yolo_conf_continue: float = 0.25
+    enable_vlm_description: bool = False
 
     # Telemetry & Observability
     telemetry_interval_sec: int = 60

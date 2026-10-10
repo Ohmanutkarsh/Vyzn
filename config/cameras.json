@@ -43,6 +43,13 @@
       }
     ],
     "privacy_zones": [],
-    "watch_areas": []
+    "watch_areas": [],
+    "osd_exclude_polygon": null,
+    "start_motion_threshold": null,
+    "continue_motion_threshold": null,
+    "pre_roll_sec": null,
+    "post_roll_sec": null,
+    "merge_gap_sec": null,
+    "max_clip_duration_sec": null
   }
 ]
