@@ -2070,6 +2070,178 @@ def get_authenticated_user(request: Request, db: EventDatabase = Depends(get_db)
     return user
 
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    remember: Optional[bool] = False
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    full_name: str
+    business_name: str
+    business_type: Optional[str] = "retail"
+    phone_e164: Optional[str] = None
+
+
+@app.post("/api/auth/login")
+def api_auth_login(
+    req: LoginRequest,
+    request: Request,
+    response: Response,
+    db: EventDatabase = Depends(get_db)
+):
+    """Direct enterprise email + password sign in."""
+    import re
+    email = req.email.strip().lower()
+    password = req.password.strip()
+
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required.")
+
+    user = db.verify_user_credentials(email, password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect email or password. Please check your credentials or create a new account."
+        )
+
+    session_token = db.create_session(user["id"])
+    max_age_sec = 30 * 86400 if req.remember else 86400
+
+    response.set_cookie(
+        key="vyzn_session",
+        value=session_token,
+        httponly=True,
+        samesite="lax",
+        max_age=max_age_sec,
+        path="/"
+    )
+    response.set_cookie(
+        key="vyzn_access_token",
+        value=session_token,
+        httponly=False,
+        samesite="lax",
+        max_age=max_age_sec,
+        path="/"
+    )
+
+    # Supabase synchronization if available
+    try:
+        sync_user_to_supabase(user)
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+        record_login_event_to_supabase(user["id"], email, auth_method="password", ip_address=client_ip, user_agent=user_agent)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "redirect": "/overview",
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": user.get("full_name") or "Store Manager",
+            "business_name": user.get("business_name") or "Primary Store",
+            "role": user.get("role") or "shopkeeper"
+        }
+    }
+
+
+@app.post("/api/auth/signup")
+def api_auth_signup(
+    req: SignupRequest,
+    request: Request,
+    response: Response,
+    db: EventDatabase = Depends(get_db)
+):
+    """Direct enterprise merchant registration with store and credentials."""
+    import re
+    email = req.email.strip().lower()
+    password = req.password.strip()
+    full_name = req.full_name.strip()
+    business_name = req.business_name.strip()
+    business_type = (req.business_type or "retail").strip()
+    phone_e164 = req.phone_e164.strip() if req.phone_e164 else None
+
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=400, detail="Enter a valid email address.")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if not full_name:
+        raise HTTPException(status_code=400, detail="Full name is required.")
+    if not business_name:
+        raise HTTPException(status_code=400, detail="Business or store name is required.")
+
+    # Check if user already exists
+    existing = db.get_user_by_email(email)
+    if existing and existing.get("password_hash"):
+        raise HTTPException(status_code=400, detail="An account with this email already exists. Please sign in.")
+
+    if existing:
+        # Existing OTP account without password - upgrade with full credentials
+        pwd_hash = hash_password(password)
+        now_ms = int(time.time() * 1000)
+        db.writer.queue.put((
+            "UPDATE users SET password_hash = ?, full_name = ?, business_name = ?, business_type = ?, phone_e164 = ?, updated_at_ms = ? WHERE id = ?",
+            (pwd_hash, full_name, business_name, business_type, phone_e164, now_ms, existing["id"]),
+            None
+        ))
+        db.flush()
+        user = existing
+        user["full_name"] = full_name
+        user["business_name"] = business_name
+    else:
+        user = db.create_user_with_credentials(
+            email=email,
+            password=password,
+            full_name=full_name,
+            business_name=business_name,
+            business_type=business_type,
+            phone_e164=phone_e164
+        )
+
+    session_token = db.create_session(user["id"])
+    response.set_cookie(
+        key="vyzn_session",
+        value=session_token,
+        httponly=True,
+        samesite="lax",
+        max_age=30 * 86400,
+        path="/"
+    )
+    response.set_cookie(
+        key="vyzn_access_token",
+        value=session_token,
+        httponly=False,
+        samesite="lax",
+        max_age=30 * 86400,
+        path="/"
+    )
+
+    try:
+        sync_user_to_supabase(user)
+        client_ip = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+        record_login_event_to_supabase(user["id"], email, auth_method="password_signup", ip_address=client_ip, user_agent=user_agent)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "redirect": "/overview",
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "full_name": full_name,
+            "business_name": business_name,
+            "role": "shopkeeper"
+        }
+    }
+
+
 @app.post("/api/auth/email/start")
 def api_auth_email_start(req: EmailStartRequest, db: EventDatabase = Depends(get_db)):
     import re, secrets

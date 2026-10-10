@@ -132,81 +132,454 @@ function renderCurrentRoute() {
 }
 
 // ---------------------------------------------------------------------------
-// Screen S1: /login
+// Screen S1: /login — Sign In (Email + Pass only) & Sign Up (Full Merchant Details)
 // ---------------------------------------------------------------------------
+let currentAuthTab = 'login'; // 'login' | 'signup' | 'otp'
+
 function renderS1(container) {
+  const cardWrap = document.querySelector('.auth-card-wrap');
+  if (cardWrap) {
+    if (currentAuthTab === 'signup') {
+      cardWrap.classList.add('is-wide');
+    } else {
+      cardWrap.classList.remove('is-wide');
+    }
+  }
+
   const savedEmail = sessionStorage.getItem('vyzn_login_email') || '';
 
+  if (currentAuthTab === 'otp') {
+    renderOtpView(container, savedEmail);
+    return;
+  }
+
   container.innerHTML = `
-    <h1 class="auth-title">${escapeHtml(t('auth.signin_title'))}</h1>
-    <p class="auth-helper">${escapeHtml(t('auth.signin_helper'))}</p>
+    <!-- Segmented Tab Switcher -->
+    <div class="auth-tabs-row" role="tablist">
+      <button type="button" class="auth-tab-btn ${currentAuthTab === 'login' ? 'is-active' : ''}" id="tab-btn-login" role="tab">
+        Sign In
+      </button>
+      <button type="button" class="auth-tab-btn ${currentAuthTab === 'signup' ? 'is-active' : ''}" id="tab-btn-signup" role="tab">
+        Create Account
+      </button>
+    </div>
 
-    <div id="s1-error" class="auth-error-banner" style="display:none;" role="alert"></div>
+    ${currentAuthTab === 'login' ? renderLoginFormHtml(savedEmail) : renderSignupFormHtml(savedEmail)}
+  `;
 
-    <form id="s1-form" novalidate>
+  // Attach Tab Switch Handlers
+  const tabLogin = document.getElementById('tab-btn-login');
+  const tabSignup = document.getElementById('tab-btn-signup');
+  if (tabLogin) {
+    tabLogin.addEventListener('click', () => {
+      currentAuthTab = 'login';
+      renderS1(container);
+    });
+  }
+  if (tabSignup) {
+    tabSignup.addEventListener('click', () => {
+      currentAuthTab = 'signup';
+      renderS1(container);
+    });
+  }
+
+  if (currentAuthTab === 'login') {
+    attachLoginFormHandlers(container);
+  } else {
+    attachSignupFormHandlers(container);
+  }
+}
+
+function renderLoginFormHtml(savedEmail) {
+  return `
+    <h1 class="auth-title">Welcome to VYZN</h1>
+    <p class="auth-helper">Sign in with your email and password to access your cameras and clips.</p>
+
+    <div id="login-error" class="auth-error-banner" style="display:none;" role="alert"></div>
+
+    <form id="login-form" novalidate>
       <div class="auth-form-group">
-        <label for="s1-email" class="auth-label">${escapeHtml(t('auth.email_label'))}</label>
-        <input id="s1-email" class="auth-input" type="email" autocomplete="email" inputmode="email"
-               placeholder="${escapeHtml(t('auth.email_placeholder'))}" value="${escapeHtml(savedEmail)}" autofocus required />
+        <label for="login-email" class="auth-label">Email address</label>
+        <input id="login-email" class="auth-input" type="email" autocomplete="email" inputmode="email"
+               placeholder="owner@store.com" value="${escapeHtml(savedEmail)}" autofocus required />
       </div>
 
-      <button id="s1-submit-btn" class="btn btn-primary btn-block" type="submit">
-        ${escapeHtml(t('auth.send_code'))}
+      <div class="auth-form-group">
+        <label for="login-password" class="auth-label">Password</label>
+        <div class="auth-password-wrap">
+          <input id="login-password" class="auth-input" type="password" autocomplete="current-password"
+                 placeholder="Enter your password" required />
+          <button type="button" class="auth-pw-toggle" id="btn-login-pw-toggle" aria-label="Toggle password visibility">👁</button>
+        </div>
+      </div>
+
+      <div class="auth-checkbox-row">
+        <label class="auth-checkbox-label">
+          <input type="checkbox" id="login-remember" checked />
+          Remember me
+        </label>
+        <button type="button" class="auth-helper-link" id="btn-switch-otp">Sign in with email code</button>
+      </div>
+
+      <button id="login-submit-btn" class="btn btn-primary btn-block" type="submit" style="margin-top: 8px;">
+        Sign In
       </button>
     </form>
   `;
+}
 
-  const form = document.getElementById('s1-form');
-  const emailInput = document.getElementById('s1-email');
-  const errorBox = document.getElementById('s1-error');
-  const submitBtn = document.getElementById('s1-submit-btn');
+function renderSignupFormHtml(savedEmail) {
+  return `
+    <h1 class="auth-title">Create merchant account</h1>
+    <p class="auth-helper">Enter your store details to set up your intelligent CCTV monitoring.</p>
 
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorBox.style.display = 'none';
+    <div id="signup-error" class="auth-error-banner" style="display:none;" role="alert"></div>
 
-    const email = emailInput.value.trim().toLowerCase();
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      errorBox.textContent = t('auth.error_invalid_email');
-      errorBox.style.display = 'flex';
-      emailInput.focus();
-      return;
-    }
+    <form id="signup-form" novalidate>
+      <div class="auth-row-2col">
+        <div class="auth-form-group">
+          <label for="signup-name" class="auth-label">Full Name</label>
+          <input id="signup-name" class="auth-input" type="text" placeholder="Utkarsh Tapise" autocomplete="name" required autofocus />
+        </div>
+        <div class="auth-form-group">
+          <label for="signup-business" class="auth-label">Business / Store Name</label>
+          <input id="signup-business" class="auth-input" type="text" placeholder="Vyzn Supermarket" required />
+        </div>
+      </div>
 
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Sending…';
+      <div class="auth-row-2col">
+        <div class="auth-form-group">
+          <label for="signup-type" class="auth-label">Business Type</label>
+          <select id="signup-type" class="auth-select">
+            <option value="retail">Retail Shop / Store</option>
+            <option value="supermarket">Grocery & Supermarket</option>
+            <option value="jewellery">Jewellery & Gold</option>
+            <option value="electronics">Electronics & Gadgets</option>
+            <option value="godown">Warehouse / Godown</option>
+            <option value="restaurant">Restaurant / Cafe</option>
+            <option value="other">Other Business</option>
+          </select>
+        </div>
+        <div class="auth-form-group">
+          <label for="signup-phone" class="auth-label">Mobile Number</label>
+          <input id="signup-phone" class="auth-input mono-input" type="tel" placeholder="+91 98765 43210" autocomplete="tel" />
+        </div>
+      </div>
 
-    try {
-      const res = await fetch('/api/auth/email/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const data = await res.json();
+      <div class="auth-form-group">
+        <label for="signup-email" class="auth-label">Email Address</label>
+        <input id="signup-email" class="auth-input" type="email" autocomplete="email" inputmode="email"
+               placeholder="owner@store.com" value="${escapeHtml(savedEmail)}" required />
+      </div>
 
-      if (res.ok) {
-        sessionStorage.setItem('vyzn_login_email', email);
-        if (data.warning) {
-          sessionStorage.setItem('vyzn_email_warning', data.warning);
+      <div class="auth-row-2col">
+        <div class="auth-form-group">
+          <label for="signup-password" class="auth-label">Password</label>
+          <div class="auth-password-wrap">
+            <input id="signup-password" class="auth-input" type="password" autocomplete="new-password"
+                   placeholder="Min. 6 characters" required />
+            <button type="button" class="auth-pw-toggle" id="btn-signup-pw-toggle" aria-label="Toggle password visibility">👁</button>
+          </div>
+        </div>
+        <div class="auth-form-group">
+          <label for="signup-confirm-password" class="auth-label">Confirm Password</label>
+          <input id="signup-confirm-password" class="auth-input" type="password" autocomplete="new-password"
+                 placeholder="Re-enter password" required />
+        </div>
+      </div>
+
+      <div style="margin: 8px 0 16px 0;">
+        <label class="auth-checkbox-label" style="align-items: flex-start; line-height: 1.4;">
+          <input type="checkbox" id="signup-terms" checked required style="margin-top: 2px;" />
+          <span>I agree to the Terms of Service and 72-hour automated footage retention policy.</span>
+        </label>
+      </div>
+
+      <button id="signup-submit-btn" class="btn btn-primary btn-block" type="submit">
+        Create Account & Continue
+      </button>
+    </form>
+  `;
+}
+
+function attachLoginFormHandlers(container) {
+  const form = document.getElementById('login-form');
+  const emailInput = document.getElementById('login-email');
+  const passInput = document.getElementById('login-password');
+  const errorBox = document.getElementById('login-error');
+  const submitBtn = document.getElementById('login-submit-btn');
+  const pwToggle = document.getElementById('btn-login-pw-toggle');
+  const btnSwitchOtp = document.getElementById('btn-switch-otp');
+
+  if (pwToggle && passInput) {
+    pwToggle.addEventListener('click', () => {
+      const isPw = passInput.type === 'password';
+      passInput.type = isPw ? 'text' : 'password';
+      pwToggle.textContent = isPw ? '🔒' : '👁';
+    });
+  }
+
+  if (btnSwitchOtp) {
+    btnSwitchOtp.addEventListener('click', () => {
+      currentAuthTab = 'otp';
+      renderS1(container);
+    });
+  }
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.style.display = 'none';
+
+      const email = emailInput.value.trim().toLowerCase();
+      const password = passInput.value;
+      const remember = document.getElementById('login-remember')?.checked ?? false;
+
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        errorBox.textContent = 'Please enter a valid email address.';
+        errorBox.style.display = 'flex';
+        emailInput.focus();
+        return;
+      }
+      if (!password) {
+        errorBox.textContent = 'Please enter your password.';
+        errorBox.style.display = 'flex';
+        passInput.focus();
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Signing in…';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, remember })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.ok) {
+          sessionStorage.setItem('vyzn_login_email', email);
+          if (data.user) {
+            localStorage.setItem('vyzn_user', JSON.stringify(data.user));
+          }
+          window.location.replace(data.redirect || '/overview');
         } else {
-          sessionStorage.removeItem('vyzn_email_warning');
+          errorBox.textContent = data.detail || 'Incorrect email or password. Please try again.';
+          errorBox.style.display = 'flex';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Sign In';
         }
-        navigateTo('/login/code');
-      } else {
-        errorBox.textContent = data.detail || t('common.generic_error');
+      } catch (err) {
+        errorBox.textContent = 'Network error connecting to server. Please check your connection.';
         errorBox.style.display = 'flex';
         submitBtn.disabled = false;
-        submitBtn.textContent = t('auth.send_code');
+        submitBtn.textContent = 'Sign In';
       }
-    } catch (err) {
-      errorBox.textContent = t('common.generic_error');
-      errorBox.style.display = 'flex';
-      submitBtn.disabled = false;
-      submitBtn.textContent = t('auth.send_code');
-    }
-  });
+    });
+  }
 }
+
+function attachSignupFormHandlers(container) {
+  const form = document.getElementById('signup-form');
+  const nameInput = document.getElementById('signup-name');
+  const businessInput = document.getElementById('signup-business');
+  const typeSelect = document.getElementById('signup-type');
+  const phoneInput = document.getElementById('signup-phone');
+  const emailInput = document.getElementById('signup-email');
+  const passInput = document.getElementById('signup-password');
+  const confirmPassInput = document.getElementById('signup-confirm-password');
+  const termsCheckbox = document.getElementById('signup-terms');
+  const errorBox = document.getElementById('signup-error');
+  const submitBtn = document.getElementById('signup-submit-btn');
+  const pwToggle = document.getElementById('btn-signup-pw-toggle');
+
+  if (pwToggle && passInput) {
+    pwToggle.addEventListener('click', () => {
+      const isPw = passInput.type === 'password';
+      passInput.type = isPw ? 'text' : 'password';
+      pwToggle.textContent = isPw ? '🔒' : '👁';
+    });
+  }
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.style.display = 'none';
+
+      const full_name = nameInput.value.trim();
+      const business_name = businessInput.value.trim();
+      const business_type = typeSelect.value;
+      const phone_e164 = phoneInput.value.trim();
+      const email = emailInput.value.trim().toLowerCase();
+      const password = passInput.value;
+      const confirmPassword = confirmPassInput.value;
+
+      if (!full_name) {
+        errorBox.textContent = 'Please enter your full name.';
+        errorBox.style.display = 'flex';
+        nameInput.focus();
+        return;
+      }
+      if (!business_name) {
+        errorBox.textContent = 'Please enter your business or store name.';
+        errorBox.style.display = 'flex';
+        businessInput.focus();
+        return;
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        errorBox.textContent = 'Please enter a valid email address.';
+        errorBox.style.display = 'flex';
+        emailInput.focus();
+        return;
+      }
+      if (password.length < 6) {
+        errorBox.textContent = 'Password must be at least 6 characters.';
+        errorBox.style.display = 'flex';
+        passInput.focus();
+        return;
+      }
+      if (password !== confirmPassword) {
+        errorBox.textContent = 'Passwords do not match.';
+        errorBox.style.display = 'flex';
+        confirmPassInput.focus();
+        return;
+      }
+      if (!termsCheckbox.checked) {
+        errorBox.textContent = 'Please accept the terms and retention policy to continue.';
+        errorBox.style.display = 'flex';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating account…';
+
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            full_name,
+            business_name,
+            business_type,
+            phone_e164,
+            email,
+            password
+          })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.ok) {
+          sessionStorage.setItem('vyzn_login_email', email);
+          if (data.user) {
+            localStorage.setItem('vyzn_user', JSON.stringify(data.user));
+          }
+          window.location.replace(data.redirect || '/overview');
+        } else {
+          errorBox.textContent = data.detail || 'Could not create account. Please try again.';
+          errorBox.style.display = 'flex';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Create Account & Continue';
+        }
+      } catch (err) {
+        errorBox.textContent = 'Network error connecting to server. Please check your connection.';
+        errorBox.style.display = 'flex';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Account & Continue';
+      }
+    });
+  }
+}
+
+function renderOtpView(container, savedEmail) {
+  container.innerHTML = `
+    <h1 class="auth-title">Sign in with email code</h1>
+    <p class="auth-helper">We'll send a 6-digit one-time code to your email.</p>
+
+    <div id="otp-error" class="auth-error-banner" style="display:none;" role="alert"></div>
+
+    <form id="otp-start-form" novalidate>
+      <div class="auth-form-group">
+        <label for="otp-email" class="auth-label">Email address</label>
+        <input id="otp-email" class="auth-input" type="email" autocomplete="email" inputmode="email"
+               placeholder="owner@store.com" value="${escapeHtml(savedEmail)}" autofocus required />
+      </div>
+
+      <button id="otp-submit-btn" class="btn btn-primary btn-block" type="submit">
+        Send Code
+      </button>
+
+      <div style="text-align: center; margin-top: 16px;">
+        <button type="button" class="auth-helper-link" id="btn-back-to-password">
+          ← Back to password sign in
+        </button>
+      </div>
+    </form>
+  `;
+
+  const btnBack = document.getElementById('btn-back-to-password');
+  if (btnBack) {
+    btnBack.addEventListener('click', () => {
+      currentAuthTab = 'login';
+      renderS1(container);
+    });
+  }
+
+  const form = document.getElementById('otp-start-form');
+  const emailInput = document.getElementById('otp-email');
+  const errorBox = document.getElementById('otp-error');
+  const submitBtn = document.getElementById('otp-submit-btn');
+
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.style.display = 'none';
+      const email = emailInput.value.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        errorBox.textContent = 'Please enter a valid email address.';
+        errorBox.style.display = 'flex';
+        emailInput.focus();
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Sending…';
+
+      try {
+        const res = await fetch('/api/auth/email/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          sessionStorage.setItem('vyzn_login_email', email);
+          if (data.warning) {
+            sessionStorage.setItem('vyzn_email_warning', data.warning);
+          } else {
+            sessionStorage.removeItem('vyzn_email_warning');
+          }
+          navigateTo('/login/code');
+        } else {
+          errorBox.textContent = data.detail || 'Failed to send code.';
+          errorBox.style.display = 'flex';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Send Code';
+        }
+      } catch (err) {
+        errorBox.textContent = 'Failed to connect to server.';
+        errorBox.style.display = 'flex';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Send Code';
+      }
+    });
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // Screen S2: /login/code

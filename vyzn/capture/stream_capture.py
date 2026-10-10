@@ -365,8 +365,9 @@ class RTSPCaptureThread(threading.Thread):
                 # Downscale to 360p for MOG2 & Inference
                 downscaled = buf_frame
 
-                # Push to queue (drop oldest frame if queue full to avoid memory buildup)
-                item = (self.config.camera_id, now_mono, downscaled, self.config.is_night_ir)
+                # Push to queue with real Unix epoch timestamp
+                now_epoch = time.time()
+                item = (self.config.camera_id, now_epoch, downscaled, self.config.is_night_ir)
                 if self.output_queue.full():
                     try:
                         self.output_queue.get_nowait()

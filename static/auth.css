@@ -478,3 +478,149 @@
   margin-bottom: var(--space-4);
   text-align: center;
 }
+
+/* Modern Auth Segmented Tab Switcher */
+.auth-tabs-row {
+  display: flex;
+  background: var(--bg-canvas);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  margin-bottom: var(--space-5);
+  gap: 2px;
+}
+
+.auth-tab-btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition: all 140ms ease;
+  font-family: inherit;
+}
+
+.auth-tab-btn:hover {
+  color: var(--fg-default);
+}
+
+.auth-tab-btn.is-active {
+  background: var(--bg-surface);
+  color: var(--fg-default);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Wide Auth Card for Sign Up Form */
+.auth-card-wrap.is-wide {
+  max-width: 460px;
+  transition: max-width 200ms ease;
+}
+
+.auth-row-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+@media (max-width: 480px) {
+  .auth-row-2col {
+    grid-template-columns: 1fr;
+    gap: var(--space-2);
+  }
+}
+
+.auth-password-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.auth-password-wrap .auth-input {
+  padding-right: 40px;
+}
+
+.auth-pw-toggle {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--fg-dim);
+  cursor: pointer;
+  font-size: 15px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 140ms ease;
+}
+
+.auth-pw-toggle:hover {
+  color: var(--fg-default);
+}
+
+.auth-checkbox-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-2);
+  margin-bottom: var(--space-4);
+  font-size: 12px;
+}
+
+.auth-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.auth-checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: #38bdf8;
+  width: 14px;
+  height: 14px;
+}
+
+.auth-helper-link {
+  font-size: 12px;
+  color: #38bdf8;
+  text-decoration: none;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.auth-helper-link:hover {
+  text-decoration: underline;
+}
+
+.auth-select {
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-3);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  color: var(--fg-default);
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.auth-select:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--ring-focus);
+}

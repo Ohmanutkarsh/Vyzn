@@ -29,19 +29,92 @@
 
         <!-- Step 1: Choose Connection Type -->
         <section class="wizard-step" id="step-1">
-          <h2 class="wizard-step-title" id="step1-title">How is the camera connected?</h2>
+          <div class="wizard-stepper-pill"><span class="step-accent">Step 1</span> of 3</div>
+          <h2 class="wizard-step-title" id="step1-title" style="margin-bottom: 8px;">How is the camera connected?</h2>
+          <p class="wizard-subhead">Select a connection method to stream footage into VYZN.</p>
+
           <div class="choice-cards-stack">
+            <!-- Direct IP Card -->
             <button type="button" class="choice-card" data-choice="ip">
-              <div class="choice-card-title">IP camera or recorder</div>
-              <div class="choice-card-desc">CCTV camera, DVR or NVR. You know its IP address.</div>
+              <div class="choice-icon-wrap icon-cyan">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+              </div>
+              <div class="choice-card-body">
+                <div class="choice-title-row">
+                  <span class="choice-card-title">IP camera or recorder</span>
+                  <span class="choice-chip chip-cyan">Direct RTSP</span>
+                </div>
+                <div class="choice-card-desc">CCTV camera, DVR or NVR. Connect directly using its local IP address and credentials.</div>
+                <div class="choice-card-tags">
+                  <span class="choice-tag">Hikvision</span>
+                  <span class="choice-tag">CP Plus</span>
+                  <span class="choice-tag">Dahua</span>
+                  <span class="choice-tag">ONVIF / NVR</span>
+                </div>
+              </div>
+              <div class="choice-card-chevron">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              </div>
             </button>
+
+            <!-- Network Scan Card -->
             <button type="button" class="choice-card" data-choice="network">
-              <div class="choice-card-title">Find on my network</div>
-              <div class="choice-card-desc">VYZN looks for cameras and recorders on your shop's network (the local server). Works when this computer is on the same Wi-Fi or network as the cameras.</div>
+              <div class="choice-icon-wrap icon-emerald">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                  <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                  <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                </svg>
+              </div>
+              <div class="choice-card-body">
+                <div class="choice-title-row">
+                  <span class="choice-card-title">Find on my network</span>
+                  <span class="choice-chip chip-emerald">Auto-Discovery</span>
+                </div>
+                <div class="choice-card-desc">VYZN scans your shop's Wi-Fi and local network for active CCTV feeds automatically.</div>
+                <div class="choice-card-tags">
+                  <span class="choice-tag">Zero Setup</span>
+                  <span class="choice-tag">Auto-Detect</span>
+                  <span class="choice-tag">Local Subnet</span>
+                </div>
+              </div>
+              <div class="choice-card-chevron">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              </div>
             </button>
+
+            <!-- Phone / Webcam Card -->
             <button type="button" class="choice-card" data-choice="phone">
-              <div class="choice-card-title">Phone or webcam</div>
-              <div class="choice-card-desc">Use a spare phone, or this computer's webcam, as a camera.</div>
+              <div class="choice-icon-wrap icon-purple">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                  <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                </svg>
+              </div>
+              <div class="choice-card-body">
+                <div class="choice-title-row">
+                  <span class="choice-card-title">Phone or webcam</span>
+                  <span class="choice-chip chip-purple">Instant Test</span>
+                </div>
+                <div class="choice-card-desc">Use a spare phone running IP Webcam, or this computer's webcam for instant testing.</div>
+                <div class="choice-card-tags">
+                  <span class="choice-tag">Computer Webcam</span>
+                  <span class="choice-tag">Android / iOS App</span>
+                </div>
+              </div>
+              <div class="choice-card-chevron">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              </div>
             </button>
           </div>
         </section>

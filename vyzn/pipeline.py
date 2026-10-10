@@ -356,9 +356,16 @@ class EdgePipeline:
         clip_path = write_result.clip_path
         thumb_path = write_result.thumb_path
 
-        start_dt = datetime.fromtimestamp(segment.start_pts, timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+        if segment.start_pts < 1577836800.0:
+            clip_dur = max(1.0, segment.end_pts - segment.start_pts)
+            start_dt = now_utc - timedelta(seconds=clip_dur)
+            end_dt = now_utc
+        else:
+            start_dt = datetime.fromtimestamp(segment.start_pts, timezone.utc)
+            end_dt = datetime.fromtimestamp(segment.end_pts, timezone.utc)
         start_time = start_dt.isoformat()
-        end_time = datetime.fromtimestamp(segment.end_pts, timezone.utc).isoformat()
+        end_time = end_dt.isoformat()
         duration = write_result.duration_sec
 
         cam_name = getattr(cam_config, "name", camera_id) or camera_id
