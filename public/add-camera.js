@@ -27,30 +27,22 @@ function setWizardStep(stepNum, stepperText) {
   const stepper = document.getElementById('wizard-stepper');
   if (stepper) stepper.textContent = stepperText.toUpperCase();
 
-  const seg1 = document.getElementById('seg-1');
-  const seg2 = document.getElementById('seg-2');
-  const seg3 = document.getElementById('seg-3');
+  const fill = document.getElementById('stepper-progress-fill');
   const counter = document.getElementById('stepper-counter');
   const wrap = document.getElementById('stepper-progress-wrap');
 
   if (stepNum === 'step-1') {
-    if (seg1) seg1.className = 'stepper-segment is-active';
-    if (seg2) seg2.className = 'stepper-segment';
-    if (seg3) seg3.className = 'stepper-segment';
+    if (fill) fill.style.width = '33.333%';
     if (counter) counter.textContent = '1/3';
     if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';
   } else if (stepNum === 'step-2') {
-    if (seg1) seg1.className = 'stepper-segment is-active';
-    if (seg2) seg2.className = 'stepper-segment is-active';
-    if (seg3) seg3.className = 'stepper-segment';
+    if (fill) fill.style.width = '66.666%';
     if (counter) counter.textContent = '2/3';
     if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';
   } else if (stepNum === 'step-3') {
-    if (seg1) seg1.className = 'stepper-segment is-active';
-    if (seg2) seg2.className = 'stepper-segment is-active';
-    if (seg3) seg3.className = 'stepper-segment is-active';
+    if (fill) fill.style.width = '100%';
     if (counter) counter.textContent = '3/3';
     if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';

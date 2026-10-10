@@ -5,10 +5,211 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Add Camera — VYZN</title>
   <link rel="stylesheet" href="/static/tokens.css">
-  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="stylesheet" href="/static/components/ui.css?v=20261011">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* High-Contrast Enterprise Dark Mode (Tailwind Zinc Palette) */
+    .shell-main-wrapper {
+      overflow-x: hidden !important;
+    }
+
+    .wizard-container {
+      max-width: 680px !important;
+      width: 100% !important;
+      margin: 0 auto !important;
+      padding: 48px 24px 64px 24px !important;
+      box-sizing: border-box !important;
+    }
+
+    .wizard-stepper {
+      font-size: 12px !important;
+      font-weight: 600 !important;
+      letter-spacing: 0.1em !important;
+      text-transform: uppercase !important;
+      color: #71717a !important; /* text-zinc-500 */
+      margin-bottom: 8px !important;
+      display: block !important;
+    }
+
+    .wizard-step-title {
+      font-size: 30px !important;
+      font-weight: 700 !important;
+      letter-spacing: -0.025em !important;
+      color: #ffffff !important;
+      margin: 0 0 8px 0 !important;
+      line-height: 1.25 !important;
+    }
+
+    .wizard-subhead {
+      font-size: 14px !important;
+      color: #a1a1aa !important; /* text-zinc-400 */
+      margin: 0 0 32px 0 !important;
+      line-height: 1.5 !important;
+    }
+
+    .option-cards-stack {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 14px !important; /* gap-3.5 */
+      width: 100% !important;
+    }
+
+    .option-card {
+      all: unset !important;
+      display: flex !important;
+      align-items: flex-start !important;
+      justify-content: space-between !important;
+      background: rgba(24, 24, 27, 0.6) !important; /* bg-zinc-900/60 */
+      border: 1px solid #27272a !important; /* border-zinc-800 */
+      border-radius: 12px !important; /* rounded-xl */
+      padding: 20px !important; /* p-5 */
+      cursor: pointer !important;
+      transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+      box-sizing: border-box !important;
+      width: 100% !important;
+      text-align: left !important;
+      position: relative !important;
+    }
+
+    .option-card:hover {
+      background: rgba(24, 24, 27, 0.9) !important; /* hover:bg-zinc-900/90 */
+      border-color: #3f3f46 !important; /* hover:border-zinc-700 */
+      transform: translateY(-1px) !important;
+    }
+
+    .option-icon-box {
+      padding: 10px !important; /* p-2.5 */
+      border-radius: 8px !important; /* rounded-lg */
+      background: rgba(39, 39, 42, 0.6) !important; /* bg-zinc-800/60 */
+      border: 1px solid rgba(63, 63, 70, 0.5) !important; /* border-zinc-700/50 */
+      color: #d4d4d8 !important; /* text-zinc-300 */
+      margin-right: 16px !important; /* mr-4 */
+      flex-shrink: 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      transition: color 150ms ease !important;
+    }
+
+    .option-card:hover .option-icon-box {
+      color: #ffffff !important; /* group-hover:text-white */
+    }
+
+    .option-card-body {
+      flex: 1 1 0% !important;
+      min-width: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    .option-title-row {
+      display: flex !important;
+      align-items: center !important;
+      flex-wrap: wrap !important;
+      gap: 8px !important;
+    }
+
+    .option-card-title {
+      font-size: 16px !important; /* text-base */
+      font-weight: 600 !important;
+      color: #ffffff !important; /* text-white */
+      line-height: 1.3 !important;
+    }
+
+    .option-badge {
+      font-size: 11px !important; /* text-[11px] */
+      font-weight: 500 !important;
+      padding: 2px 8px !important; /* px-2 py-0.5 */
+      border-radius: 9999px !important; /* rounded-full */
+      display: inline-flex !important;
+      align-items: center !important;
+      line-height: 1.4 !important;
+    }
+
+    .badge-blue {
+      background: rgba(59, 130, 246, 0.1) !important; /* bg-blue-500/10 */
+      color: #60a5fa !important; /* text-blue-400 */
+      border: 1px solid rgba(59, 130, 246, 0.2) !important; /* border-blue-500/20 */
+    }
+
+    .badge-emerald {
+      background: rgba(16, 185, 129, 0.1) !important; /* bg-emerald-500/10 */
+      color: #34d399 !important; /* text-emerald-400 */
+      border: 1px solid rgba(16, 185, 129, 0.2) !important; /* border-emerald-500/20 */
+    }
+
+    .badge-purple {
+      background: rgba(168, 85, 247, 0.1) !important; /* bg-purple-500/10 */
+      color: #c084fc !important; /* text-purple-400 */
+      border: 1px solid rgba(168, 85, 247, 0.2) !important; /* border-purple-500/20 */
+    }
+
+    .option-card-desc {
+      font-size: 14px !important; /* text-sm */
+      color: #a1a1aa !important; /* text-zinc-400 */
+      margin-top: 4px !important; /* mt-1 */
+      margin-bottom: 8px !important; /* mb-2 */
+      line-height: 1.5 !important;
+    }
+
+    .option-card-tags {
+      font-size: 12px !important; /* text-xs */
+      color: #71717a !important; /* text-zinc-500 */
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+      letter-spacing: 0.02em !important;
+    }
+
+    .option-arrow {
+      color: #52525b !important; /* text-zinc-600 */
+      margin-top: 4px !important; /* mt-1 */
+      margin-left: 12px !important;
+      flex-shrink: 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      transition: all 150ms ease !important;
+    }
+
+    .option-card:hover .option-arrow {
+      color: #ffffff !important; /* group-hover:text-white */
+      transform: translateX(2px) !important; /* group-hover:translate-x-0.5 */
+    }
+
+    .stepper-progress-wrap {
+      margin-top: 40px !important; /* mt-10 */
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 16px !important; /* gap-4 */
+      width: 100% !important;
+    }
+
+    .stepper-progress-track {
+      height: 4px !important; /* h-1 */
+      background: #27272a !important; /* bg-zinc-800 */
+      border-radius: 9999px !important; /* rounded-full */
+      flex: 1 1 0% !important;
+      overflow: hidden !important;
+      position: relative !important;
+    }
+
+    .stepper-progress-active {
+      height: 100% !important;
+      width: 33.333% !important; /* w-1/3 */
+      background: #3b82f6 !important; /* bg-blue-500 */
+      border-radius: 9999px !important;
+      transition: width 250ms ease !important;
+    }
+
+    .stepper-counter {
+      font-size: 12px !important; /* text-xs */
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+      color: #71717a !important; /* text-zinc-500 */
+      flex-shrink: 0 !important;
+    }
+  </style>
 </head>
 <body class="app-shell">
 
@@ -32,22 +233,22 @@
           <h1 class="wizard-step-title" id="step1-title">How is the camera connected?</h1>
           <p class="wizard-subhead">Select a connection method to stream footage into VYZN.</p>
 
-          <div class="choice-cards-stack option-cards-stack">
-            <!-- Card 1: Direct IP -->
-            <button type="button" class="option-card choice-card" data-choice="ip">
-              <div class="option-card-left">
+          <div class="option-cards-stack">
+            <!-- Card 1: IP Camera or Recorder -->
+            <button type="button" class="option-card" data-choice="ip">
+              <div class="option-icon-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+              </div>
+              <div class="option-card-body">
                 <div class="option-title-row">
-                  <span class="option-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-                      <circle cx="12" cy="13" r="4"></circle>
-                    </svg>
-                  </span>
-                  <span class="option-title">IP camera or recorder</span>
+                  <span class="option-card-title">IP camera or recorder</span>
                   <span class="option-badge badge-blue">Direct RTSP</span>
                 </div>
-                <div class="option-desc">CCTV camera, DVR or NVR. Connect directly using its local IP address and credentials.</div>
-                <div class="option-tags">Hikvision • CP Plus • Dahua • ONVIF / NVR</div>
+                <div class="option-card-desc">CCTV camera, DVR, or NVR. Connect directly using its local IP address and credentials.</div>
+                <div class="option-card-tags">Hikvision • CP Plus • Dahua • ONVIF / NVR</div>
               </div>
               <div class="option-arrow">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -57,23 +258,23 @@
               </div>
             </button>
 
-            <!-- Card 2: Find on Network -->
-            <button type="button" class="option-card choice-card" data-choice="network">
-              <div class="option-card-left">
+            <!-- Card 2: Find on my network -->
+            <button type="button" class="option-card" data-choice="network">
+              <div class="option-icon-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                  <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                  <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                </svg>
+              </div>
+              <div class="option-card-body">
                 <div class="option-title-row">
-                  <span class="option-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
-                      <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
-                      <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
-                      <line x1="12" y1="20" x2="12.01" y2="20"></line>
-                    </svg>
-                  </span>
-                  <span class="option-title">Find on my network</span>
-                  <span class="option-badge badge-green">Auto-Discovery</span>
+                  <span class="option-card-title">Find on my network</span>
+                  <span class="option-badge badge-emerald">Auto-Discovery</span>
                 </div>
-                <div class="option-desc">VYZN scans your shop's Wi-Fi and local network for active CCTV feeds automatically.</div>
-                <div class="option-tags">Zero Setup • Auto-Detect • Local Subnet</div>
+                <div class="option-card-desc">VYZN scans your shop's Wi-Fi and local network for active CCTV feeds automatically.</div>
+                <div class="option-card-tags">Zero Setup • Auto-Detect Local Subnet</div>
               </div>
               <div class="option-arrow">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -83,21 +284,21 @@
               </div>
             </button>
 
-            <!-- Card 3: Phone or Webcam -->
-            <button type="button" class="option-card choice-card" data-choice="phone">
-              <div class="option-card-left">
+            <!-- Card 3: Phone or webcam -->
+            <button type="button" class="option-card" data-choice="phone">
+              <div class="option-icon-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                  <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                </svg>
+              </div>
+              <div class="option-card-body">
                 <div class="option-title-row">
-                  <span class="option-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
-                      <line x1="12" y1="18" x2="12.01" y2="18"></line>
-                    </svg>
-                  </span>
-                  <span class="option-title">Phone or webcam</span>
+                  <span class="option-card-title">Phone or webcam</span>
                   <span class="option-badge badge-purple">Instant Test</span>
                 </div>
-                <div class="option-desc">Use a spare phone running IP Webcam, or this computer's webcam for instant testing.</div>
-                <div class="option-tags">Computer Webcam • Android / iOS App</div>
+                <div class="option-card-desc">Use a spare phone running IP Webcam, or this computer's webcam for instant testing.</div>
+                <div class="option-card-tags">Computer Webcam • Android / iOS App</div>
               </div>
               <div class="option-arrow">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -266,12 +467,10 @@
           </div>
         </section>
 
-        <!-- Stepper Progress (Bottom Indicator) -->
+        <!-- Stepper Progress Indicator -->
         <div class="stepper-progress-wrap" id="stepper-progress-wrap">
-          <div class="stepper-progress-bars">
-            <div class="stepper-segment is-active" id="seg-1"></div>
-            <div class="stepper-segment" id="seg-2"></div>
-            <div class="stepper-segment" id="seg-3"></div>
+          <div class="stepper-progress-track">
+            <div class="stepper-progress-active" id="stepper-progress-fill"></div>
           </div>
           <span class="stepper-counter" id="stepper-counter">1/3</span>
         </div>
