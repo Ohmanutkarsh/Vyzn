@@ -184,23 +184,31 @@
       justify-content: space-between !important;
       gap: 16px !important; /* gap-4 */
       width: 100% !important;
+      user-select: none !important;
     }
 
     .stepper-progress-track {
-      height: 4px !important; /* h-1 */
+      height: 6px !important; /* h-1.5 for easy clicking */
       background: #27272a !important; /* bg-zinc-800 */
       border-radius: 9999px !important; /* rounded-full */
       flex: 1 1 0% !important;
       overflow: hidden !important;
       position: relative !important;
+      cursor: pointer !important;
+      transition: background 150ms ease !important;
+    }
+
+    .stepper-progress-track:hover {
+      background: #3f3f46 !important;
     }
 
     .stepper-progress-active {
       height: 100% !important;
-      width: 33.333% !important; /* w-1/3 */
+      width: 33.333%; /* Not !important so JS can change width freely */
       background: #3b82f6 !important; /* bg-blue-500 */
       border-radius: 9999px !important;
       transition: width 250ms ease !important;
+      pointer-events: none !important;
     }
 
     .stepper-counter {
@@ -208,6 +216,12 @@
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
       color: #71717a !important; /* text-zinc-500 */
       flex-shrink: 0 !important;
+      cursor: pointer !important;
+      transition: color 150ms ease !important;
+    }
+
+    .stepper-counter:hover {
+      color: #ffffff !important;
     }
   </style>
 </head>
@@ -312,6 +326,9 @@
 
         <!-- Step 2: Form & Connection Test -->
         <section class="wizard-step" id="step-2" style="display: none;">
+          <div style="margin-bottom: 16px;">
+            <button type="button" class="btn btn-quiet" id="btn-step2-back" style="padding: 4px 8px; font-size: 13px; color: #a1a1aa; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">← Change connection method</button>
+          </div>
           <h2 class="wizard-step-title" id="step2-title">Connect the camera</h2>
 
           <!-- Path A: IP Camera or Recorder -->
@@ -440,6 +457,9 @@
 
         <!-- Step 3: Name it -->
         <section class="wizard-step" id="step-3" style="display: none;">
+          <div style="margin-bottom: 16px;">
+            <button type="button" class="btn btn-quiet" id="btn-step3-back" style="padding: 4px 8px; font-size: 13px; color: #a1a1aa; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">← Back to connection test</button>
+          </div>
           <h2 class="wizard-step-title" id="step3-title">Name the camera</h2>
           <div class="form-group">
             <label for="camera-name-input" class="form-label">Camera name</label>
@@ -468,11 +488,11 @@
         </section>
 
         <!-- Stepper Progress Indicator -->
-        <div class="stepper-progress-wrap" id="stepper-progress-wrap">
-          <div class="stepper-progress-track">
+        <div class="stepper-progress-wrap" id="stepper-progress-wrap" title="Click progress bar to switch steps">
+          <div class="stepper-progress-track" id="stepper-progress-track">
             <div class="stepper-progress-active" id="stepper-progress-fill"></div>
           </div>
-          <span class="stepper-counter" id="stepper-counter">1/3</span>
+          <span class="stepper-counter" id="stepper-counter" title="Click to advance step">1/3</span>
         </div>
 
       </div>

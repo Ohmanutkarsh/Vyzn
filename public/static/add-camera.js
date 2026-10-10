@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   attachStep1Events();
   attachStep2Events();
   attachStep3Events();
+  attachStepperNavigation();
 
   window.runConnectionTest = runConnectionTest;
 });
@@ -32,17 +33,17 @@ function setWizardStep(stepNum, stepperText) {
   const wrap = document.getElementById('stepper-progress-wrap');
 
   if (stepNum === 'step-1') {
-    if (fill) fill.style.width = '33.333%';
+    if (fill) fill.style.setProperty('width', '33.333%', 'important');
     if (counter) counter.textContent = '1/3';
     if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';
   } else if (stepNum === 'step-2') {
-    if (fill) fill.style.width = '66.666%';
+    if (fill) fill.style.setProperty('width', '66.666%', 'important');
     if (counter) counter.textContent = '2/3';
     if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';
   } else if (stepNum === 'step-3') {
-    if (fill) fill.style.width = '100%';
+    if (fill) fill.style.setProperty('width', '100%', 'important');
     if (counter) counter.textContent = '3/3';
     if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';
@@ -54,6 +55,71 @@ function setWizardStep(stepNum, stepperText) {
   document.querySelectorAll('.wizard-step').forEach(el => el.style.display = 'none');
   const target = document.getElementById(stepNum);
   if (target) target.style.display = 'block';
+}
+
+function attachStepperNavigation() {
+  const track = document.getElementById('stepper-progress-track') || document.querySelector('.stepper-progress-track');
+  if (track) {
+    track.addEventListener('click', (e) => {
+      const rect = track.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const ratio = clickX / rect.width;
+      if (ratio <= 0.35) {
+        setWizardStep('step-1', 'Step 1 of 3');
+      } else if (ratio <= 0.70) {
+        setWizardStep('step-2', 'Step 2 of 3');
+        document.querySelectorAll('.path-section').forEach(s => s.style.display = 'none');
+        const pathEl = document.getElementById(`path-${currentChoice}`);
+        if (pathEl) pathEl.style.display = 'block';
+        if (currentChoice === 'ip') updateAddressPreview();
+      } else {
+        setWizardStep('step-3', 'Step 3 of 3');
+      }
+    });
+  }
+
+  const counter = document.getElementById('stepper-counter');
+  if (counter) {
+    counter.addEventListener('click', () => {
+      const text = counter.textContent.trim();
+      if (text === '1/3') {
+        setWizardStep('step-2', 'Step 2 of 3');
+        document.querySelectorAll('.path-section').forEach(s => s.style.display = 'none');
+        const pathEl = document.getElementById(`path-${currentChoice}`);
+        if (pathEl) pathEl.style.display = 'block';
+      } else if (text === '2/3') {
+        setWizardStep('step-3', 'Step 3 of 3');
+      } else {
+        setWizardStep('step-1', 'Step 1 of 3');
+      }
+    });
+  }
+
+  const stepper = document.getElementById('wizard-stepper');
+  if (stepper) {
+    stepper.style.cursor = 'pointer';
+    stepper.title = 'Click to return to Step 1';
+    stepper.addEventListener('click', () => {
+      setWizardStep('step-1', 'Step 1 of 3');
+    });
+  }
+
+  const btnStep2Back = document.getElementById('btn-step2-back');
+  if (btnStep2Back) {
+    btnStep2Back.addEventListener('click', () => {
+      setWizardStep('step-1', 'Step 1 of 3');
+    });
+  }
+
+  const btnStep3Back = document.getElementById('btn-step3-back');
+  if (btnStep3Back) {
+    btnStep3Back.addEventListener('click', () => {
+      setWizardStep('step-2', 'Step 2 of 3');
+      document.querySelectorAll('.path-section').forEach(s => s.style.display = 'none');
+      const pathEl = document.getElementById(`path-${currentChoice}`);
+      if (pathEl) pathEl.style.display = 'block';
+    });
+  }
 }
 
 

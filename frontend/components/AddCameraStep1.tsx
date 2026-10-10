@@ -53,12 +53,14 @@ const CONNECTION_OPTIONS: ConnectionOption[] = [
 
 interface AddCameraStep1Props {
   onSelectOption?: (optionId: 'ip' | 'network' | 'phone') => void;
+  onStepChange?: (step: number) => void;
   currentStep?: number;
   totalSteps?: number;
 }
 
 export default function AddCameraStep1({
   onSelectOption,
+  onStepChange,
   currentStep = 1,
   totalSteps = 3,
 }: AddCameraStep1Props) {
@@ -66,7 +68,11 @@ export default function AddCameraStep1({
     <div className="w-full min-h-screen bg-zinc-950 text-zinc-100 antialiased overflow-x-hidden">
       <main className="max-w-2xl mx-auto py-12 px-6">
         {/* Step Indicator */}
-        <div className="text-xs font-semibold tracking-widest uppercase text-zinc-500 mb-2 select-none">
+        <div
+          className="text-xs font-semibold tracking-widest uppercase text-zinc-500 hover:text-zinc-300 mb-2 select-none cursor-pointer inline-block transition-colors"
+          onClick={() => onStepChange?.(1)}
+          title="Return to Step 1"
+        >
           STEP {currentStep} OF {totalSteps}
         </div>
 
@@ -131,14 +137,30 @@ export default function AddCameraStep1({
         </div>
 
         {/* Stepper Progress Indicator */}
-        <div className="mt-10 flex items-center justify-between gap-4">
-          <div className="h-1 bg-zinc-800 rounded-full flex-1 overflow-hidden">
+        <div className="mt-10 flex items-center justify-between gap-4 select-none">
+          <div
+            className="h-1.5 bg-zinc-800 hover:bg-zinc-700/80 rounded-full flex-1 overflow-hidden cursor-pointer transition-colors"
+            title="Click to jump to a step"
+            onClick={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = (e.clientX - rect.left) / rect.width;
+              const nextStep = ratio <= 0.35 ? 1 : ratio <= 0.7 ? 2 : 3;
+              onStepChange?.(nextStep);
+            }}
+          >
             <div
-              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+              className="h-full bg-blue-500 rounded-full transition-all duration-300 pointer-events-none"
               style={{ width: `${(currentStep / totalSteps) * 100}%` }}
             />
           </div>
-          <span className="text-xs font-mono text-zinc-500 select-none">
+          <span
+            className="text-xs font-mono text-zinc-500 hover:text-white cursor-pointer transition-colors"
+            title="Click to cycle steps"
+            onClick={() => {
+              const nextStep = currentStep >= totalSteps ? 1 : currentStep + 1;
+              onStepChange?.(nextStep);
+            }}
+          >
             {currentStep}/{totalSteps}
           </span>
         </div>

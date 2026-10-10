@@ -1156,12 +1156,19 @@
 
 .stepper-progress-track,
 .wizard-progress-track {
-  height: 4px;
+  height: 6px;
   background: #27272a;
   border-radius: 9999px;
   flex: 1 1 0%;
   overflow: hidden;
   position: relative;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.stepper-progress-track:hover,
+.wizard-progress-track:hover {
+  background: #3f3f46;
 }
 
 .stepper-progress-active,
@@ -1171,6 +1178,7 @@
   background: #3b82f6;
   border-radius: 9999px;
   transition: width 250ms ease;
+  pointer-events: none;
 }
 
 .stepper-counter,
