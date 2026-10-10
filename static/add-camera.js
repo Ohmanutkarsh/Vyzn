@@ -27,27 +27,35 @@ function setWizardStep(stepNum, stepperText) {
   const stepper = document.getElementById('wizard-stepper');
   if (stepper) stepper.textContent = stepperText.toUpperCase();
 
-  const fill = document.getElementById('wizard-progress-fill');
-  const count = document.getElementById('wizard-progress-count');
-  const progressSec = document.getElementById('wizard-progress-section');
+  const seg1 = document.getElementById('seg-1');
+  const seg2 = document.getElementById('seg-2');
+  const seg3 = document.getElementById('seg-3');
+  const counter = document.getElementById('stepper-counter');
+  const wrap = document.getElementById('stepper-progress-wrap');
 
   if (stepNum === 'step-1') {
-    if (fill) fill.style.width = '33.33%';
-    if (count) count.textContent = '1/3';
-    if (progressSec) progressSec.style.display = 'flex';
+    if (seg1) seg1.className = 'stepper-segment is-active';
+    if (seg2) seg2.className = 'stepper-segment';
+    if (seg3) seg3.className = 'stepper-segment';
+    if (counter) counter.textContent = '1/3';
+    if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';
   } else if (stepNum === 'step-2') {
-    if (fill) fill.style.width = '66.66%';
-    if (count) count.textContent = '2/3';
-    if (progressSec) progressSec.style.display = 'flex';
+    if (seg1) seg1.className = 'stepper-segment is-active';
+    if (seg2) seg2.className = 'stepper-segment is-active';
+    if (seg3) seg3.className = 'stepper-segment';
+    if (counter) counter.textContent = '2/3';
+    if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';
   } else if (stepNum === 'step-3') {
-    if (fill) fill.style.width = '100%';
-    if (count) count.textContent = '3/3';
-    if (progressSec) progressSec.style.display = 'flex';
+    if (seg1) seg1.className = 'stepper-segment is-active';
+    if (seg2) seg2.className = 'stepper-segment is-active';
+    if (seg3) seg3.className = 'stepper-segment is-active';
+    if (counter) counter.textContent = '3/3';
+    if (wrap) wrap.style.display = 'flex';
     if (stepper) stepper.style.display = 'block';
   } else if (stepNum === 'step-success') {
-    if (progressSec) progressSec.style.display = 'none';
+    if (wrap) wrap.style.display = 'none';
     if (stepper) stepper.style.display = 'none';
   }
 

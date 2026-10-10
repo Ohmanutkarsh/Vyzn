@@ -1006,10 +1006,11 @@
 .choice-card {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 16px;
-  padding: 20px;
-  background: #141416;
-  border: 1px solid #27272A;
+  padding: 20px 24px;
+  background: #14161C;
+  border: 1px solid #232732;
   border-radius: 12px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1021,57 +1022,48 @@
 
 .option-card:hover,
 .choice-card:hover {
-  background: #18181B;
-  border-color: #3F3F46;
+  background: #181B23;
+  border-color: #383F52;
   transform: translateY(-1px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
-/* Left Icon (48px) */
-.option-icon-box,
-.choice-icon-wrap {
-  width: 48px;
-  height: 48px;
-  background: #27272A;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: #E2E8F0;
-  transition: transform 0.2s ease, border-color 0.2s ease;
-}
-
-.option-card:hover .option-icon-box,
-.choice-card:hover .choice-icon-wrap {
-  border-color: rgba(255, 255, 255, 0.15);
-  transform: scale(1.04);
-}
-
-/* Middle Text & Badges (Flexible) */
+.option-card-left,
 .option-card-body,
 .choice-card-body {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
 }
 
 .option-title-row,
 .choice-title-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 2px;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
 }
 
+.option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #94A3B8;
+  flex-shrink: 0;
+}
+
+.option-title,
 .option-card-title,
 .choice-card-title {
   font-size: 16px;
   font-weight: 600;
   color: #FFFFFF;
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 /* Badges */
@@ -1080,7 +1072,7 @@
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 9999px;
+  border-radius: 6px;
   letter-spacing: 0.02em;
   display: inline-flex;
   align-items: center;
@@ -1089,41 +1081,45 @@
 
 .badge-blue,
 .chip-cyan {
-  color: #3B82F6;
-  background: rgba(59, 130, 246, 0.15);
+  color: #60A5FA;
+  background: rgba(59, 130, 246, 0.16);
   border: 1px solid rgba(59, 130, 246, 0.25);
 }
 
 .badge-green,
 .chip-emerald {
-  color: #10B981;
-  background: rgba(16, 185, 129, 0.15);
+  color: #34D399;
+  background: rgba(16, 185, 129, 0.16);
   border: 1px solid rgba(16, 185, 129, 0.25);
 }
 
 .badge-purple,
 .chip-purple {
-  color: #8B5CF6;
-  background: rgba(139, 92, 246, 0.15);
-  border: 1px solid rgba(139, 92, 246, 0.25);
+  color: #C084FC;
+  background: rgba(168, 85, 247, 0.16);
+  border: 1px solid rgba(168, 85, 247, 0.25);
 }
 
+.option-desc,
 .option-card-desc,
 .choice-card-desc {
-  font-size: 14px;
+  font-size: 13.5px;
   line-height: 1.5;
   color: #94A3B8;
-  margin: 4px 0 10px 0;
+  margin: 2px 0 8px 0;
+  text-align: left;
 }
 
+.option-tags,
 .option-card-tags,
 .choice-card-tags {
   font-size: 11px;
   letter-spacing: 0.02em;
-  color: #64748B;
+  color: #525B70;
   display: flex;
   align-items: center;
   gap: 6px;
+  text-align: left;
 }
 
 /* Right Arrow (24px) */
@@ -1134,9 +1130,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #71717A;
+  color: #64748B;
   flex-shrink: 0;
   transition: all 0.2s ease;
+  margin-left: 16px;
 }
 
 .option-card:hover .option-arrow,
@@ -1145,31 +1142,36 @@
   transform: translateX(3px);
 }
 
-/* Stepper Progress (Bottom Indicator) */
+/* Stepper Progress (Bottom Indicator matching screenshot) */
+.stepper-progress-wrap,
 .wizard-progress-section {
   display: flex;
   align-items: center;
   gap: 16px;
-  margin-top: 36px;
+  margin-top: 40px;
   width: 100%;
 }
 
-.wizard-progress-track {
+.stepper-progress-bars {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
-  height: 4px;
-  background: #27272A;
-  border-radius: 2px;
-  overflow: hidden;
-  position: relative;
 }
 
-.wizard-progress-fill {
-  height: 100%;
-  background: #3B82F6;
+.stepper-segment {
+  flex: 1;
+  height: 3px;
   border-radius: 2px;
-  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  background: #242731;
+  transition: background 0.25s ease;
 }
 
+.stepper-segment.is-active {
+  background: #38BDF8;
+}
+
+.stepper-counter,
 .wizard-progress-count {
   font-size: 12px;
   font-weight: 500;
