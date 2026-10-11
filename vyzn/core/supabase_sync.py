@@ -89,6 +89,7 @@ def sync_user_to_supabase(user: Dict[str, Any]) -> Dict[str, Any]:
         "email_verified": True,
         "telegram_status": user.get("telegram_status", "not_linked"),
         "telegram_chat_id": str(user.get("telegram_chat_id")) if user.get("telegram_chat_id") else None,
+        "telegram_alerts_enabled": bool(user.get("telegram_alerts_enabled", 1)),
         "last_sign_in_at": now_iso,
         "updated_at": now_iso
     }
@@ -107,7 +108,15 @@ def sync_user_to_supabase(user: Dict[str, Any]) -> Dict[str, Any]:
             post_url = f"{base_url}/rest/v1/vyzn_users"
             resp = requests.post(post_url, json=insert_payload, headers=headers, timeout=6.0)
 
-        if resp.status_code in [200, 201]:
+        if resp.status_code == 400 and "telegram_alerts_enabled" in resp.text:
+            # Remote Supabase schema cache may not have telegram_alerts_enabled yet; fallback gracefully
+            fallback_payload = {k: v for k, v in update_payload.items() if k != "telegram_alerts_enabled"}
+            if existing and len(existing) > 0:
+                resp = requests.patch(patch_url, json=fallback_payload, headers=headers, timeout=6.0)
+            else:
+                resp = requests.post(post_url, json={**fallback_payload, "id": user.get("id")}, headers=headers, timeout=6.0)
+
+        if resp.status_code in [200, 201, 204]:
             logger.info(f"[SUPABASE] Successfully stored user {email} on Supabase.")
             return {
                 "synced": True,

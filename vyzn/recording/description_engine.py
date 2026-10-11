@@ -40,6 +40,43 @@ class ClipDescriptionEngine:
         )
 
     @staticmethod
+    def compute_d4_modifier(
+        has_person: bool = False,
+        has_multiple_people: bool = False,
+        is_after_hours: bool = False,
+        is_night_ir: bool = False,
+        has_loitering_30s: bool = False,
+        has_extended_duration_45s: bool = False
+    ) -> Tuple[float, List[str]]:
+        """
+        Computes Level 4 forensic additive modifier D4 in range 0..37.
+        Strictly additive, never overrides Level 3.
+        """
+        factors = []
+        d4 = 0.0
+        if has_person:
+            d4 += 5.0
+            factors.append("Person present in camera view (+5)")
+        if has_multiple_people:
+            d4 += 8.0
+            factors.append("Multiple people observed simultaneously (+8)")
+        if is_after_hours:
+            d4 += 10.0
+            factors.append("Activity occurred outside business hours (+10)")
+        if is_night_ir:
+            d4 += 4.0
+            factors.append("Infrared night vision mode active (+4)")
+        if has_loitering_30s:
+            d4 += 6.0
+            factors.append("Subject stationary for >=30s (loitering) (+6)")
+        if has_extended_duration_45s:
+            d4 += 4.0
+            factors.append("Extended event duration >=45s (+4)")
+
+        d4 = max(0.0, min(37.0, d4))
+        return d4, factors
+
+    @staticmethod
     def generate_analysis(
         camera_id: str,
         camera_name: str,
@@ -53,7 +90,8 @@ class ClipDescriptionEngine:
         is_night_ir: bool = False,
         is_after_hours: bool = False,
         part_index: int = 0,
-        parent_event_id: Optional[str] = None
+        parent_event_id: Optional[str] = None,
+        final_score: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Builds the canonical forensic analysis dictionary matching Section 6 requirements.
@@ -267,43 +305,31 @@ class ClipDescriptionEngine:
                 "avg_confidence": round(float(np.mean(confs)), 2)
             }
 
-        # 6. Evaluate Importance & Score
-        score_factors: List[str] = []
-        importance_score = 40
-
-        if "person" in class_detections:
-            importance_score += 20
-            score_factors.append("Person present in camera view")
-
-        if max_simultaneous_by_class.get("person", 0) > 1:
-            importance_score += 15
-            score_factors.append(f"Multiple people observed simultaneously ({max_simultaneous_by_class.get('person')} people)")
-
-        if is_after_hours:
-            importance_score += 20
-            score_factors.append("Activity occurred outside business hours")
-
-        if is_night_ir:
-            importance_score += 10
-            score_factors.append("Infrared night vision mode active")
-
-        # Loitering / stay duration
+        # 6. Evaluate Forensic D4 Modifier & Importance Score
+        has_person = "person" in class_detections
+        has_multi_person = max_simultaneous_by_class.get("person", 0) > 1
         max_stat = max([m["stationary_duration_sec"] for m in movement_summary], default=0.0)
-        if max_stat >= 30.0:
-            importance_score += 15
-            score_factors.append(f"Subject stationary for {int(max_stat)}s (potential loitering)")
+        has_loiter_30s = max_stat >= 30.0
+        has_ext_45s = duration_sec >= 45.0
 
-        if duration_sec >= 45.0:
-            importance_score += 10
-            score_factors.append(f"Extended event duration ({int(duration_sec)}s)")
+        d4_modifier, score_factors = ClipDescriptionEngine.compute_d4_modifier(
+            has_person=has_person,
+            has_multiple_people=has_multi_person,
+            is_after_hours=is_after_hours,
+            is_night_ir=is_night_ir,
+            has_loitering_30s=has_loiter_30s,
+            has_extended_duration_45s=has_ext_45s
+        )
 
-        importance_score = min(100, max(20, importance_score))
-        if importance_score >= 80:
+        display_score = int(final_score) if final_score is not None else int(round(d4_modifier))
+        if display_score >= 85:
             importance_level = "critical"
-        elif importance_score >= 65:
+        elif display_score >= 70:
             importance_level = "high"
-        elif importance_score >= 45:
+        elif display_score >= 50:
             importance_level = "medium"
+        elif display_score >= 30:
+            importance_level = "notable"
         else:
             importance_level = "low"
 
@@ -349,7 +375,8 @@ class ClipDescriptionEngine:
             "trigger_reason": trigger_reason,
             "event_type": event_type,
             "importance": {
-                "score": importance_score,
+                "score": display_score,
+                "d4_modifier": round(d4_modifier, 2),
                 "level": importance_level,
                 "reasons": score_factors
             },

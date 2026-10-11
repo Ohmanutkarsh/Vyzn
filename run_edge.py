@@ -4,6 +4,7 @@ Usage:
     python run_edge.py --simulate 3 --api --port 8000
 """
 
+import os
 import argparse
 import time
 import signal
@@ -41,6 +42,8 @@ def build_synthetic_settings(num_cameras: int, data_dir: Path, demo_mode: bool =
         alert_score_threshold=70,
         raw_retention_hours=0.02 if demo_mode else 72
     )
+    import os
+    settings.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or None
 
     # 1. Load persistent user cameras if configured
     cfg_file = Path("./config/cameras.json")
@@ -118,7 +121,8 @@ def main():
     parser.add_argument("--use-yolo", action="store_true", help="Load Ultralytics YOLOv8n instead of fast Mock detector")
     parser.add_argument("--api", action="store_true", default=True, help="Launch Web Dashboard and REST API (default: True)")
     parser.add_argument("--no-api", dest="api", action="store_false", help="Disable Web Dashboard")
-    parser.add_argument("--port", type=int, default=8000, help="Web dashboard port (default: 8000)")
+    default_port = int(os.environ.get("PORT", 8000))
+    parser.add_argument("--port", type=int, default=default_port, help=f"Web dashboard port (default: {default_port})")
     parser.add_argument("--demo", action="store_true", help="Enable demo mode (1-min accelerated retention)")
     parser.add_argument("--cloud-url", type=str, default=None, help="VYZN Cloud Fleet Manager URL (e.g. http://localhost:9000)")
     parser.add_argument("--site-key", type=str, default="vyzn_edge_secret_local_default_2026", help="Site shared secret for cloud telemetry auth and OTA verification")

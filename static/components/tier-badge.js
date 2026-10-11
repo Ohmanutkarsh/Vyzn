@@ -22,6 +22,11 @@ export function renderTierBadge(tier) {
       iconHtml = icons.review(14);
       cssClass = 'review';
       break;
+    case 'low':
+      label = 'Low';
+      iconHtml = icons.info ? icons.info(14) : icons.review(14);
+      cssClass = 'low';
+      break;
     case 'reviewed':
       label = 'Reviewed';
       iconHtml = icons.check(14);

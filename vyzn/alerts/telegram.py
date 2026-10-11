@@ -153,9 +153,10 @@ class TelegramAlertProvider(AlertProvider):
     Supports single chats, broadcast channels, and multi-owner monitoring groups.
     """
 
-    def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
+    def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None, db: Optional[Any] = None):
         self.bot_token = bot_token
         self.chat_id = chat_id
+        self.db = db
         self.api_url = f"https://api.telegram.org/bot{bot_token}" if bot_token else None
 
     def build_alert_payload(
@@ -169,7 +170,7 @@ class TelegramAlertProvider(AlertProvider):
         headline = format_alert_headline(event, cam_display)
         when_str = format_alert_when(event.start_time)
 
-        caption = f"🚨 Alert · {cam_display}\n{headline}\n{when_str}"
+        caption = f"🚨 VYZN Security Alert · {cam_display}\n{headline}\n{when_str}"
 
         clip_id = str(event.event_group_id)
         clip_url = f"{base_url.rstrip('/')}/clips/{clip_id}"
@@ -197,7 +198,7 @@ class TelegramAlertProvider(AlertProvider):
     ) -> bool:
         """
         Transmits Appendix B alert to Telegram with photo thumbnail and inline buttons.
-        Review-tier clips are never pushed.
+        Review-tier clips are never pushed. Suppresses alerts if user has muted alerts or is disconnected.
         """
         # Rule: Review-tier clips are never pushed
         if getattr(event, "tier", "review") != "alert":
@@ -207,14 +208,51 @@ class TelegramAlertProvider(AlertProvider):
             )
             return False
 
+        # Determine target chat ID and verify notification permissions
+        target_chat_id = self.chat_id
+        if not target_chat_id and self.db:
+            owner_email = getattr(event, "owner_email", None)
+            if not owner_email and getattr(event, "camera_id", None) and hasattr(self.db, "get_camera"):
+                cam = self.db.get_camera(event.camera_id)
+                if cam:
+                    owner_email = cam.get("owner_email")
+            if owner_email and hasattr(self.db, "get_user_by_email"):
+                user = self.db.get_user_by_email(owner_email)
+                if user:
+                    if user.get("telegram_status") != "linked" or not user.get("telegram_alerts_enabled", 1):
+                        logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for user {owner_email}")
+                        return False
+                    target_chat_id = user.get("telegram_chat_id")
+
+            if not target_chat_id and hasattr(self.db, "get_all_users"):
+                try:
+                    for u in self.db.get_all_users():
+                        if u.get("telegram_status") == "linked" and u.get("telegram_alerts_enabled", 1) and u.get("telegram_chat_id"):
+                            target_chat_id = u.get("telegram_chat_id")
+                            break
+                except Exception:
+                    pass
+
+        if target_chat_id and self.db and hasattr(self.db, "get_user_by_telegram_chat_id"):
+            user = self.db.get_user_by_telegram_chat_id(target_chat_id)
+            if user and (user.get("telegram_status") != "linked" or not user.get("telegram_alerts_enabled", 1)):
+                logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for chat {target_chat_id}")
+                return False
+
         payload = self.build_alert_payload(event, base_url=base_url, camera_name=camera_name)
         caption = payload["caption"]
         reply_markup = payload["reply_markup"]
 
+        active_api_url = self.api_url
+        if not active_api_url:
+            tok = self.bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
+            if tok:
+                active_api_url = f"https://api.telegram.org/bot{tok}"
+
         # Simulation Mode
-        if not self.api_url or not self.chat_id:
+        if not active_api_url or not target_chat_id:
             logger.info(
-                f"[TELEGRAM SIMULATION] Alert to {self.chat_id or 'Chat-ID-Unset'}:\n"
+                f"[TELEGRAM SIMULATION] Alert to {target_chat_id or 'Chat-ID-Unset'}:\n"
                 f"{caption}\n"
                 f"Buttons: [Open clip] | [Not an issue] (Event ID: {event.event_group_id})"
             )
@@ -225,9 +263,9 @@ class TelegramAlertProvider(AlertProvider):
             if thumb_path and os.path.exists(thumb_path):
                 with open(thumb_path, "rb") as pf:
                     resp = requests.post(
-                        f"{self.api_url}/sendPhoto",
+                        f"{active_api_url}/sendPhoto",
                         data={
-                            "chat_id": self.chat_id,
+                            "chat_id": target_chat_id,
                             "caption": caption,
                             "reply_markup": json.dumps(reply_markup)
                         },
@@ -242,7 +280,7 @@ class TelegramAlertProvider(AlertProvider):
                     resp = requests.post(
                         f"{self.api_url}/sendVideo",
                         data={
-                            "chat_id": self.chat_id,
+                            "chat_id": target_chat_id,
                             "caption": caption,
                             "reply_markup": json.dumps(reply_markup)
                         },
@@ -256,7 +294,7 @@ class TelegramAlertProvider(AlertProvider):
                 resp = requests.post(
                     f"{self.api_url}/sendMessage",
                     json={
-                        "chat_id": self.chat_id,
+                        "chat_id": target_chat_id,
                         "text": caption,
                         "reply_markup": reply_markup
                     },
@@ -267,6 +305,196 @@ class TelegramAlertProvider(AlertProvider):
         except Exception as e:
             logger.error(f"Failed to dispatch Telegram alert: {e}")
             return False
+
+
+def _send_tg_message_safely(
+    api_url: Optional[str],
+    chat_id: Any,
+    text: str,
+    reply_markup: Optional[Dict[str, Any]] = None,
+    parse_mode: Optional[str] = None
+) -> bool:
+    """Helper to safely deliver Telegram text messages without unhandled exceptions."""
+    if not api_url or not chat_id:
+        return True
+    try:
+        payload: Dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
+        resp = requests.post(f"{api_url}/sendMessage", json=payload, timeout=6.0)
+        return resp.status_code == 200
+    except Exception as e:
+        logger.debug(f"Failed to send Telegram message: {e}")
+        return False
+
+
+def process_telegram_update(
+    update: Dict[str, Any],
+    db: Optional[Any] = None,
+    calibrator: Optional[Any] = None,
+    bot_token: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Core processor for incoming Telegram updates.
+    Handles callback query triage and /start <token> server-side consumption.
+    Used by both long-polling daemon and HTTP webhook endpoint.
+    """
+    api_url = f"https://api.telegram.org/bot{bot_token}" if bot_token else None
+
+    # 1. Inline button callback query
+    if "callback_query" in update:
+        cq = update["callback_query"]
+        cq_id = cq.get("id")
+        data = cq.get("data", "")
+        user_name = cq.get("from", {}).get("first_name", "Operator")
+
+        reply_text = "Action acknowledged."
+        if data.startswith("star_"):
+            event_id = data.replace("star_", "")
+            if db:
+                db.update_event_star(event_id, 1)
+                db.log_audit("TELEGRAM_TRIAGE_STARRED", event_id, f"Operator: {user_name}")
+            reply_text = f"⭐ Event {event_id} protected as evidence!"
+        elif data.startswith("not_an_issue_"):
+            event_id = data.replace("not_an_issue_", "")
+            if db:
+                if hasattr(db, "update_clip_status"):
+                    db.update_clip_status(event_id, "not_an_issue")
+                else:
+                    db.update_event_triage(event_id, "not_an_issue")
+                db.log_audit("TELEGRAM_TRIAGE_NOT_AN_ISSUE", event_id, f"Operator: {user_name}")
+            reply_text = "Marked as not an issue."
+            # Edit message to reflect status per Appendix B
+            msg = cq.get("message", {})
+            chat_id = msg.get("chat", {}).get("id")
+            msg_id = msg.get("message_id")
+            if chat_id and msg_id and api_url:
+                try:
+                    if msg.get("photo") or "caption" in msg:
+                        requests.post(
+                            f"{api_url}/editMessageCaption",
+                            json={"chat_id": chat_id, "message_id": msg_id, "caption": reply_text},
+                            timeout=5.0
+                        )
+                    else:
+                        requests.post(
+                            f"{api_url}/editMessageText",
+                            json={"chat_id": chat_id, "message_id": msg_id, "text": reply_text},
+                            timeout=5.0
+                        )
+                except Exception as e:
+                    logger.debug(f"Failed to edit Telegram message: {e}")
+        elif data.startswith("false_"):
+            event_id = data.replace("false_", "")
+            if db:
+                db.update_event_triage(event_id, "false_positive")
+                db.log_audit("TELEGRAM_TRIAGE_FALSE_ALARM", event_id, f"Operator: {user_name}")
+                ev = db.get_event(event_id)
+                if ev and calibrator:
+                    calibrator.record_triage(ev.camera_id, is_threat=False)
+            reply_text = "❌ False alarm recorded. AI sensitivity auto-calibrated!"
+
+        if api_url and cq_id:
+            try:
+                requests.post(
+                    f"{api_url}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id, "text": reply_text, "show_alert": False},
+                    timeout=5.0
+                )
+            except Exception:
+                pass
+
+        return {"type": "callback_query", "action": data, "result": reply_text}
+
+    # 2. Incoming chat message processing (/start, /stop)
+    if "message" in update:
+        msg = update["message"]
+        chat_id = msg.get("chat", {}).get("id")
+        from_user = msg.get("from", {})
+        from_id = from_user.get("id")
+        username = from_user.get("username")
+        text = (msg.get("text") or "").strip()
+
+        # Handle /start command (with or without linking token)
+        if text.startswith("/start"):
+            parts = text.split()
+            if len(parts) > 1 and db:
+                token = parts[1].strip()
+                success, reason, data = db.consume_telegram_link(
+                    token=token,
+                    chat_id=str(chat_id),
+                    telegram_user_id=str(from_id),
+                    username=username
+                )
+
+                if success:
+                    user_id = data["user_id"]
+                    try:
+                        from vyzn.core.supabase_sync import sync_user_to_supabase
+                        fresh_user = db.get_user_by_id(user_id)
+                        if fresh_user:
+                            sync_user_to_supabase(fresh_user)
+                    except Exception as e:
+                        logger.warning(f"Failed to sync user to Supabase after telegram link: {e}")
+
+                    welcome_msg = (
+                        "✅ *Connected to VYZN Security!*\n\n"
+                        "Your Telegram account has been linked successfully. "
+                        "You will now receive real-time security alerts and CCTV screenshots for your cameras here."
+                    )
+                    _send_tg_message_safely(api_url, chat_id, welcome_msg, parse_mode="Markdown")
+                    return {"type": "telegram_linked_success", "user_id": user_id, "chat_id": chat_id, "status": "linked"}
+
+                elif reason == "already_used":
+                    err_msg = "⚠️ This connection link has already been used. Please generate a new connection link from your VYZN Settings page."
+                    _send_tg_message_safely(api_url, chat_id, err_msg)
+                    return {"type": "start_token_already_used", "chat_id": chat_id}
+
+                elif reason == "expired_token":
+                    err_msg = "⏳ This connection link has expired. Linking tokens are valid for 10 minutes. Please generate a new link on VYZN."
+                    _send_tg_message_safely(api_url, chat_id, err_msg)
+                    return {"type": "start_token_expired", "chat_id": chat_id}
+
+                elif reason == "duplicate_chat":
+                    err_msg = "⚠️ This Telegram account is already linked to another VYZN account. Please disconnect that account before linking a new one."
+                    _send_tg_message_safely(api_url, chat_id, err_msg)
+                    return {"type": "start_token_duplicate_chat", "chat_id": chat_id}
+
+                else:  # invalid_token
+                    err_msg = "❌ This connection link is invalid. Please request a new link from your VYZN Settings page."
+                    _send_tg_message_safely(api_url, chat_id, err_msg)
+                    return {"type": "start_token_invalid", "chat_id": chat_id}
+
+            else:
+                intro_msg = (
+                    "👋 *Welcome to VYZN Security Bot!*\n\n"
+                    "To connect your CCTV cameras to Telegram, click *'Connect VYZN Telegram'* in your VYZN Settings or onboarding page."
+                )
+                _send_tg_message_safely(api_url, chat_id, intro_msg, parse_mode="Markdown")
+                return {"type": "start_regular", "chat_id": chat_id}
+
+        # Handle /stop command
+        if text == "/stop" and db:
+            user = db.get_user_by_telegram_chat_id(str(chat_id))
+            if user:
+                db.disconnect_user_telegram(user["id"])
+                try:
+                    from vyzn.core.supabase_sync import sync_user_to_supabase
+                    fresh_user = db.get_user_by_id(user["id"])
+                    if fresh_user:
+                        sync_user_to_supabase(fresh_user)
+                except Exception:
+                    pass
+            else:
+                db.update_user_telegram_blocked(str(chat_id))
+
+            stop_msg = "🛑 Alerts stopped. VYZN will no longer send notifications to this chat. You can reconnect anytime from your VYZN Settings."
+            _send_tg_message_safely(api_url, chat_id, stop_msg)
+            return {"type": "telegram_stopped", "chat_id": chat_id}
+
+    return None
 
 
 class TelegramPollingWorker(threading.Thread):
@@ -315,217 +543,12 @@ class TelegramPollingWorker(threading.Thread):
 
     def handle_update(self, update: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Processes an incoming Telegram update and executes actions."""
-        # 1. Inline button callback query
-        if "callback_query" in update:
-            cq = update["callback_query"]
-            cq_id = cq.get("id")
-            data = cq.get("data", "")
-            user_name = cq.get("from", {}).get("first_name", "Operator")
-
-            reply_text = "Action acknowledged."
-            if data.startswith("star_"):
-                event_id = data.replace("star_", "")
-                if self.db:
-                    self.db.update_event_star(event_id, 1)
-                    self.db.log_audit("TELEGRAM_TRIAGE_STARRED", event_id, f"Operator: {user_name}")
-                reply_text = f"⭐ Event {event_id} protected as evidence!"
-            elif data.startswith("not_an_issue_"):
-                event_id = data.replace("not_an_issue_", "")
-                if self.db:
-                    if hasattr(self.db, "update_clip_status"):
-                        self.db.update_clip_status(event_id, "not_an_issue")
-                    else:
-                        self.db.update_event_triage(event_id, "not_an_issue")
-                    self.db.log_audit("TELEGRAM_TRIAGE_NOT_AN_ISSUE", event_id, f"Operator: {user_name}")
-                reply_text = "Marked as not an issue."
-                # Edit message to reflect status per Appendix B
-                msg = cq.get("message", {})
-                chat_id = msg.get("chat", {}).get("id")
-                msg_id = msg.get("message_id")
-                if chat_id and msg_id:
-                    try:
-                        if msg.get("photo") or "caption" in msg:
-                            requests.post(
-                                f"{self.api_url}/editMessageCaption",
-                                json={"chat_id": chat_id, "message_id": msg_id, "caption": reply_text},
-                                timeout=5.0
-                            )
-                        else:
-                            requests.post(
-                                f"{self.api_url}/editMessageText",
-                                json={"chat_id": chat_id, "message_id": msg_id, "text": reply_text},
-                                timeout=5.0
-                            )
-                    except Exception as e:
-                        logger.debug(f"Failed to edit Telegram message: {e}")
-            elif data.startswith("false_"):
-                event_id = data.replace("false_", "")
-                if self.db:
-                    self.db.update_event_triage(event_id, "false_positive")
-                    self.db.log_audit("TELEGRAM_TRIAGE_FALSE_ALARM", event_id, f"Operator: {user_name}")
-                    ev = self.db.get_event(event_id)
-                    if ev and self.calibrator:
-                        self.calibrator.record_triage(ev.camera_id, is_threat=False)
-                reply_text = "❌ False alarm recorded. AI sensitivity auto-calibrated!"
-
-            try:
-                requests.post(
-                    f"{self.api_url}/answerCallbackQuery",
-                    json={"callback_query_id": cq_id, "text": reply_text, "show_alert": False},
-                    timeout=5.0
-                )
-            except Exception:
-                pass
-
-            return {"type": "callback_query", "action": data, "result": reply_text}
-
-        # 2. Incoming chat message processing (/start, contact sharing, /stop)
-        if "message" in update:
-            msg = update["message"]
-            chat_id = msg.get("chat", {}).get("id")
-            from_user = msg.get("from", {})
-            from_id = from_user.get("id")
-            username = from_user.get("username")
-            text = (msg.get("text") or "").strip()
-
-            # Handle /start <token> command
-            if text.startswith("/start"):
-                parts = text.split()
-                if len(parts) > 1 and self.db:
-                    token = parts[1].strip()
-                    link = self.db.get_telegram_link(token)
-                    now_ms = int(time.time() * 1000)
-                    if link and now_ms <= link.get("expires_at_ms", 0) and link.get("status") != "linked":
-                        self.db.update_telegram_link_chat(token, str(chat_id))
-                        # Prompt with native contact-sharing keyboard
-                        try:
-                            requests.post(
-                                f"{self.api_url}/sendMessage",
-                                json={
-                                    "chat_id": chat_id,
-                                    "text": "Please tap the button below to share your mobile number so VYZN can connect your alerts.",
-                                    "reply_markup": {
-                                        "keyboard": [[{"text": "📱 Share my number", "request_contact": True}]],
-                                        "resize_keyboard": True,
-                                        "one_time_keyboard": True
-                                    }
-                                },
-                                timeout=5.0
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to send contact prompt: {e}")
-                        return {"type": "start_token", "token": token, "chat_id": chat_id}
-                    else:
-                        try:
-                            requests.post(
-                                f"{self.api_url}/sendMessage",
-                                json={
-                                    "chat_id": chat_id,
-                                    "text": "This link has expired or is invalid. Please request a new link on VYZN."
-                                },
-                                timeout=5.0
-                            )
-                        except Exception:
-                            pass
-                        return {"type": "start_token_expired", "chat_id": chat_id}
-                else:
-                    try:
-                        requests.post(
-                            f"{self.api_url}/sendMessage",
-                            json={
-                                "chat_id": chat_id,
-                                "text": "Welcome to VYZN Netra. To connect alerts, use the link provided in your VYZN setup page."
-                            },
-                            timeout=5.0
-                        )
-                    except Exception:
-                        pass
-                    return {"type": "start_regular", "chat_id": chat_id}
-
-            # Handle contact message
-            if "contact" in msg and self.db:
-                contact = msg["contact"]
-                contact_user_id = contact.get("user_id")
-
-                # Anti-spoofing check: contact shared must match the sender's Telegram user ID
-                if contact_user_id is not None and str(contact_user_id) != str(from_id):
-                    try:
-                        requests.post(
-                            f"{self.api_url}/sendMessage",
-                            json={
-                                "chat_id": chat_id,
-                                "text": "⚠️ Please share your own mobile number using the 'Share my number' button.",
-                                "reply_markup": {"remove_keyboard": True}
-                            },
-                            timeout=5.0
-                        )
-                    except Exception:
-                        pass
-                    return {"type": "contact_user_mismatch", "chat_id": chat_id}
-
-                # Retrieve pending link for this chat_id
-                link = self.db.get_telegram_link_by_chat_id(str(chat_id))
-                shared_phone = normalize_phone(contact.get("phone_number"))
-
-                if link:
-                    expected_phone = normalize_phone(link.get("phone_e164"))
-                    if shared_phone == expected_phone:
-                        # Match: connect Telegram to user account
-                        self.db.update_user_telegram(
-                            user_id=link["user_id"],
-                            chat_id=str(chat_id),
-                            telegram_user_id=str(from_id),
-                            username=username
-                        )
-                        self.db.update_telegram_link_status(link["token"], "linked")
-                        try:
-                            requests.post(
-                                f"{self.api_url}/sendMessage",
-                                json={
-                                    "chat_id": chat_id,
-                                    "text": "Connected. VYZN alerts will arrive here.",
-                                    "reply_markup": {"remove_keyboard": True}
-                                },
-                                timeout=5.0
-                            )
-                        except Exception:
-                            pass
-                        return {"type": "telegram_linked_success", "user_id": link["user_id"], "chat_id": chat_id}
-                    else:
-                        # Mismatch
-                        self.db.update_telegram_link_status(link["token"], "mismatch")
-                        try:
-                            requests.post(
-                                f"{self.api_url}/sendMessage",
-                                json={
-                                    "chat_id": chat_id,
-                                    "text": f"The number shared in Telegram ({shared_phone}) doesn't match the mobile number registered on VYZN.\n\nPlease share the number of this Telegram account, or change your mobile number.",
-                                    "reply_markup": {"remove_keyboard": True}
-                                },
-                                timeout=5.0
-                            )
-                        except Exception:
-                            pass
-                        return {"type": "telegram_linked_mismatch", "user_id": link["user_id"], "chat_id": chat_id}
-
-            # Handle /stop command
-            if text == "/stop" and self.db:
-                self.db.update_user_telegram_blocked(str(chat_id))
-                try:
-                    requests.post(
-                        f"{self.api_url}/sendMessage",
-                        json={
-                            "chat_id": chat_id,
-                            "text": "Alerts stopped. VYZN will no longer send notifications to this chat.",
-                            "reply_markup": {"remove_keyboard": True}
-                        },
-                        timeout=5.0
-                    )
-                except Exception:
-                    pass
-                return {"type": "telegram_stopped", "chat_id": chat_id}
-
-        return None
+        return process_telegram_update(
+            update=update,
+            db=self.db,
+            calibrator=self.calibrator,
+            bot_token=self.bot_token
+        )
 
 
 _active_poller: Optional[TelegramPollingWorker] = None

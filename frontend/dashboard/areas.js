@@ -274,9 +274,16 @@ function buildEditorDom(container) {
             <label class="form-group-label" for="input-area-name">${escapeHtml(t('areas.field_name', 'Name'))}</label>
             <input type="text" class="input" id="input-area-name" maxlength="32">
             <div class="name-suggestions">
+              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_gate', 'Main gate security'))}">${escapeHtml(t('areas.suggest_gate', 'Main gate security'))}</button>
+              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_vehicle', 'Vehicle entry/exit'))}">${escapeHtml(t('areas.suggest_vehicle', 'Vehicle entry/exit'))}</button>
+              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_parking', 'Visitor parking'))}">${escapeHtml(t('areas.suggest_parking', 'Visitor parking'))}</button>
+              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_lobby', 'Lobby entrance'))}">${escapeHtml(t('areas.suggest_lobby', 'Lobby entrance'))}</button>
+              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_boundary', 'Boundary wall'))}">${escapeHtml(t('areas.suggest_boundary', 'Boundary wall'))}</button>
+              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_play_area', 'Kids play area'))}">${escapeHtml(t('areas.suggest_play_area', 'Kids play area'))}</button>
+              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_terrace', 'Terrace / Water tank'))}">${escapeHtml(t('areas.suggest_terrace', 'Terrace / Water tank'))}</button>
               <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_counter', 'Cash counter'))}">${escapeHtml(t('areas.suggest_counter', 'Cash counter'))}</button>
               <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_floor', 'Shop floor'))}">${escapeHtml(t('areas.suggest_floor', 'Shop floor'))}</button>
-              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_door', 'Door'))}">${escapeHtml(t('areas.suggest_door', 'Door'))}</button>
+              <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_door', 'Door / Back gate'))}">${escapeHtml(t('areas.suggest_door', 'Door / Back gate'))}</button>
               <button type="button" class="suggestion-chip" data-name="${escapeHtml(t('areas.suggest_godown', 'Godown'))}">${escapeHtml(t('areas.suggest_godown', 'Godown'))}</button>
             </div>
           </div>

@@ -230,8 +230,8 @@ function renderLoginFormHtml(savedEmail) {
 
 function renderSignupFormHtml(savedEmail) {
   return `
-    <h1 class="auth-title">Create merchant account</h1>
-    <p class="auth-helper">Enter your store details to set up your intelligent CCTV monitoring.</p>
+    <h1 class="auth-title">Create Account</h1>
+    <p class="auth-helper">Set up intelligent CCTV surveillance for your society, premises, or business.</p>
 
     <div id="signup-error" class="auth-error-banner" style="display:none;" role="alert"></div>
 
@@ -242,22 +242,24 @@ function renderSignupFormHtml(savedEmail) {
           <input id="signup-name" class="auth-input" type="text" placeholder="Utkarsh Tapise" autocomplete="name" required autofocus />
         </div>
         <div class="auth-form-group">
-          <label for="signup-business" class="auth-label">Business / Store Name</label>
-          <input id="signup-business" class="auth-input" type="text" placeholder="Vyzn Supermarket" required />
+          <label for="signup-business" class="auth-label">Society / Premise / Business Name</label>
+          <input id="signup-business" class="auth-input" type="text" placeholder="e.g., Asara Dnyantirtha CHS" required />
         </div>
       </div>
 
       <div class="auth-row-2col">
         <div class="auth-form-group">
-          <label for="signup-type" class="auth-label">Business Type</label>
+          <label for="signup-type" class="auth-label">Premises / Property Type</label>
           <select id="signup-type" class="auth-select">
-            <option value="retail">Retail Shop / Store</option>
-            <option value="supermarket">Grocery & Supermarket</option>
-            <option value="jewellery">Jewellery & Gold</option>
-            <option value="electronics">Electronics & Gadgets</option>
-            <option value="godown">Warehouse / Godown</option>
-            <option value="restaurant">Restaurant / Cafe</option>
-            <option value="other">Other Business</option>
+            <option value="society" selected>🏢 Housing Society / CHS / Apartment Complex</option>
+            <option value="gated_community">🏡 Gated Community / Villa Township</option>
+            <option value="commercial_complex">🏬 Commercial Complex / IT Park</option>
+            <option value="retail">🛍️ Retail Shop / Store</option>
+            <option value="supermarket">🛒 Grocery & Supermarket</option>
+            <option value="jewellery">💎 Jewellery & Gold Showroom</option>
+            <option value="godown">📦 Warehouse / Godown</option>
+            <option value="restaurant">🍽️ Restaurant / Cafe</option>
+            <option value="other">🏢 Other Premises / Business</option>
           </select>
         </div>
         <div class="auth-form-group">
@@ -355,10 +357,11 @@ function attachLoginFormHandlers(container) {
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password, remember })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
 
         if (res.ok && data.ok) {
           sessionStorage.setItem('vyzn_login_email', email);
@@ -367,7 +370,7 @@ function attachLoginFormHandlers(container) {
           }
           window.location.replace(data.redirect || '/overview');
         } else {
-          errorBox.textContent = data.detail || 'Incorrect email or password. Please try again.';
+          errorBox.textContent = data.detail || (res.status >= 500 ? 'Server error occurred. Please try again.' : 'Incorrect email or password. Please try again.');
           errorBox.style.display = 'flex';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Sign In';
@@ -424,7 +427,7 @@ function attachSignupFormHandlers(container) {
         return;
       }
       if (!business_name) {
-        errorBox.textContent = 'Please enter your business or store name.';
+        errorBox.textContent = 'Please enter your society, premises, or business name.';
         errorBox.style.display = 'flex';
         businessInput.focus();
         return;
@@ -460,6 +463,7 @@ function attachSignupFormHandlers(container) {
       try {
         const res = await fetch('/api/auth/signup', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             full_name,
@@ -470,7 +474,7 @@ function attachSignupFormHandlers(container) {
             password
           })
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
 
         if (res.ok && data.ok) {
           sessionStorage.setItem('vyzn_login_email', email);
@@ -479,7 +483,7 @@ function attachSignupFormHandlers(container) {
           }
           window.location.replace(data.redirect || '/overview');
         } else {
-          errorBox.textContent = data.detail || 'Could not create account. Please try again.';
+          errorBox.textContent = data.detail || (res.status >= 500 ? 'Server error processing registration. Please try again.' : 'Could not create account. Please check your inputs.');
           errorBox.style.display = 'flex';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Create Account & Continue';
@@ -805,6 +809,41 @@ function renderS3PhoneInput(container) {
 
     <div id="s3-error" class="auth-error-banner" style="display:none;" role="alert"></div>
 
+    <!-- Connect Telegram Option (Instant CCTV Alerts) -->
+    <div class="auth-tg-card" style="background: rgba(36, 161, 222, 0.08); border: 1px solid rgba(36, 161, 222, 0.28); border-radius: 12px; padding: 18px; margin-bottom: 20px; text-align: left;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">✈️</span>
+          <span style="font-size: 15px; font-weight: 600; color: #ffffff;">Connect VYZN Telegram</span>
+        </div>
+        <span style="font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(36, 161, 222, 0.22); color: #38bdf8; font-weight: 600;">RECOMMENDED</span>
+      </div>
+      <p style="font-size: 13px; color: #94a3b8; margin: 0 0 14px 0; line-height: 1.45;">
+        Get real-time CCTV threat alerts, instant incident photos, and 1-tap false alarm dismissal directly on Telegram.
+      </p>
+
+      <button id="s3-btn-connect-telegram" class="btn btn-primary" type="button" style="width: 100%; background: #24A1DE; border-color: #24A1DE; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px; height: 42px; font-size: 14px;">
+        <span>✈️</span> Connect Telegram
+      </button>
+
+      <div id="s3-tg-status-panel" style="display: none; margin-top: 12px; padding: 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.08);">
+        <div style="display: flex; align-items: center; gap: 10px;" id="s3-tg-status-msg">
+          <span class="spinner" style="width: 14px; height: 14px; border: 2px solid #38bdf8; border-top-color: transparent; border-radius: 50%; display: inline-block; animation: spin 1s linear infinite;"></span>
+          <span style="font-size: 13px; color: #e2e8f0;">Waiting for you to tap <strong>Start</strong> in Telegram…</span>
+        </div>
+        <div style="margin-top: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <a id="s3-tg-reopen-link" href="#" target="_blank" rel="noopener" style="font-size: 12px; color: #38bdf8; text-decoration: underline;">Open bot again</a>
+          <button type="button" id="s3-tg-test-confirm" class="btn-ghost" style="font-size: 11px; padding: 2px 6px; color: #94a3b8; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;">Simulate Start (Test)</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; margin: 18px 0 16px 0; gap: 12px;">
+      <div style="flex: 1; height: 1px; background: rgba(255, 255, 255, 0.08);"></div>
+      <span style="font-size: 11px; color: #71717a; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;">OR ADD PHONE NUMBER</span>
+      <div style="flex: 1; height: 1px; background: rgba(255, 255, 255, 0.08);"></div>
+    </div>
+
     <form id="s3-phone-form" novalidate>
       <div class="auth-form-group">
         <label for="s3-phone" class="auth-label">${escapeHtml(t('auth.phone_label'))}</label>
@@ -835,6 +874,82 @@ function renderS3PhoneInput(container) {
   const submitBtn = document.getElementById('s3-submit-btn');
   const skipBtn = document.getElementById('s3-skip-btn');
 
+  // Telegram Connect flow
+  let tgPollTimer = null;
+  const tgBtn = document.getElementById('s3-btn-connect-telegram');
+  const tgPanel = document.getElementById('s3-tg-status-panel');
+  const tgMsg = document.getElementById('s3-tg-status-msg');
+  const tgReopenLink = document.getElementById('s3-tg-reopen-link');
+  const tgTestConfirm = document.getElementById('s3-tg-test-confirm');
+  let currentTgToken = null;
+
+  if (tgBtn) {
+    tgBtn.addEventListener('click', async () => {
+      tgBtn.disabled = true;
+      tgBtn.textContent = 'Generating connection link…';
+      errorBox.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/telegram/link', {
+          method: 'POST',
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to generate Telegram link');
+
+        currentTgToken = data.token;
+        if (tgReopenLink) tgReopenLink.href = data.deepLink;
+        if (tgPanel) tgPanel.style.display = 'block';
+
+        // Open Telegram bot directly
+        window.open(data.deepLink, '_blank', 'noopener');
+
+        // Start polling Telegram connection status
+        if (tgPollTimer) clearInterval(tgPollTimer);
+        tgPollTimer = setInterval(async () => {
+          try {
+            const stRes = await fetch('/api/telegram/status', { credentials: 'include' });
+            const stData = await stRes.json();
+            if (stData && stData.connected) {
+              clearInterval(tgPollTimer);
+              tgBtn.textContent = '✅ Connected to Telegram';
+              tgBtn.style.background = '#10B981';
+              tgBtn.style.borderColor = '#10B981';
+              if (tgMsg) {
+                tgMsg.innerHTML = `<span style="color: #10B981; font-weight: 600;">✅ Connected successfully to @${escapeHtml(stData.telegram_username || 'Telegram')}! Redirecting…</span>`;
+              }
+              setTimeout(() => {
+                window.location.href = '/overview';
+              }, 1200);
+            }
+          } catch (e) {
+            // Polling retry
+          }
+        }, 1500);
+
+      } catch (err) {
+        errorBox.textContent = err.message || 'Failed to connect Telegram.';
+        errorBox.style.display = 'flex';
+        tgBtn.disabled = false;
+        tgBtn.textContent = '✈️ Connect Telegram';
+      }
+    });
+  }
+
+  if (tgTestConfirm) {
+    tgTestConfirm.addEventListener('click', async () => {
+      if (!currentTgToken) return;
+      try {
+        await fetch('/api/telegram/simulate-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ token: currentTgToken, username: 'demo_user' })
+        });
+      } catch (e) {}
+    });
+  }
+
   // Format phone number with space as user types
   phoneInput.addEventListener('input', () => {
     let digits = phoneInput.value.replace(/\D/g, '').slice(0, 10);
@@ -847,9 +962,10 @@ function renderS3PhoneInput(container) {
 
   // Skip button: user can proceed directly without adding phone
   skipBtn.addEventListener('click', async () => {
+    if (tgPollTimer) clearInterval(tgPollTimer);
     skipBtn.disabled = true;
     try {
-      const res = await fetch('/api/auth/phone/skip', { method: 'POST' });
+      const res = await fetch('/api/auth/phone/skip', { method: 'POST', credentials: 'include' });
       const data = await res.json();
       window.location.href = data.next_step || '/overview';
     } catch (err) {
@@ -1154,7 +1270,7 @@ async function renderS4(container) {
     </div>
 
     <h1 class="auth-title">${escapeHtml(t('auth.telegram_title'))}</h1>
-    <p class="auth-helper">Alerts arrive in Telegram. Connect the account that uses ${escapeHtml(maskedPhoneStr)}.</p>
+    <p class="auth-helper">Real-time alerts and CCTV screenshots arrive in Telegram. Connect your Telegram account below.</p>
 
     <div id="s4-notice-banner" style="display:none;"></div>
 
@@ -1162,10 +1278,10 @@ async function renderS4(container) {
       <div class="tg-step-item">
         <div class="tg-step-num">1</div>
         <div class="tg-step-content">
-          <div>Open VYZN on Telegram</div>
+          <div>Open VYZN Security Bot</div>
           <div style="margin-top: 8px;">
             <a id="s4-open-tg-btn" class="btn btn-secondary" href="#" target="_blank" rel="noopener">
-              ✈️ ${escapeHtml(t('auth.step_open_tg'))}
+              ✈️ Connect VYZN Telegram
             </a>
           </div>
         </div>
@@ -1173,7 +1289,7 @@ async function renderS4(container) {
 
       <div class="tg-step-item">
         <div class="tg-step-num">2</div>
-        <div class="tg-step-content">${escapeHtml(t('auth.step_share_num'))}</div>
+        <div class="tg-step-content">Tap <strong>Start</strong> in Telegram to link your alerts</div>
       </div>
 
       <div class="tg-step-item">

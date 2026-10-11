@@ -54,6 +54,11 @@ class FinalizedClipSegment:
     max_confidence: float
     is_discarded: bool = False
     is_alert: bool = False
+    score: int = 0
+    score_raw: float = 0.0
+    tier: str = "low"
+    severity_label: str = "Low"
+    score_breakdown: Dict[str, Any] = field(default_factory=dict)
 
 
 class ClipStateMachine:
@@ -120,6 +125,11 @@ class ClipStateMachine:
         self.primary_object: str = "unclassified"
         self.max_confidence: float = 0.0
 
+        # Continuous scoring tracking (3-second moving average window)
+        self.scoring_window: deque = deque()
+        self.max_3s_moving_avg: float = 0.0
+        self.peak_breakdown: Dict[str, Any] = {}
+
         # Merge & Debounce tracking
         self.last_finalized_end_pts: Optional[float] = None
         self.last_finalized_event_id: Optional[str] = None
@@ -139,13 +149,27 @@ class ClipStateMachine:
         motion_score: float,
         detections: List[Any],
         tracks: List[Any],
-        in_roi: bool = True
+        in_roi: bool = True,
+        live_score_breakdown: Optional[Dict[str, Any]] = None
     ) -> Optional[FinalizedClipSegment]:
         """
         Executes one state machine transition step for the given frame.
-        Returns a FinalizedClipSegment when an event segment completes, else None.
+        Tracks 3-second moving average score and returns FinalizedClipSegment when complete.
         """
         self.last_frame_pts = pts
+
+        # Track continuous 3-second moving average score if breakdown provided
+        if live_score_breakdown is not None:
+            s_live = float(live_score_breakdown.get("s_live", live_score_breakdown.get("final_score", 0.0)))
+            self.scoring_window.append((pts, s_live, live_score_breakdown))
+            while self.scoring_window and (pts - self.scoring_window[0][0]) > 3.0:
+                self.scoring_window.popleft()
+            if self.scoring_window:
+                ma_3s = sum(s for _, s, _ in self.scoring_window) / len(self.scoring_window)
+                if ma_3s > self.max_3s_moving_avg:
+                    self.max_3s_moving_avg = ma_3s
+                    self.peak_breakdown = dict(live_score_breakdown)
+                self.highest_score = max(self.highest_score, int(round(ma_3s)))
 
         # Clean expired suppressed static tracks
         self.suppressed_static_track_ids = {
@@ -301,6 +325,9 @@ class ClipStateMachine:
         self.highest_score = 0
         self.primary_object = "unclassified"
         self.max_confidence = 0.0
+        self.scoring_window.clear()
+        self.max_3s_moving_avg = 0.0
+        self.peak_breakdown = {}
         self._update_event_metrics(meta)
 
     def _update_event_metrics(self, meta: FrameMetadata):
@@ -349,6 +376,49 @@ class ClipStateMachine:
         if not self.had_target_detection and active_dur < self.min_motion_only_sec:
             is_discarded = True
 
+        final_s = self.max_3s_moving_avg
+        peak_bd = self.peak_breakdown or {}
+
+        # Fallback if no frames scored via moving average
+        if final_s == 0.0 and self.highest_score > 0:
+            final_s = float(self.highest_score)
+
+        # Caps: pure unclassified motion capped at 29 unless unexplained motion in restricted after hours
+        is_restr_after_hours = bool(peak_bd.get("l0_threat_floor", 0) == 30 or (self.primary_object == "unclassified" and peak_bd.get("threat_floor") == 30))
+        if self.primary_object == "unclassified" and not is_restr_after_hours:
+            final_s = min(final_s, 29.0)
+
+        # Floors: apply threat floor from peak breakdown
+        t_floor = float(peak_bd.get("threat_floor", 0.0) or peak_bd.get("l0_threat_floor", 0.0) or 0.0)
+        if t_floor > 0.0:
+            final_s = max(final_s, t_floor)
+
+        import decimal
+        d = decimal.Decimal(str(round(final_s, 6)))
+        final_int_score = int(d.quantize(decimal.Decimal('1'), rounding=decimal.ROUND_HALF_UP))
+        final_int_score = max(0, min(100, final_int_score))
+
+        if final_int_score >= 70:
+            tier = "alert"
+            is_alert = True
+        elif final_int_score >= 30:
+            tier = "review"
+            is_alert = False
+        else:
+            tier = "low"
+            is_alert = False
+
+        if final_int_score >= 85:
+            severity_label = "Critical"
+        elif final_int_score >= 70:
+            severity_label = "High"
+        elif final_int_score >= 50:
+            severity_label = "Medium"
+        elif final_int_score >= 30:
+            severity_label = "Notable"
+        else:
+            severity_label = "Low"
+
         segment = FinalizedClipSegment(
             event_group_id=self.current_event_id or f"ev_{self.camera_id}_{int(pts)}",
             camera_id=self.camera_id,
@@ -361,11 +431,16 @@ class ClipStateMachine:
             close_reason=close_reason,
             frames=list(self.active_frames),
             frame_metas=list(self.active_metas),
-            highest_score=self.highest_score or (80 if self.had_target_detection else 45),
+            highest_score=final_int_score,
             primary_object=self.primary_object,
             max_confidence=self.max_confidence,
             is_discarded=is_discarded,
-            is_alert=self.had_target_detection
+            is_alert=is_alert,
+            score=final_int_score,
+            score_raw=round(float(final_s), 2),
+            tier=tier,
+            severity_label=severity_label,
+            score_breakdown=peak_bd
         )
 
         if not continue_recording:

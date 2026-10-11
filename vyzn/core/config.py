@@ -134,3 +134,30 @@ def get_default_settings(data_root: Optional[Path] = None) -> EdgeSettings:
         data_dir=root,
         db_path=root / "index.db"
     )
+
+
+_SCORING_CONFIG_CACHE: Optional[dict] = None
+
+
+def get_scoring_config(reload: bool = False) -> dict:
+    """Loads and caches scoring parameters from config/scoring.json."""
+    global _SCORING_CONFIG_CACHE
+    if _SCORING_CONFIG_CACHE is not None and not reload:
+        return _SCORING_CONFIG_CACHE
+
+    possible_paths = [
+        Path("config/scoring.json"),
+        Path(__file__).resolve().parent.parent.parent / "config" / "scoring.json",
+        Path(__file__).resolve().parent.parent / "config" / "scoring.json",
+    ]
+    for p in possible_paths:
+        if p.exists():
+            try:
+                import json
+                with open(p, "r", encoding="utf-8") as f:
+                    _SCORING_CONFIG_CACHE = json.load(f)
+                    return _SCORING_CONFIG_CACHE
+            except Exception:
+                pass
+    return {}
+

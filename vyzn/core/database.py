@@ -321,6 +321,16 @@ class DatabaseWriterWorker(threading.Thread):
             pass
 
         try:
+            conn.execute("ALTER TABLE users ADD COLUMN telegram_alerts_enabled INTEGER DEFAULT 1;")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE telegram_links ADD COLUMN chat_id TEXT;")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_owner ON events(owner_email);")
         except sqlite3.OperationalError:
             pass
@@ -340,6 +350,13 @@ class DatabaseWriterWorker(threading.Thread):
             "importance_level TEXT",
             "parent_event_id TEXT",
             "part_index INTEGER DEFAULT 0",
+            "score_raw REAL",
+            "severity_label TEXT",
+            "score_breakdown TEXT DEFAULT '{}'",
+            "scoring_version INTEGER DEFAULT 2",
+            "expires_at TEXT",
+            "is_pinned INTEGER DEFAULT 0",
+            "user_label TEXT DEFAULT NULL",
         ]:
             try:
                 conn.execute(f"ALTER TABLE events ADD COLUMN {col_def};")
@@ -348,6 +365,22 @@ class DatabaseWriterWorker(threading.Thread):
 
         try:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_events_parent ON events(parent_event_id);")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_tier_retention ON events(tier, expires_at_ms, is_pinned);")
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_camera_tier_time ON events(camera_id, tier, start_time);")
+        except sqlite3.OperationalError:
+            pass
+
+        # Legacy clips migration: mark existing NULL scoring_version as 1
+        try:
+            conn.execute("UPDATE events SET scoring_version = 1 WHERE scoring_version IS NULL;")
         except sqlite3.OperationalError:
             pass
 
@@ -403,6 +436,27 @@ class EventDatabase:
                 callback(None, e)
             return False
 
+        meta_dict = {}
+        if getattr(event, "metadata_json", None):
+            try:
+                import json
+                meta_dict = json.loads(event.metadata_json)
+            except Exception:
+                meta_dict = {}
+
+        score_raw = getattr(event, "score_raw", meta_dict.get("score_raw", float(event.score)))
+        severity_label = getattr(event, "severity_label", meta_dict.get("severity_label", "Medium"))
+        score_bd_str = json.dumps(meta_dict.get("score_breakdown", {})) if isinstance(meta_dict.get("score_breakdown"), dict) else "{}"
+        scoring_ver = int(meta_dict.get("scoring_version", 2))
+        is_pinned = int(getattr(event, "is_pinned", 0) or getattr(event, "starred", 0))
+        user_lbl = getattr(event, "user_label", None)
+        expires_at_iso = getattr(event, "expires_at", None)
+        if not expires_at_iso and getattr(event, "expires_at_ms", None):
+            try:
+                expires_at_iso = datetime.fromtimestamp(event.expires_at_ms / 1000.0, timezone.utc).isoformat()
+            except Exception:
+                expires_at_iso = None
+
         sql = """
         INSERT OR REPLACE INTO events (
             event_group_id, camera_id, start_time, end_time,
@@ -412,8 +466,10 @@ class EventDatabase:
             motion_points_count, metadata_json,
             clip_number, expires_at_ms, sha256, tier, owner_email,
             analysis_json, title, summary, trigger_reason,
-            importance_score, importance_level, parent_event_id, part_index
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            importance_score, importance_level, parent_event_id, part_index,
+            score_raw, severity_label, score_breakdown, scoring_version,
+            expires_at, is_pinned, user_label
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             event.event_group_id, event.camera_id, event.start_time, event.end_time,
@@ -439,6 +495,8 @@ class EventDatabase:
             getattr(event, "importance_level", None),
             getattr(event, "parent_event_id", None),
             getattr(event, "part_index", 0),
+            score_raw, severity_label, score_bd_str, scoring_ver,
+            expires_at_iso, is_pinned, user_lbl
         )
         self.writer.queue.put((sql, params, callback))
 
@@ -795,13 +853,24 @@ class EventDatabase:
         finally:
             conn.close()
 
+    def get_all_users(self) -> List[Dict[str, Any]]:
+        """Retrieves all registered user profiles ordered by creation."""
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users ORDER BY created_at_ms ASC")
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def create_user_with_credentials(
         self,
         email: str,
         password: str,
         full_name: str,
         business_name: str,
-        business_type: str = "retail",
+        business_type: str = "society",
         phone_e164: Optional[str] = None,
         role: str = "shopkeeper"
     ) -> Dict[str, Any]:
@@ -912,11 +981,43 @@ class EventDatabase:
         sql = """
         UPDATE users
         SET telegram_chat_id = ?, telegram_user_id = ?, telegram_username = ?,
-            telegram_linked_at_ms = ?, telegram_status = 'linked', updated_at_ms = ?
+            telegram_linked_at_ms = ?, telegram_status = 'linked', telegram_alerts_enabled = 1, updated_at_ms = ?
         WHERE id = ?
         """
         self.writer.queue.put((sql, (str(chat_id), str(telegram_user_id), username, now_ms, now_ms, user_id), None))
         self.flush()
+
+    def disconnect_user_telegram(self, user_id: str):
+        """Disconnects Telegram from user account and revokes pending links."""
+        now_ms = int(time.time() * 1000)
+        sql = """
+        UPDATE users
+        SET telegram_chat_id = NULL, telegram_user_id = NULL, telegram_username = NULL,
+            telegram_status = 'not_linked', updated_at_ms = ?
+        WHERE id = ?
+        """
+        self.writer.queue.put((sql, (now_ms, user_id), None))
+        self.writer.queue.put(("UPDATE telegram_links SET status = 'revoked' WHERE user_id = ?", (user_id,), None))
+        self.flush()
+
+    def set_user_telegram_alerts(self, user_id: str, enabled: bool):
+        """Enables or disables CCTV threat alerts for the user."""
+        now_ms = int(time.time() * 1000)
+        val = 1 if enabled else 0
+        sql = "UPDATE users SET telegram_alerts_enabled = ?, updated_at_ms = ? WHERE id = ?"
+        self.writer.queue.put((sql, (val, now_ms, user_id), None))
+        self.flush()
+
+    def get_user_by_telegram_chat_id(self, chat_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves user actively linked to this Telegram chat_id."""
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE telegram_chat_id = ? AND telegram_status = 'linked' LIMIT 1", (str(chat_id),))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
 
     def store_auth_code(self, email: str, code: str, ttl_sec: int = 600):
         norm_email = email.strip().lower()
@@ -1057,13 +1158,14 @@ class EventDatabase:
             self.writer.queue.put(("DELETE FROM sessions WHERE token = ?", (token,), None))
             self.flush()
 
-    def create_telegram_link(self, user_id: str, phone_e164: str, ttl_sec: int = 600) -> str:
+    def create_telegram_link(self, user_id: str, phone_e164: Optional[str] = None, ttl_sec: int = 600) -> str:
         import secrets
         token = secrets.token_urlsafe(16)
         now_ms = int(time.time() * 1000)
         expires_at_ms = now_ms + ttl_sec * 1000
+        phone_val = str(phone_e164 or "")
         sql = "INSERT OR REPLACE INTO telegram_links (token, user_id, phone_e164, created_at_ms, expires_at_ms, status, chat_id) VALUES (?, ?, ?, ?, ?, 'pending', NULL)"
-        self.writer.queue.put((sql, (token, user_id, phone_e164, now_ms, expires_at_ms), None))
+        self.writer.queue.put((sql, (token, user_id, phone_val, now_ms, expires_at_ms), None))
         self.flush()
         return token
 
@@ -1096,6 +1198,50 @@ class EventDatabase:
         sql = "UPDATE telegram_links SET chat_id = ? WHERE token = ?"
         self.writer.queue.put((sql, (str(chat_id), token), None))
         self.flush()
+
+    def consume_telegram_link(
+        self,
+        token: str,
+        chat_id: str,
+        telegram_user_id: str,
+        username: Optional[str] = None
+    ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+        """
+        Validates and consumes a single-use Telegram linking token server-side.
+        Guarantees:
+        1. Token must exist and be in 'pending' status.
+        2. Token must not be expired.
+        3. The same chat_id cannot be linked to multiple different customer accounts.
+        4. Single-use: marks token as 'linked' immediately so it cannot be reused.
+        """
+        link = self.get_telegram_link(token)
+        if not link:
+            return False, "invalid_token", None
+
+        if link.get("status") in ("linked", "revoked"):
+            return False, "already_used", link
+
+        now_ms = int(time.time() * 1000)
+        if now_ms > link.get("expires_at_ms", 0):
+            self.update_telegram_link_status(token, "expired")
+            return False, "expired_token", link
+
+        # Reject duplicate chat linking to multiple different accounts
+        existing_user = self.get_user_by_telegram_chat_id(str(chat_id))
+        if existing_user and existing_user.get("id") != link["user_id"]:
+            self.update_telegram_link_status(token, "duplicate_chat")
+            return False, "duplicate_chat", existing_user
+
+        # Mark link as consumed
+        sql_link = "UPDATE telegram_links SET status = 'linked', chat_id = ? WHERE token = ?"
+        self.writer.queue.put((sql_link, (str(chat_id), token), None))
+
+        # Update user account
+        user_id = link["user_id"]
+        self.update_user_telegram(user_id, str(chat_id), str(telegram_user_id), username)
+        self.flush()
+
+        return True, "success", link
 
     def get_telegram_link_by_chat_id(self, chat_id: str) -> Optional[Dict[str, Any]]:
         conn = self._get_read_conn()
@@ -1218,19 +1364,23 @@ class EventDatabase:
             trigger_offset_sec = meta.get("trigger_offset_sec", 3.0)
             trigger_ms = start_ms + int(trigger_offset_sec * 1000)
 
-        raw_triage = row.get("user_triage") or "unreviewed"
-        if raw_triage in ("unreviewed", "reviewed", "not_an_issue"):
-            status = raw_triage
-        elif raw_triage == "confirmed_threat":
-            status = "reviewed"
-        elif raw_triage == "false_positive":
-            status = "not_an_issue"
+        row_status = row.get("status")
+        if row_status == "deleted":
+            status = "deleted"
         else:
-            status = "unreviewed"
+            raw_triage = row.get("user_triage") or "unreviewed"
+            if raw_triage in ("unreviewed", "reviewed", "not_an_issue"):
+                status = raw_triage
+            elif raw_triage == "confirmed_threat":
+                status = "reviewed"
+            elif raw_triage == "false_positive":
+                status = "not_an_issue"
+            else:
+                status = "unreviewed"
 
         tier = row.get("tier")
-        if tier not in ("alert", "review"):
-            tier = "alert" if (row.get("score") or 0) >= 70 else "review"
+        if tier not in ("alert", "review", "low"):
+            tier = "alert" if (row.get("score") or 0) >= 70 else ("review" if (row.get("score") or 0) >= 30 else "low")
 
         area_name = row.get("zone_name")
         if area_name in ("general", "unspecified", "", None):
@@ -1357,8 +1507,79 @@ class EventDatabase:
             "parent_event_id": parent_id,
             "partIndex": part_idx,
             "part_index": part_idx,
-            "analysis": analysis
+            "analysis": analysis,
+            # Scoring v2 fields
+            "score_raw": row.get("score_raw") if row.get("score_raw") is not None else float(row.get("score") or 0),
+            "scoreRaw": row.get("score_raw") if row.get("score_raw") is not None else float(row.get("score") or 0),
+            "severity_label": row.get("severity_label") or imp_level.capitalize(),
+            "severityLabel": row.get("severity_label") or imp_level.capitalize(),
+            "score_breakdown": (
+                json.loads(row.get("score_breakdown"))
+                if isinstance(row.get("score_breakdown"), str) and row.get("score_breakdown")
+                else (row.get("score_breakdown") or {})
+            ),
+            "scoreBreakdown": (
+                json.loads(row.get("score_breakdown"))
+                if isinstance(row.get("score_breakdown"), str) and row.get("score_breakdown")
+                else (row.get("score_breakdown") or {})
+            ),
+            "scoring_version": row.get("scoring_version") or 1,
+            "scoringVersion": row.get("scoring_version") or 1,
+            "is_pinned": bool(row.get("is_pinned") or row.get("starred")),
+            "isPinned": bool(row.get("is_pinned") or row.get("starred")),
+            "user_label": row.get("user_label"),
+            "userLabel": row.get("user_label"),
+            "expires_at": row.get("expires_at"),
+            "expiresAt": row.get("expires_at")
         }
+
+    def pin_clip(self, event_id: str, is_pinned: bool = True) -> bool:
+        """Pins or unpins a clip, protecting it from auto-delete."""
+        val = 1 if is_pinned else 0
+        sql = "UPDATE events SET is_pinned = ?, starred = ? WHERE event_group_id = ?"
+        self.writer.queue.put((sql, (val, val, event_id), None))
+        return True
+
+    def set_user_label(self, event_id: str, label: str) -> bool:
+        """Sets user ground truth feedback label ('alert', 'review', 'low', 'false_alarm', 'missed_alert')."""
+        sql = "UPDATE events SET user_label = ? WHERE event_group_id = ?"
+        self.writer.queue.put((sql, (label, event_id), None))
+        return True
+
+    def get_tier_histogram(self, camera_id: Optional[str] = None) -> Dict[str, Any]:
+        """Calculates tier distribution count and percentage per camera or globally."""
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            if camera_id and camera_id.lower() != "all":
+                cursor.execute(
+                    "SELECT tier, COUNT(*) FROM events WHERE camera_id = ? AND status != 'deleted' GROUP BY tier",
+                    (camera_id,)
+                )
+            else:
+                cursor.execute(
+                    "SELECT tier, COUNT(*) FROM events WHERE status != 'deleted' GROUP BY tier"
+                )
+            rows = cursor.fetchall()
+            hist = {"alert": 0, "review": 0, "low": 0}
+            total = 0
+            for r in rows:
+                t = str(r[0]).lower() if r[0] else "low"
+                cnt = int(r[1])
+                hist[t] = hist.get(t, 0) + cnt
+                total += cnt
+
+            pct = {
+                t: round((cnt / total * 100.0), 1) if total > 0 else 0.0
+                for t, cnt in hist.items()
+            }
+            return {
+                "total": total,
+                "counts": hist,
+                "percentages": pct
+            }
+        finally:
+            conn.close()
 
     def query_clips(
         self,

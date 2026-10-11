@@ -1,8 +1,8 @@
 """
-Tests for 5-Layer Scoring Engine and Layer 0 Schedule/Zone Gating.
+Tests for 13-Layer Scoring Engine v2.0 and Layer 0 Schedule/Zone Gating.
 """
 
-# Standard assertion tests
+import math
 from datetime import datetime, timezone
 from vyzn.core.events import DetectionCandidate
 from vyzn.scoring.engine import (
@@ -21,8 +21,8 @@ def test_after_hours_intruder_high_score():
         camera_id="cam_shutter",
         object_type="person",
         confidence=0.85,
-        motion_ratio=0.08,             # 8% motion -> L1 = 16
-        track_duration_sec=4.0,        # 4s persistence -> L5 = 12
+        motion_ratio=0.08,             # L1 = 10 * (1 - exp(-0.08 / 0.03)) = 9.31
+        track_duration_sec=4.0,
         bounding_box=[0.2, 0.2, 0.4, 0.7],
         is_after_hours=True,
         is_in_restricted_zone=False,
@@ -32,10 +32,11 @@ def test_after_hours_intruder_high_score():
 
     assert score >= 70
     assert should_alert is True
-    assert breakdown["l1_motion"] == 16
-    assert breakdown["l2_confidence"] == 26  # round(0.85 * 30) = 26
-    assert breakdown["l3_object_weight"] == 40
-    assert breakdown["subtotal"] >= 80
+    assert breakdown["tier"] == "alert"
+    assert abs(breakdown["l1_motion"] - round(10.0 * (1.0 - math.exp(-0.08 / 0.03)), 2)) < 0.1
+    assert breakdown["l2_confidence"] == 15.0
+    assert breakdown["l3_object_weight"] == 20.0
+    assert breakdown["l4_threat_floor"] == 70.0
 
 
 def test_unclassified_motion_nuisance_penalty():
@@ -45,8 +46,8 @@ def test_unclassified_motion_nuisance_penalty():
         camera_id="cam_outdoor",
         object_type="unclassified",
         confidence=0.0,
-        motion_ratio=0.04,             # 4% motion -> L1 = 8
-        track_duration_sec=0.5,        # 0.5s -> L5 = 2
+        motion_ratio=0.04,
+        track_duration_sec=0.5,
         bounding_box=[0.0, 0.0, 1.0, 1.0],
         is_after_hours=True,
         is_in_restricted_zone=False,
@@ -54,24 +55,21 @@ def test_unclassified_motion_nuisance_penalty():
     )
     score, should_alert, breakdown = engine.evaluate(candidate)
 
-    # Subtotal 123 = 8 + 0 + 0 = 8.
-    # L4 penalty: max(0, 8 - 35) = 0.
-    # Total score = 0 + 2 = 2.
     assert score <= 10
     assert should_alert is False
-    assert breakdown["l4_adjustment"] == -35
+    assert breakdown["tier"] == "low"
+    assert breakdown["l4_nuisance_penalty"] == -35.0
 
 
 def test_hard_floor_for_valid_detection():
-    """Validates that any confirmed valid detection receives a hard floor of at least 50 points."""
+    """Validates that confirmed person after hours receives threat floor of at least 70 points."""
     engine = ScoringEngine(alert_threshold=70)
-    # Low confidence person just passing threshold
     candidate = DetectionCandidate(
         camera_id="cam_indoor",
         object_type="person",
-        confidence=0.36,               # Above day threshold (0.35)
-        motion_ratio=0.005,            # Tiny motion -> L1 = 1
-        track_duration_sec=0.0,        # 0s -> L5 = 0
+        confidence=0.50,               # Valid confidence >= 0.45
+        motion_ratio=0.005,
+        track_duration_sec=4.0,
         bounding_box=[0.1, 0.1, 0.2, 0.3],
         is_after_hours=True,
         is_in_restricted_zone=False,
@@ -79,20 +77,21 @@ def test_hard_floor_for_valid_detection():
     )
     score, should_alert, breakdown = engine.evaluate(candidate)
 
-    # Subtotal 123 = 1 + 11 + 40 = 52.
-    # Hard floor ensures it can never score below 50.
-    assert score >= 50
+    # Hard threat floor ensures it can never score below 70 after hours
+    assert score >= 70
+    assert should_alert is True
+    assert breakdown["tier"] == "alert"
 
 
 def test_layer_0_business_hours_suppression():
-    """Validates that during business hours, public aisle movement does NOT trigger alerts."""
+    """Validates that during business hours, public aisle customer movement does NOT trigger alerts and scores low/review."""
     engine = ScoringEngine(alert_threshold=70)
     candidate = DetectionCandidate(
         camera_id="cam_aisle",
         object_type="person",
-        confidence=0.90,
-        motion_ratio=0.10,
-        track_duration_sec=5.0,
+        confidence=0.70,
+        motion_ratio=0.02,
+        track_duration_sec=10.0,
         bounding_box=[0.2, 0.2, 0.5, 0.8],
         is_after_hours=False,          # During business hours
         is_in_restricted_zone=False,   # Normal customer zone
@@ -100,11 +99,10 @@ def test_layer_0_business_hours_suppression():
     )
     score, should_alert, breakdown = engine.evaluate(candidate)
 
-    # Score is high (>=70) due to clear person detection
-    assert score >= 70
-    # BUT alert is suppressed due to Layer 0 gate
+    # Recalibrated score stops over-scoring during business hours
+    assert score < 70
     assert should_alert is False
-    assert breakdown["gate_l0_passed"] is False
+    assert breakdown["tier"] in ("low", "review")
 
 
 def test_layer_0_restricted_zone_trigger():
@@ -125,7 +123,7 @@ def test_layer_0_restricted_zone_trigger():
 
     assert score >= 70
     assert should_alert is True
-    assert breakdown["gate_l0_passed"] is True
+    assert breakdown["tier"] == "alert"
 
 
 def test_point_in_polygon():

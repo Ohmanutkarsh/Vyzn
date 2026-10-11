@@ -196,10 +196,26 @@
 
           <div class="settings-row">
             <div>
+              <div class="settings-label">Society / Premises</div>
+              <div class="settings-sublabel">Registered society or premises name</div>
+            </div>
+            <div class="settings-value" id="val-user-business">—</div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Premises Type</div>
+              <div class="settings-sublabel">Property categorization</div>
+            </div>
+            <div class="settings-value" id="val-user-business-type">Housing Society</div>
+          </div>
+
+          <div class="settings-row">
+            <div>
               <div class="settings-label">Access Role</div>
               <div class="settings-sublabel">Permissions on this edge system</div>
             </div>
-            <div class="settings-value" id="val-user-role">Shop Owner</div>
+            <div class="settings-value" id="val-user-role">Society Admin / Premises Manager</div>
           </div>
 
           <div class="settings-row">
@@ -237,9 +253,103 @@
             </div>
             <div id="phone-feedback" style="font-size: 12px; margin-top: 6px; display: none;"></div>
           </div>
+
+          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+            <div>
+              <div style="font-size: 13px; font-weight: 500; color: var(--text-1);">Prefer Telegram Alerts?</div>
+              <div style="font-size: 12px; color: var(--text-3);">Get real-time CCTV alerts & screenshots without SMS limits.</div>
+            </div>
+            <button type="button" class="btn btn-secondary" id="btn-phone-card-connect-tg" style="display: inline-flex; align-items: center; gap: 6px;">
+              <span>✈️</span> Connect Telegram
+            </button>
+          </div>
         </section>
 
-        <!-- 3. Appearance & Theme -->
+        <!-- 3. Telegram Security Alerts Integration -->
+        <section class="settings-card" aria-labelledby="card-telegram-title">
+          <div class="settings-card-header">
+            <h3 class="settings-card-title" id="card-telegram-title">
+              <span>✈️</span> Telegram Security Alerts
+            </h3>
+            <span class="settings-badge" id="tg-status-badge">Checking…</span>
+          </div>
+
+          <p style="font-size: 13px; color: var(--text-2); margin: 0 0 16px 0; line-height: 1.5;">
+            Receive instant CCTV threat notifications, screenshot evidence cards, and interactive triage buttons ([⭐ Star Clip] / [❌ Not an issue]) directly on Telegram without SMS delays.
+          </p>
+
+          <!-- State: Disconnected -->
+          <div id="tg-disconnected-view" style="display: none;">
+            <div style="background: var(--bg-2); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 16px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+              <div>
+                <div style="font-size: 14px; font-weight: 500; color: var(--text-1);">Connect VYZN Security Bot</div>
+                <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Official bot: <strong>@Vyzn_security_bot</strong></div>
+              </div>
+              <button type="button" class="btn btn-primary" id="btn-connect-telegram">
+                Connect VYZN Telegram
+              </button>
+            </div>
+
+            <!-- Deep Link & Instructions Drawer -->
+            <div id="tg-connect-drawer" style="display: none; background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 16px; margin-top: 12px;">
+              <div style="font-size: 13px; font-weight: 600; color: var(--text-1); margin-bottom: 8px;">Steps to complete connection:</div>
+              <ol style="font-size: 13px; color: var(--text-2); margin: 0 0 14px 18px; padding: 0; line-height: 1.6;">
+                <li>Click the button below to open <strong>@Vyzn_security_bot</strong> in Telegram.</li>
+                <li>Tap <strong>Start</strong> in Telegram to link your account.</li>
+                <li>This card will automatically update once connected!</li>
+              </ol>
+              <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <a id="tg-open-deep-link" href="#" target="_blank" rel="noopener" class="btn btn-primary" style="text-decoration: none;">
+                  ✈️ Open Telegram Bot
+                </a>
+                <span style="font-size: 12px; color: var(--text-3);" id="tg-polling-indicator">Waiting for Telegram /start…</span>
+                <button type="button" id="tg-test-simulate-btn" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">Simulate Start (Test)</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- State: Connected -->
+          <div id="tg-connected-view" style="display: none;">
+            <div class="settings-row">
+              <div>
+                <div class="settings-label">Connected Telegram Account</div>
+                <div class="settings-sublabel">Receives real-time camera screenshots</div>
+              </div>
+              <div class="settings-value" id="val-tg-username">@username</div>
+            </div>
+
+            <div class="settings-row">
+              <div>
+                <div class="settings-label">CCTV Threat Notifications</div>
+                <div class="settings-sublabel" id="lbl-tg-alert-sublabel">Real-time alerts and screenshots are active</div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <button type="button" class="btn btn-secondary" id="btn-toggle-tg-alerts" style="min-width: 110px;">
+                  Mute Alerts
+                </button>
+              </div>
+            </div>
+
+            <div class="settings-row" style="padding-top: 14px;">
+              <div>
+                <div class="settings-label">Actions & Testing</div>
+                <div class="settings-sublabel">Verify delivery or unlink your Telegram account</div>
+              </div>
+              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary" id="btn-test-tg-alert">
+                  Send Test Alert
+                </button>
+                <button type="button" class="btn btn-secondary" id="btn-disconnect-telegram" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3);">
+                  Disconnect
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div id="tg-feedback" style="font-size: 12px; margin-top: 10px; display: none;"></div>
+        </section>
+
+        <!-- 4. Appearance & Theme -->
         <section class="settings-card" aria-labelledby="card-theme-title">
           <div class="settings-card-header">
             <h3 class="settings-card-title" id="card-theme-title">

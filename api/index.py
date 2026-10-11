@@ -1,12 +1,14 @@
 """
-Vercel Serverless Entry Point for VYZN Netra Platform.
-Enables cloud hosting of VYZN Surveillance Dashboard and Mobile Clip Viewer.
+Vercel Serverless Entry Point for VYZN Platform.
+Enables cloud hosting of VYZN Surveillance Dashboard, Society Onboarding,
+Telegram Bot Linking, Camera Management, and Clip Viewer.
 """
 
 import os
 import json
 import time
 import mimetypes
+import secrets
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -14,7 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="VYZN Netra Serverless Cloud Console", version="2.0.0")
+app = FastAPI(title="VYZN Cloud Serverless Console", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -26,280 +28,382 @@ app.add_middleware(
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 
-# Demo events for cloud serverless demo
-DEMO_EVENTS = [
+# ---------------------------------------------------------------------------
+# In-Memory State for Cloud Serverless Demo Sessions
+# ---------------------------------------------------------------------------
+CURRENT_USER: Dict[str, Any] = {
+    "id": "usr_primary_cloud",
+    "email": "dirtbike000000@gmail.com",
+    "full_name": "Society Administrator",
+    "business_name": "Asara Dnyantirtha CHS",
+    "business_type": "society",
+    "role": "shopkeeper",
+    "phone_e164": "+919876543210",
+    "phone_verified": True,
+    "security_pin": "202600",
+    "telegram_status": "not_linked",
+    "telegram_chat_id": None,
+    "telegram_username": None,
+    "telegram_alerts_enabled": True,
+    "telegram_linked_at_ms": None,
+}
+
+CAMERAS_STORE: List[Dict[str, Any]] = [
     {
-        "event_group_id": "ev_vault_breach_01",
-        "camera_id": "cam_cash_counter",
-        "start_time": "2026-09-12T14:15:22Z",
-        "duration_sec": 14.5,
-        "object_type": "person",
-        "confidence": 0.94,
-        "score": 92,
-        "dominant_color": "red",
-        "zone_name": "restricted_vault",
-        "status": "raw",
-        "starred": False,
-        "motion_points_count": 28
+        "id": "cam_gate",
+        "camera_id": "cam_gate",
+        "name": "Main Gate / Security",
+        "status": "online",
+        "rtsp_url": "sim://gate",
+        "target_fps": 4.0,
+        "is_night_ir": False,
+        "snapshot_url": "/api/cameras/cam_gate/snapshot.jpg",
+        "stream_url": "/api/cameras/cam_gate/mjpeg",
+        "area_count": 2,
+        "ignored_moments_count": 48,
+        "areas": [
+            {
+                "id": "area_gate_1",
+                "camera_id": "cam_gate",
+                "name": "Main gate security",
+                "polygon": [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]],
+                "response": "alert",
+                "min_stay_seconds": 0,
+                "schedule": "always"
+            },
+            {
+                "id": "area_gate_2",
+                "camera_id": "cam_gate",
+                "name": "Vehicle entry/exit",
+                "polygon": [[0.2, 0.4], [0.8, 0.4], [0.8, 0.95], [0.2, 0.95]],
+                "response": "alert",
+                "min_stay_seconds": 10,
+                "schedule": "always"
+            }
+        ]
     },
     {
-        "event_group_id": "ev_shutter_night_02",
-        "camera_id": "cam_shutter_night",
-        "start_time": "2026-09-12T13:42:10Z",
-        "duration_sec": 11.0,
-        "object_type": "vehicle",
-        "confidence": 0.89,
-        "score": 78,
-        "dominant_color": "black",
-        "zone_name": "rear_shutter",
-        "status": "raw",
-        "starred": True,
-        "motion_points_count": 19
-    },
-    {
-        "event_group_id": "ev_corridor_walk_03",
-        "camera_id": "cam_corridor",
-        "start_time": "2026-09-12T12:05:44Z",
-        "duration_sec": 9.2,
-        "object_type": "person",
-        "confidence": 0.85,
-        "score": 42,
-        "dominant_color": "blue",
-        "zone_name": "main_corridor",
-        "status": "raw",
-        "starred": False,
-        "motion_points_count": 14
+        "id": "cam_lobby",
+        "camera_id": "cam_lobby",
+        "name": "Building Lobby & Lift",
+        "status": "online",
+        "rtsp_url": "sim://lobby",
+        "target_fps": 4.0,
+        "is_night_ir": False,
+        "snapshot_url": "/api/cameras/cam_lobby/snapshot.jpg",
+        "stream_url": "/api/cameras/cam_lobby/mjpeg",
+        "area_count": 1,
+        "ignored_moments_count": 14,
+        "areas": [
+            {
+                "id": "area_lobby_1",
+                "camera_id": "cam_lobby",
+                "name": "Lobby entrance",
+                "polygon": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                "response": "review",
+                "min_stay_seconds": 0,
+                "schedule": "outside_shop_hours"
+            }
+        ]
     }
 ]
 
-DRAFTS_STORE = {}
-
-@app.get("/api/status")
-def get_system_status():
-    return {
-        "system": {
-            "cpu_usage_pct": 18.5,
-            "ram_used_mb": 420.0,
-            "disk_free_gb": 184.2,
-            "disk_free_pct": 72.0,
-            "platform": "Vercel Serverless Cloud Edge"
-        },
-        "pipeline": {
-            "fps": 4.0,
-            "far_pct": 0.0,
-            "active_cameras": 3,
-            "threat_index": 0
-        },
-        "offline_buffer_count": 0
+CLIPS_STORE: List[Dict[str, Any]] = [
+    {
+        "clip_number": 1,
+        "id": "clip_001",
+        "camera_id": "cam_gate",
+        "camera_name": "Main Gate / Security",
+        "tier": "alert",
+        "final_score": 88,
+        "raw_score": 88.4,
+        "summary": "Vehicle entry / gate approach",
+        "dominant_color": "black",
+        "zone_name": "Main gate security",
+        "object_type": "vehicle",
+        "confidence": 0.94,
+        "created_at_ms": int((time.time() - 900) * 1000),
+        "expires_at_ms": int((time.time() + 72 * 3600) * 1000),
+        "user_triage": "unreviewed",
+        "sha256": "4a7d1ed414474e4033ac29ccb8653d9b",
+        "score_breakdown": {
+            "scoring_version": "2.0",
+            "tier": "alert",
+            "final_score": 88
+        }
+    },
+    {
+        "clip_number": 2,
+        "id": "clip_002",
+        "camera_id": "cam_lobby",
+        "camera_name": "Building Lobby & Lift",
+        "tier": "review",
+        "final_score": 46,
+        "raw_score": 46.2,
+        "summary": "Person in Building lobby",
+        "dominant_color": "blue",
+        "zone_name": "Lobby entrance",
+        "object_type": "person",
+        "confidence": 0.89,
+        "created_at_ms": int((time.time() - 3600) * 1000),
+        "expires_at_ms": int((time.time() + 72 * 3600) * 1000),
+        "user_triage": "unreviewed",
+        "sha256": "b10a8db164e0754105b7a99be72e3fe5",
+        "score_breakdown": {
+            "scoring_version": "2.0",
+            "tier": "review",
+            "final_score": 46
+        }
     }
+]
 
-@app.get("/api/cameras")
-def list_cameras():
-    return [
-        {"camera_id": "cam_corridor", "name": "Main Glass Entrance Door", "status": "ONLINE", "target_fps": 4.0},
-        {"camera_id": "cam_cash_counter", "name": "Cash Counter and POS Desk", "status": "ONLINE", "target_fps": 4.0},
-        {"camera_id": "cam_shutter_night", "name": "Rear Shutter and Vault Area", "status": "ONLINE", "target_fps": 4.0}
-    ]
-
-@app.get("/api/events")
-def list_events(limit: int = 50, location_id: Optional[str] = None):
-    return DEMO_EVENTS[:limit]
-
-@app.get("/api/v1/locations")
-def list_locations():
-    return [
-        {"location_id": "loc_primary", "name": "Verma Electronics and Hardware", "address": "Sector 18, Noida"},
-        {"location_id": "loc_sec14", "name": "South Delhi Kirana Hub", "address": "Main Market, New Delhi"}
-    ]
-
-@app.get("/api/v1/forensics/search")
-def forensic_search(
-    q: Optional[str] = None,
-    object_type: Optional[str] = None,
-    color: Optional[str] = None,
-    zone: Optional[str] = None,
-    min_score: int = 0,
-    limit: int = 50
-):
-    matches = list(DEMO_EVENTS)
-    if object_type and object_type != "all":
-        matches = [e for e in matches if e["object_type"] == object_type]
-    if color and color != "all":
-        matches = [e for e in matches if e["dominant_color"] == color]
-    if zone and zone != "all":
-        matches = [e for e in matches if e["zone_name"] == zone]
-    if min_score > 0:
-        matches = [e for e in matches if e["score"] >= min_score]
-    if q:
-        ql = q.lower()
-        matches = [e for e in matches if ql in e["camera_id"].lower() or ql in e["zone_name"].lower() or ql in e["object_type"].lower()]
-    return {
-        "status": "success",
-        "count": len(matches),
-        "events": matches[:limit],
-        "results": matches[:limit]
-    }
-
-@app.get("/api/v1/alerts/telegram/status")
-def get_telegram_status():
-    return {
-        "configured": True,
-        "poller_active": True,
-        "chat_id_masked": "98765****",
-        "raw_chat_id": "987654321",
-        "channel_type": "telegram"
-    }
-
-@app.post("/api/v1/alerts/telegram/test-ping")
-def telegram_ping():
-    return {"ok": True, "bot_username": "VyznAlertBot", "latency_ms": 42}
-
-
+TELEGRAM_TOKENS: Dict[str, Dict[str, Any]] = {}
 
 # ---------------------------------------------------------------------------
-# Trial Leads Capture & Telemetry
+# Request Models
 # ---------------------------------------------------------------------------
-TRIAL_LEADS: List[Dict[str, Any]] = []
-
-class TrialLeadRequest(BaseModel):
-    full_name: str
-    store_name: str
-    city: str
-    phone: str
-    cameras: str
-    concern: str
-
 class LoginRequest(BaseModel):
     email: str
     password: str
+    remember: Optional[bool] = False
 
-class RegisterRequest(BaseModel):
+class SignupRequest(BaseModel):
     email: str
     password: str
     full_name: str
-    role: str = "shopkeeper"
+    business_name: str
+    business_type: Optional[str] = "society"
+    phone_e164: Optional[str] = None
 
-@app.post("/api/v1/leads/trial")
-def submit_trial_lead(lead: TrialLeadRequest):
-    record = lead.model_dump()
-    record["created_at"] = time.time()
-    record["lead_id"] = f"lead_{int(time.time())}"
-    TRIAL_LEADS.append(record)
-    return {
-        "status": "success",
-        "instance_id": f"VYZN-TRIAL-IN-{int(time.time()) % 10000:04d}",
-        "message": "Trial provisioned successfully! Credentials dispatched."
-    }
+class EmailStartRequest(BaseModel):
+    email: str
 
-@app.post("/api/v1/auth/login")
-def login(req: LoginRequest):
+class EmailVerifyRequest(BaseModel):
+    email: str
+    code: str
+
+class PhoneSetupRequest(BaseModel):
+    phoneE164: str
+
+class PhoneUpdateRequest(BaseModel):
+    phone: str
+
+class SecurityPinUpdateRequest(BaseModel):
+    current_pin: Optional[str] = None
+    new_pin: str
+
+class TelegramToggleAlertsRequest(BaseModel):
+    enabled: bool
+
+class CameraCreateRequest(BaseModel):
+    name: str
+    rtsp_url: str
+    target_fps: Optional[float] = 15.0
+
+class WatchAreasUpdateRequest(BaseModel):
+    areas: List[Dict[str, Any]]
+
+# ---------------------------------------------------------------------------
+# Auth Endpoints
+# ---------------------------------------------------------------------------
+@app.post("/api/auth/login")
+def api_auth_login(req: LoginRequest, response: Response):
     email = req.email.strip().lower()
-    password = req.password
+    session_token = f"sess_{secrets.token_hex(16)}"
+    response.set_cookie(key="vyzn_session", value=session_token, httponly=True, path="/")
+    response.set_cookie(key="vyzn_access_token", value=session_token, httponly=False, path="/")
     
-    # Attempt Supabase or local auth via the cloud module
-    try:
-        from vyzn.supabase_client import sign_in_with_email
-        result = sign_in_with_email(email, password)
-        return result
-    except HTTPException:
-        raise
-    except ImportError:
-        # vyzn module not available in serverless env — use minimal local auth
-        LOCAL_DEMO_USERS = {
-            "admin@vyzn.ai": {"password": "admin123", "role": "admin", "full_name": "Fleet Admin"},
-            "installer@safenet.in": {"password": "safenet123", "role": "installer", "full_name": "SafeNet Installer"},
-            "shopkeeper@kirana.in": {"password": "kirana123", "role": "shopkeeper", "full_name": "Kirana Store Owner"},
-            "owner@vyzn.ai": {"password": "owner123", "role": "resident", "full_name": "Premises Owner"},
-        }
-        if email not in LOCAL_DEMO_USERS:
-            raise HTTPException(status_code=404, detail="No account found with this email address.")
-        user = LOCAL_DEMO_USERS[email]
-        if user["password"] != password:
-            raise HTTPException(status_code=401, detail="Incorrect password.")
-        import jwt as pyjwt
-        import time as _time
-        token = pyjwt.encode(
-            {"sub": email, "email": email, "role": user["role"],
-             "app_metadata": {"role": user["role"]},
-             "user_metadata": {"full_name": user["full_name"]},
-             "iat": int(_time.time()), "exp": int(_time.time()) + 86400},
-            "vyzn_default_supabase_jwt_secret_2026", algorithm="HS256"
-        )
-        return {
-            "status": "success",
-            "access_token": token,
-            "user": {"email": email, "role": user["role"], "full_name": user["full_name"]}
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Authentication service error.")
-
-@app.get("/api/v1/auth/me")
-def get_current_user(request: Request):
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    token = auth_header[7:].strip()
-    try:
-        import jwt as pyjwt
-        payload = pyjwt.decode(
-            token,
-            "vyzn_default_supabase_jwt_secret_2026",
-            algorithms=["HS256"],
-            options={"verify_aud": False}
-        )
-        return {
-            "user_id": payload.get("sub"),
-            "email": payload.get("email"),
-            "role": payload.get("app_metadata", {}).get("role", "shopkeeper"),
-            "full_name": payload.get("user_metadata", {}).get("full_name", "")
-        }
-    except Exception:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-@app.post("/api/v1/auth/logout")
-def logout():
-    return {"status": "ok", "message": "Signed out successfully."}
-
-@app.get("/api/system/metrics")
-def get_system_metrics():
+    CURRENT_USER["email"] = email
     return {
-        "system": {
-            "cpu_usage_pct": 18.5,
-            "ram_used_mb": 420.0,
-            "disk_free_gb": 184.2,
-            "disk_free_pct": 72.0,
-            "platform": "Vercel Serverless Cloud Edge"
-        },
-        "pipeline": {
-            "fps": 4.0,
-            "far_pct": 0.0,
-            "active_cameras": 3,
-            "threat_index": 0
-        },
-        "offline_buffer_count": 0
+        "ok": True,
+        "redirect": "/overview",
+        "user": {
+            "id": CURRENT_USER["id"],
+            "email": CURRENT_USER["email"],
+            "full_name": CURRENT_USER["full_name"],
+            "business_name": CURRENT_USER["business_name"],
+            "business_type": CURRENT_USER["business_type"],
+            "role": CURRENT_USER["role"]
+        }
     }
 
-@app.post("/api/v1/cameras/adopt")
-def adopt_camera(payload: Dict[str, Any]):
-    import hashlib as _hashlib
-    cam_url = payload.get("camera_url", "")
-    cam_name = payload.get("camera_name", "New Camera")
-    cam_type = payload.get("camera_type", "rtsp")
-    cam_id = "cam_" + _hashlib.md5(cam_url.encode()).hexdigest()[:8]
+@app.post("/api/auth/signup")
+def api_auth_signup(req: SignupRequest, response: Response):
+    email = req.email.strip().lower()
+    CURRENT_USER["email"] = email
+    CURRENT_USER["full_name"] = req.full_name.strip()
+    CURRENT_USER["business_name"] = req.business_name.strip()
+    CURRENT_USER["business_type"] = (req.business_type or "society").strip()
+    if req.phone_e164:
+        CURRENT_USER["phone_e164"] = req.phone_e164.strip()
+
+    session_token = f"sess_{secrets.token_hex(16)}"
+    response.set_cookie(key="vyzn_session", value=session_token, httponly=True, path="/")
+    response.set_cookie(key="vyzn_access_token", value=session_token, httponly=False, path="/")
+
     return {
-        "status": "success",
-        "camera_id": cam_id,
-        "name": cam_name,
-        "camera_url": cam_url,
-        "camera_type": cam_type,
-        "message": f"Camera '{cam_name}' registered successfully."
+        "ok": True,
+        "redirect": "/overview",
+        "user": {
+            "id": CURRENT_USER["id"],
+            "email": CURRENT_USER["email"],
+            "full_name": CURRENT_USER["full_name"],
+            "business_name": CURRENT_USER["business_name"],
+            "business_type": CURRENT_USER["business_type"],
+            "role": CURRENT_USER["role"]
+        }
     }
 
+@app.post("/api/auth/email/start")
+def api_email_start(req: EmailStartRequest):
+    return {"ok": True, "message": "Verification code dispatched"}
+
+@app.post("/api/auth/email/verify")
+def api_email_verify(req: EmailVerifyRequest, response: Response):
+    session_token = f"sess_{secrets.token_hex(16)}"
+    response.set_cookie(key="vyzn_session", value=session_token, httponly=True, path="/")
+    return {"ok": True, "redirect": "/overview", "user": CURRENT_USER}
+
+@app.post("/api/auth/signout")
+def api_auth_signout(response: Response):
+    response.delete_cookie(key="vyzn_session", path="/")
+    response.delete_cookie(key="vyzn_access_token", path="/")
+    return {"ok": True}
+
 # ---------------------------------------------------------------------------
-# Camera Demo MJPEG Stream & Zones Mock Handlers
+# Current User & Profile
 # ---------------------------------------------------------------------------
+@app.get("/api/me")
+def api_get_me():
+    return CURRENT_USER
+
+@app.post("/api/me/phone")
+def api_set_me_phone(req: PhoneSetupRequest):
+    CURRENT_USER["phone_e164"] = req.phoneE164.strip()
+    CURRENT_USER["phone_verified"] = True
+    return {"ok": True, "phone_e164": CURRENT_USER["phone_e164"]}
+
+@app.get("/api/settings/profile")
+def get_user_profile():
+    return {
+        **CURRENT_USER,
+        "security_pin_set": bool(CURRENT_USER.get("security_pin")),
+        "disk_free_pct": 74.3,
+        "retention_hours": 72
+    }
+
+@app.post("/api/settings/phone")
+def update_phone_number(payload: PhoneUpdateRequest):
+    CURRENT_USER["phone_e164"] = payload.phone.strip()
+    CURRENT_USER["phone_verified"] = True
+    return {"ok": True, "phone_e164": CURRENT_USER["phone_e164"]}
+
+@app.post("/api/settings/security-pin")
+def update_security_pin(payload: SecurityPinUpdateRequest):
+    CURRENT_USER["security_pin"] = payload.new_pin.strip()
+    return {"ok": True}
+
+# ---------------------------------------------------------------------------
+# Telegram Integration
+# ---------------------------------------------------------------------------
+@app.get("/api/telegram/config")
+def api_telegram_config():
+    bot = os.environ.get("TELEGRAM_BOT_USERNAME") or "Vyzn_security_bot"
+    return {"bot_username": bot, "bot_configured": True}
+
+@app.get("/api/telegram/link")
+def api_telegram_link():
+    token = f"tg_{secrets.token_urlsafe(16)}"
+    bot = os.environ.get("TELEGRAM_BOT_USERNAME") or "Vyzn_security_bot"
+    TELEGRAM_TOKENS[token] = {
+        "user_id": CURRENT_USER["id"],
+        "expires_at": time.time() + 900
+    }
+    return {
+        "ok": True,
+        "token": token,
+        "bot_username": bot,
+        "link_url": f"https://t.me/{bot}?start={token}"
+    }
+
+@app.get("/api/telegram/status")
+def api_telegram_status():
+    return {
+        "connected": CURRENT_USER.get("telegram_status") == "connected",
+        "chat_id": CURRENT_USER.get("telegram_chat_id"),
+        "username": CURRENT_USER.get("telegram_username"),
+        "alerts_enabled": bool(CURRENT_USER.get("telegram_alerts_enabled", True)),
+        "status": CURRENT_USER.get("telegram_status", "not_linked")
+    }
+
+@app.post("/api/telegram/disconnect")
+def api_telegram_disconnect():
+    CURRENT_USER["telegram_status"] = "not_linked"
+    CURRENT_USER["telegram_chat_id"] = None
+    CURRENT_USER["telegram_username"] = None
+    return {"ok": True, "status": "not_linked"}
+
+@app.post("/api/telegram/toggle")
+def api_telegram_toggle(req: TelegramToggleAlertsRequest):
+    CURRENT_USER["telegram_alerts_enabled"] = req.enabled
+    return {"ok": True, "alerts_enabled": req.enabled}
+
+# ---------------------------------------------------------------------------
+# Cameras & Watch Areas
+# ---------------------------------------------------------------------------
+@app.get("/api/cameras")
+def list_cameras():
+    return CAMERAS_STORE
+
+@app.post("/api/cameras")
+def add_camera(payload: CameraCreateRequest):
+    new_id = f"cam_{int(time.time() * 1000) % 100000}"
+    cam = {
+        "id": new_id,
+        "camera_id": new_id,
+        "name": payload.name,
+        "status": "online",
+        "rtsp_url": payload.rtsp_url,
+        "target_fps": payload.target_fps or 15.0,
+        "is_night_ir": False,
+        "snapshot_url": f"/api/cameras/{new_id}/snapshot.jpg",
+        "stream_url": f"/api/cameras/{new_id}/mjpeg",
+        "area_count": 0,
+        "ignored_moments_count": 0,
+        "areas": []
+    }
+    CAMERAS_STORE.append(cam)
+    return {"ok": True, "camera": cam}
+
+@app.delete("/api/cameras/{camera_id}")
+def delete_camera(camera_id: str):
+    global CAMERAS_STORE
+    CAMERAS_STORE = [c for c in CAMERAS_STORE if c.get("id") != camera_id and c.get("camera_id") != camera_id]
+    return {"ok": True}
+
+@app.get("/api/cameras/{camera_id}/areas")
+def get_camera_areas(camera_id: str):
+    for c in CAMERAS_STORE:
+        if c.get("id") == camera_id or c.get("camera_id") == camera_id:
+            return {"camera_id": camera_id, "areas": c.get("areas", [])}
+    return {"camera_id": camera_id, "areas": []}
+
+@app.post("/api/cameras/{camera_id}/areas")
+def save_camera_areas(camera_id: str, payload: WatchAreasUpdateRequest):
+    for c in CAMERAS_STORE:
+        if c.get("id") == camera_id or c.get("camera_id") == camera_id:
+            c["areas"] = payload.areas
+            c["area_count"] = len(payload.areas)
+            return {"ok": True, "areas": payload.areas}
+    return {"ok": True, "areas": payload.areas}
+
+@app.post("/api/cameras/{camera_id}/snapshot")
+def update_snapshot(camera_id: str):
+    return {"ok": True, "timestamp": time.time()}
+
+@app.get("/api/cameras/{camera_id}/snapshot.jpg")
 @app.get("/api/cameras/{camera_id}/mjpeg")
-def stream_demo_mjpeg(camera_id: str):
+def stream_camera_visual(camera_id: str):
     label = camera_id.replace("cam_", "").replace("_", " ").upper()
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
       <defs>
@@ -315,101 +419,117 @@ def stream_demo_mjpeg(camera_id: str):
       <line x1="320" y1="40" x2="320" y2="320" stroke="#1e293b" stroke-width="1"/>
       <circle cx="320" cy="180" r="4" fill="#0ea5e9"/>
       <text x="24" y="36" fill="#10b981" font-family="monospace" font-size="13" font-weight="bold">● LIVE: {label}</text>
-      <text x="24" y="58" fill="#64748b" font-family="monospace" font-size="11">YOLOv8 EDGE AI • ON-PREMISE • ZERO-BANDWIDTH CHOKE</text>
+      <text x="24" y="58" fill="#64748b" font-family="monospace" font-size="11">YOLOv8 EDGE AI • ZERO CLOUD BANDWIDTH COST</text>
       <rect x="220" y="110" width="160" height="175" stroke="#0ea5e9" stroke-width="2" stroke-dasharray="6 3" fill="rgba(14,165,233,0.06)"/>
-      <text x="225" y="102" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold">PERSON: 94.2% [CASHIER / PROPRIETOR]</text>
+      <text x="225" y="102" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold">PERSON: 95.4% [RESIDENT / VISITOR]</text>
       <text x="440" y="340" fill="#475569" font-family="monospace" font-size="10">SEC-65B CERTIFIED</text>
     </svg>'''
     return Response(content=svg, media_type="image/svg+xml")
 
-@app.get("/api/cameras/{camera_id}/zones")
-def get_demo_zones(camera_id: str):
-    return [
-        {
-            "zone_id": f"zone_{camera_id}_pos",
-            "name": "Cash Counter & POS Box",
-            "zone_type": "high_theft",
-            "points": [[0.25, 0.45], [0.65, 0.45], [0.65, 0.85], [0.25, 0.85]],
-            "schedule": "all_times"
+@app.get("/api/v1/cameras/discover")
+def discover_cameras():
+    return {
+        "status": "success",
+        "cameras": [
+            {"ip": "192.168.1.64", "port": 554, "vendor": "Hikvision NVR", "rtsp_url": "rtsp://192.168.1.64:554/ch1/main"},
+            {"ip": "192.168.1.65", "port": 554, "vendor": "CP Plus HD", "rtsp_url": "rtsp://192.168.1.65:554/live/ch0"}
+        ]
+    }
+
+@app.post("/api/v1/cameras/test-connection")
+def test_camera_connection(payload: Dict[str, Any]):
+    return {
+        "status": "online",
+        "success": True,
+        "message": "Connection test successful! Camera stream verified.",
+        "width": 1920,
+        "height": 1080,
+        "fps": 15.0
+    }
+
+# ---------------------------------------------------------------------------
+# Events, Clips & System Metrics
+# ---------------------------------------------------------------------------
+@app.get("/api/events")
+@app.get("/api/clips")
+def list_clips():
+    return CLIPS_STORE
+
+@app.post("/api/clips/{clip_number}/feedback")
+def submit_clip_feedback(clip_number: int, payload: Dict[str, Any]):
+    return {"ok": True, "clip_number": clip_number}
+
+@app.get("/api/clips/{clip_number}/evidence-pack")
+def get_evidence_pack(clip_number: int):
+    return Response(
+        content=b"VYZN_SEC65B_EVIDENCE_PACK_DUMMY_BINARY",
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=evidence_clip_{clip_number}.zip"}
+    )
+
+@app.get("/api/system/metrics")
+def get_system_metrics():
+    return {
+        "cpu_percent": 14.2,
+        "ram_percent": 48.6,
+        "ram_used_mb": 1024.0,
+        "disk_free_gb": 128.5,
+        "disk_used_pct": 74.3,
+        "active_cameras": len(CAMERAS_STORE),
+        "pipeline_fps": 4.0,
+        "unsynced_events": 0
+    }
+
+@app.get("/api/status")
+def get_status():
+    return {
+        "status": "online",
+        "system": {
+            "platform": "VYZN Multi-Tenant Cloud / Edge Node",
+            "active_cameras": len(CAMERAS_STORE)
         }
-    ]
+    }
 
 # ---------------------------------------------------------------------------
-# Static File Handlers (For Direct Serverless Fallback)
+# Fallback Static Page Routes
 # ---------------------------------------------------------------------------
-@app.get("/styles.css")
-def serve_root_styles():
-    for p in [WORKSPACE_ROOT / "public" / "styles.css", WORKSPACE_ROOT / "frontend" / "dashboard" / "styles.css"]:
-        if p.exists():
-            return Response(content=p.read_text(encoding="utf-8"), media_type="text/css")
-    raise HTTPException(status_code=404, detail="styles.css not found")
-
-@app.get("/app.js")
-def serve_root_js():
-    for p in [WORKSPACE_ROOT / "public" / "app.js", WORKSPACE_ROOT / "frontend" / "dashboard" / "app.js"]:
-        if p.exists():
-            return Response(content=p.read_text(encoding="utf-8"), media_type="application/javascript")
-    raise HTTPException(status_code=404, detail="app.js not found")
-
-@app.get("/static/{file_path:path}")
-def serve_static_file(file_path: str):
-    clean_path = file_path.lstrip("/")
-    candidates = [
-        WORKSPACE_ROOT / "public" / "static" / clean_path,
-        WORKSPACE_ROOT / "public" / clean_path,
-        WORKSPACE_ROOT / "frontend" / "dashboard" / clean_path,
-        WORKSPACE_ROOT / "vyzn_cloud" / "templates" / clean_path
-    ]
-    for c in candidates:
-        if c.exists() and c.is_file():
-            mime, _ = mimetypes.guess_type(str(c))
-            return Response(content=c.read_bytes(), media_type=mime or "application/octet-stream")
-    raise HTTPException(status_code=404, detail=f"Static file {file_path} not found")
+def _serve_file_or_fallback(rel_path: str) -> Response:
+    for base in [WORKSPACE_ROOT / "public", WORKSPACE_ROOT / "frontend" / "dashboard"]:
+        candidate = base / rel_path
+        if candidate.exists() and candidate.is_file():
+            mime, _ = mimetypes.guess_type(str(candidate))
+            return Response(content=candidate.read_bytes(), media_type=mime or "text/html")
+    return HTMLResponse(content=f"<h1>Page not found: {rel_path}</h1>", status_code=404)
 
 @app.get("/overview", response_class=HTMLResponse)
 def serve_overview():
-    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "overview.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Overview page not found</h1>")
+    return _serve_file_or_fallback("overview.html")
 
 @app.get("/cameras", response_class=HTMLResponse)
 def serve_cameras():
-    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "cameras.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Cameras page not found</h1>")
+    return _serve_file_or_fallback("cameras.html")
 
 @app.get("/cameras/new", response_class=HTMLResponse)
 def serve_add_camera():
-    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "add-camera.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Add Camera page not found</h1>")
+    return _serve_file_or_fallback("add-camera.html")
 
 @app.get("/areas", response_class=HTMLResponse)
 @app.get("/areas/{camera_id}", response_class=HTMLResponse)
 def serve_areas(camera_id: Optional[str] = None):
-    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "areas.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Areas page not found</h1>")
+    return _serve_file_or_fallback("areas.html")
 
 @app.get("/clips", response_class=HTMLResponse)
 @app.get("/clips/{clip_id}", response_class=HTMLResponse)
 def serve_clips(clip_id: Optional[str] = None):
-    p = WORKSPACE_ROOT / "frontend" / "dashboard" / "clips.html"
-    if p.exists():
-        return HTMLResponse(content=p.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>Clips page not found</h1>")
+    return _serve_file_or_fallback("clips.html")
+
+@app.get("/settings", response_class=HTMLResponse)
+def serve_settings():
+    return _serve_file_or_fallback("settings.html")
 
 @app.get("/login", response_class=HTMLResponse)
-@app.get("/login/code", response_class=HTMLResponse)
-@app.get("/setup/phone", response_class=HTMLResponse)
-@app.get("/setup/telegram", response_class=HTMLResponse)
+@app.get("/login/{path:path}", response_class=HTMLResponse)
+@app.get("/setup/{path:path}", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
-    index_file = WORKSPACE_ROOT / "frontend" / "dashboard" / "index.html"
-    if index_file.exists():
-        return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
-    return HTMLResponse(content="<h1>VYZN Netra</h1>")
+    return _serve_file_or_fallback("index.html")

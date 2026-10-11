@@ -21,15 +21,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY vyzn/ /app/vyzn/
 COPY frontend/ /app/frontend/
+COPY public/ /app/public/
+COPY static/ /app/static/
 COPY config/ /app/config/
 COPY run_edge.py /app/
 
 # Ensure storage directory exists
 RUN mkdir -p /data/clips
 
+ENV PORT=8000
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:8000/api/status || exit 1
+  CMD curl -f http://localhost:${PORT:-8000}/api/status || exit 1
 
-ENTRYPOINT ["python", "run_edge.py", "--simulate", "3", "--api", "--port", "8000"]
+ENTRYPOINT ["sh", "-c", "python run_edge.py --simulate 3 --api --port ${PORT:-8000}"]

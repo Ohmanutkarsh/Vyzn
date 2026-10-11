@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from vyzn.core.database import EventDatabase
+from vyzn.core.database import EventDatabase, hash_password, verify_password
 from vyzn.core.config import EdgeSettings, CameraConfig, WatchAreaConfig, ZonePolygon
 from vyzn.storage.evidence_pack import create_evidence_pack_zip
 from vyzn.alerts.telegram import (
@@ -34,7 +34,8 @@ from vyzn.alerts.telegram import (
     stop_telegram_poller,
     get_active_poller,
     test_telegram_connection,
-    send_telegram_threat_alert
+    send_telegram_threat_alert,
+    process_telegram_update
 )
 from vyzn.supabase_client import (
     sign_in_with_email,
@@ -175,10 +176,18 @@ def get_optional_user(request: Request) -> Optional[Dict[str, Any]]:
                     "id": user["id"],
                     "user_id": user["id"],
                     "email": user["email"],
+                    "full_name": user.get("full_name"),
+                    "business_name": user.get("business_name"),
+                    "business_type": user.get("business_type") or "society",
                     "role": user.get("role", "shopkeeper"),
                     "phone_e164": user.get("phone_e164"),
                     "phone_verified": bool(user.get("phone_verified")),
-                    "security_pin": user.get("security_pin", "202600")
+                    "security_pin": user.get("security_pin", "202600"),
+                    "telegram_status": user.get("telegram_status", "not_linked"),
+                    "telegram_chat_id": user.get("telegram_chat_id"),
+                    "telegram_username": user.get("telegram_username"),
+                    "telegram_alerts_enabled": bool(user.get("telegram_alerts_enabled", 1)),
+                    "telegram_linked_at_ms": user.get("telegram_linked_at_ms")
                 }
         except Exception:
             pass
@@ -203,10 +212,18 @@ def get_optional_user(request: Request) -> Optional[Dict[str, Any]]:
                 "id": user["id"],
                 "user_id": user["id"],
                 "email": user["email"],
+                "full_name": user.get("full_name"),
+                "business_name": user.get("business_name"),
+                "business_type": user.get("business_type") or "society",
                 "role": user.get("role", "shopkeeper"),
                 "phone_e164": user.get("phone_e164"),
                 "phone_verified": bool(user.get("phone_verified")),
-                "security_pin": user.get("security_pin", "202600")
+                "security_pin": user.get("security_pin", "202600"),
+                "telegram_status": user.get("telegram_status", "not_linked"),
+                "telegram_chat_id": user.get("telegram_chat_id"),
+                "telegram_username": user.get("telegram_username"),
+                "telegram_alerts_enabled": bool(user.get("telegram_alerts_enabled", 1)),
+                "telegram_linked_at_ms": user.get("telegram_linked_at_ms")
             }
     except Exception:
         pass
@@ -514,6 +531,41 @@ def delete_clip_endpoint(
     if not ok:
         raise HTTPException(status_code=404, detail="Clip not found")
     return {"ok": True, "status": "deleted", "clip_id": clip_id}
+
+
+@app.post("/api/clips/{clip_id}/pin")
+async def toggle_pin_clip(clip_id: str, payload: Optional[Dict[str, Any]] = None):
+    """Toggles or sets clip pinned state to exempt from 72h auto-delete."""
+    db = get_db()
+    clip = db.get_clip_by_id(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    pinned = payload.get("is_pinned", True) if payload else not bool(clip.get("is_pinned"))
+    db.pin_clip(clip_id, is_pinned=pinned)
+    updated = db.get_clip_by_id(clip_id)
+    await broadcast_sse_event("clip.updated", updated)
+    return {"ok": True, "clip_id": clip_id, "is_pinned": pinned, "clip": updated}
+
+
+@app.post("/api/clips/{clip_id}/label")
+async def label_clip_feedback(clip_id: str, payload: Dict[str, Any]):
+    """Sets user ground truth feedback label for calibration ('alert', 'review', 'low', 'false_alarm', 'missed_alert')."""
+    db = get_db()
+    label = payload.get("label", "").lower().strip()
+    valid_labels = {"alert", "review", "low", "false_alarm", "missed_alert"}
+    if label not in valid_labels:
+        raise HTTPException(status_code=400, detail=f"Invalid label. Must be one of {valid_labels}")
+    db.set_user_label(clip_id, label)
+    updated = db.get_clip_by_id(clip_id)
+    await broadcast_sse_event("clip.updated", updated)
+    return {"ok": True, "clip_id": clip_id, "user_label": label, "clip": updated}
+
+
+@app.get("/api/scoring/histogram")
+def get_scoring_tier_histogram(camera: Optional[str] = Query(None)):
+    """Returns tier distribution (counts and percentages) for scoring calibration."""
+    db = get_db()
+    return db.get_tier_histogram(camera_id=camera)
 
 
 @app.post("/api/clips/{clip_id}/telegram")
@@ -1631,6 +1683,10 @@ def create_camera(
 
     final_url = normalize_camera_stream_url(final_url)
     owner = user.get("email") if user else None
+    if not owner and _db_instance and hasattr(_db_instance, "get_all_users"):
+        all_u = _db_instance.get_all_users()
+        if all_u:
+            owner = all_u[0].get("email")
     loc_id = req.location_id or "loc_primary"
 
     new_cam = CameraConfig(
@@ -1753,7 +1809,25 @@ def list_cameras(
 
     if user and user.get("role") not in ("admin", "fleet_admin"):
         user_email = user.get("email")
-        cams = [c for c in cams if c.owner_email == user_email]
+        changed = False
+        for c in settings.cameras:
+            if not getattr(c, "owner_email", None):
+                c.owner_email = user_email
+                changed = True
+        if changed:
+            save_cameras_config(settings)
+        cams = [c for c in cams if getattr(c, "owner_email", None) in (None, "", user_email)]
+
+    # Auto-start capture stream for any configured camera not yet running
+    if _pipeline_instance and hasattr(_pipeline_instance, "capture_threads"):
+        existing_cids = {getattr(t.config, "camera_id", None) for t in _pipeline_instance.capture_threads if getattr(t, "config", None)}
+        for c in cams:
+            if c.camera_id not in existing_cids and getattr(c, "enabled", True):
+                try:
+                    _pipeline_instance.add_camera_stream(c)
+                except Exception as e:
+                    import logging
+                    logging.getLogger("vyzn.api").warning(f"Auto-starting capture stream for {c.camera_id} failed: {e}")
 
     live_status_map = {}
     if _pipeline_instance and hasattr(_pipeline_instance, "capture_threads"):
@@ -2050,10 +2124,13 @@ class PhoneVerifyRequest(BaseModel):
 
 class SimulateTelegramLinkRequest(BaseModel):
     token: str
-    phone: str
+    phone: Optional[str] = None
     chat_id: Optional[str] = "98765432"
     telegram_user_id: Optional[str] = "12345678"
     username: Optional[str] = "demo_owner"
+
+class TelegramToggleAlertsRequest(BaseModel):
+    enabled: bool
 
 
 def get_authenticated_user(request: Request, db: EventDatabase = Depends(get_db)) -> Dict[str, Any]:
@@ -2080,7 +2157,7 @@ class SignupRequest(BaseModel):
     password: str
     full_name: str
     business_name: str
-    business_type: Optional[str] = "retail"
+    business_type: Optional[str] = "society"
     phone_e164: Optional[str] = None
 
 
@@ -2143,8 +2220,9 @@ def api_auth_login(
         "user": {
             "id": user["id"],
             "email": user["email"],
-            "full_name": user.get("full_name") or "Store Manager",
-            "business_name": user.get("business_name") or "Primary Store",
+            "full_name": user.get("full_name") or "Premises Manager",
+            "business_name": user.get("business_name") or "Primary Premises / Society",
+            "business_type": user.get("business_type") or "society",
             "role": user.get("role") or "shopkeeper"
         }
     }
@@ -2163,7 +2241,7 @@ def api_auth_signup(
     password = req.password.strip()
     full_name = req.full_name.strip()
     business_name = req.business_name.strip()
-    business_type = (req.business_type or "retail").strip()
+    business_type = (req.business_type or "society").strip()
     phone_e164 = req.phone_e164.strip() if req.phone_e164 else None
 
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
@@ -2173,7 +2251,7 @@ def api_auth_signup(
     if not full_name:
         raise HTTPException(status_code=400, detail="Full name is required.")
     if not business_name:
-        raise HTTPException(status_code=400, detail="Business or store name is required.")
+        raise HTTPException(status_code=400, detail="Society, premises, or business name is required.")
 
     # Check if user already exists
     existing = db.get_user_by_email(email)
@@ -2193,6 +2271,7 @@ def api_auth_signup(
         user = existing
         user["full_name"] = full_name
         user["business_name"] = business_name
+        user["business_type"] = business_type
     else:
         user = db.create_user_with_credentials(
             email=email,
@@ -2237,6 +2316,7 @@ def api_auth_signup(
             "email": user["email"],
             "full_name": full_name,
             "business_name": business_name,
+            "business_type": business_type,
             "role": "shopkeeper"
         }
     }
@@ -2452,7 +2532,11 @@ def api_get_me(user: Dict[str, Any] = Depends(get_authenticated_user)):
         "telegram_chat_id": user.get("telegram_chat_id"),
         "telegram_username": user.get("telegram_username"),
         "telegram_status": user.get("telegram_status", "not_linked"),
-        "telegram_linked_at_ms": user.get("telegram_linked_at_ms")
+        "telegram_alerts_enabled": bool(user.get("telegram_alerts_enabled", 1)),
+        "telegram_linked_at_ms": user.get("telegram_linked_at_ms"),
+        "full_name": user.get("full_name"),
+        "business_name": user.get("business_name"),
+        "business_type": user.get("business_type") or "society"
     }
 
 
@@ -2473,57 +2557,115 @@ def api_set_me_phone(req: PhoneSetupRequest, user: Dict[str, Any] = Depends(get_
 
 
 @app.post("/api/telegram/link")
-def api_telegram_link(user: Dict[str, Any] = Depends(get_authenticated_user), db: EventDatabase = Depends(get_db), settings: EdgeSettings = Depends(get_settings)):
-    if not user.get("phone_e164"):
-        raise HTTPException(status_code=400, detail="Mobile number must be added before linking Telegram")
-
-    link_token = db.create_telegram_link(user["id"], user["phone_e164"], ttl_sec=600)
-    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "VYZNBot")
+def api_telegram_link(user: Optional[Dict[str, Any]] = Depends(get_optional_user), db: EventDatabase = Depends(get_db), settings: EdgeSettings = Depends(get_settings)):
+    if not user and hasattr(db, "get_all_users"):
+        all_u = db.get_all_users()
+        if all_u:
+            user = all_u[0]
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required to link Telegram.")
+    link_token = db.create_telegram_link(user["id"], user.get("phone_e164"), ttl_sec=600)
+    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME") or os.environ.get("VYZN_TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_bot") or "Vyzn_security_bot"
     deep_link = f"https://t.me/{bot_username}?start={link_token}"
     now_ms = int(time.time() * 1000)
     return {
+        "ok": True,
         "deepLink": deep_link,
         "token": link_token,
+        "botUsername": bot_username,
         "expiresAtMs": now_ms + 600 * 1000
     }
 
 
 @app.get("/api/telegram/status")
-def api_telegram_status(user: Dict[str, Any] = Depends(get_authenticated_user), db: EventDatabase = Depends(get_db)):
+def api_telegram_status(user: Optional[Dict[str, Any]] = Depends(get_optional_user), db: EventDatabase = Depends(get_db)):
+    if not user and hasattr(db, "get_all_users"):
+        all_u = db.get_all_users()
+        if all_u:
+            user = all_u[0]
+    if not user:
+        return {"status": "waiting", "connected": False, "telegram_alerts_enabled": False}
+
     fresh_user = db.get_user_by_id(user["id"]) or user
+    alerts_enabled = bool(fresh_user.get("telegram_alerts_enabled", 1))
     if fresh_user.get("telegram_status") == "linked":
         return {
             "status": "connected",
+            "connected": True,
             "telegram_chat_id": fresh_user.get("telegram_chat_id"),
             "telegram_username": fresh_user.get("telegram_username"),
+            "telegram_alerts_enabled": alerts_enabled,
             "linked_at_ms": fresh_user.get("telegram_linked_at_ms")
         }
     elif fresh_user.get("telegram_status") == "blocked":
-        return {"status": "blocked"}
+        return {"status": "blocked", "connected": False, "telegram_alerts_enabled": alerts_enabled}
 
     link = db.get_latest_telegram_link_for_user(user["id"])
     if not link:
-        return {"status": "waiting"}
+        return {"status": "waiting", "connected": False, "telegram_alerts_enabled": alerts_enabled}
 
     now_ms = int(time.time() * 1000)
     if link.get("status") == "mismatch":
-        return {"status": "mismatch"}
+        return {"status": "mismatch", "connected": False, "telegram_alerts_enabled": alerts_enabled}
+    elif link.get("status") == "revoked":
+        return {"status": "disconnected", "connected": False, "telegram_alerts_enabled": alerts_enabled}
     elif now_ms > link.get("expires_at_ms", 0):
-        return {"status": "expired"}
-    elif link.get("status") == "linked":
-        return {
-            "status": "connected",
-            "telegram_chat_id": fresh_user.get("telegram_chat_id"),
-            "telegram_username": fresh_user.get("telegram_username")
-        }
-    return {"status": "waiting"}
+        return {"status": "expired", "connected": False, "telegram_alerts_enabled": alerts_enabled}
+    return {"status": "waiting", "connected": False, "telegram_alerts_enabled": alerts_enabled}
+
+
+@app.post("/api/telegram/disconnect")
+def api_telegram_disconnect(user: Optional[Dict[str, Any]] = Depends(get_optional_user), db: EventDatabase = Depends(get_db)):
+    if not user and hasattr(db, "get_all_users"):
+        all_u = db.get_all_users()
+        if all_u:
+            user = all_u[0]
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    db.disconnect_user_telegram(user["id"])
+    fresh_user = db.get_user_by_id(user["id"])
+    if fresh_user:
+        sync_user_to_supabase(fresh_user)
+    return {"ok": True, "status": "disconnected"}
+
+
+@app.post("/api/telegram/toggle-alerts")
+def api_telegram_toggle_alerts(req: TelegramToggleAlertsRequest, user: Optional[Dict[str, Any]] = Depends(get_optional_user), db: EventDatabase = Depends(get_db)):
+    if not user and hasattr(db, "get_all_users"):
+        all_u = db.get_all_users()
+        if all_u:
+            user = all_u[0]
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    db.set_user_telegram_alerts(user["id"], req.enabled)
+    fresh_user = db.get_user_by_id(user["id"])
+    if fresh_user:
+        sync_user_to_supabase(fresh_user)
+    return {"ok": True, "telegram_alerts_enabled": req.enabled}
+
+
+@app.post("/api/telegram/webhook")
+async def api_telegram_webhook(request: Request, db: EventDatabase = Depends(get_db), settings: EdgeSettings = Depends(get_settings)):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or getattr(settings, "telegram_bot_token", None)
+    result = process_telegram_update(payload, db=db, calibrator=None, bot_token=bot_token)
+    return {"ok": True, "result": result}
 
 
 @app.post("/api/telegram/test")
-def api_telegram_test(user: Dict[str, Any] = Depends(get_authenticated_user), db: EventDatabase = Depends(get_db), settings: EdgeSettings = Depends(get_settings)):
+def api_telegram_test(user: Optional[Dict[str, Any]] = Depends(get_optional_user), db: EventDatabase = Depends(get_db), settings: EdgeSettings = Depends(get_settings)):
+    if not user and hasattr(db, "get_all_users"):
+        all_u = db.get_all_users()
+        if all_u:
+            user = all_u[0]
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     fresh_user = db.get_user_by_id(user["id"]) or user
     chat_id = fresh_user.get("telegram_chat_id")
-    bot_token = os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or getattr(settings, "telegram_bot_token", None)
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or getattr(settings, "telegram_bot_token", None)
 
     if not chat_id:
         raise HTTPException(status_code=400, detail="Telegram is not connected yet")
@@ -2552,7 +2694,6 @@ def api_telegram_test(user: Dict[str, Any] = Depends(get_authenticated_user), db
 @app.post("/api/telegram/simulate-link")
 def api_telegram_simulate_link(req: SimulateTelegramLinkRequest, db: EventDatabase = Depends(get_db)):
     """Simulation helper for automated headless test verification of Telegram linking."""
-    from vyzn.alerts.telegram import normalize_phone
     link = db.get_telegram_link(req.token)
     if not link:
         raise HTTPException(status_code=404, detail="Link token not found")
@@ -2562,21 +2703,61 @@ def api_telegram_simulate_link(req: SimulateTelegramLinkRequest, db: EventDataba
         db.update_telegram_link_status(req.token, "expired")
         return {"status": "expired"}
 
-    sim_phone = normalize_phone(req.phone)
-    exp_phone = normalize_phone(link["phone_e164"])
+    if req.phone and link.get("phone_e164"):
+        from vyzn.alerts.telegram import normalize_phone
+        sim_phone = normalize_phone(req.phone)
+        exp_phone = normalize_phone(link["phone_e164"])
+        if sim_phone and exp_phone and sim_phone != exp_phone:
+            db.update_telegram_link_status(req.token, "mismatch")
+            return {"status": "mismatch"}
 
-    if sim_phone == exp_phone:
-        db.update_user_telegram(
-            user_id=link["user_id"],
-            chat_id=req.chat_id or "98765432",
-            telegram_user_id=req.telegram_user_id or "12345678",
-            username=req.username or "demo_user"
-        )
-        db.update_telegram_link_status(req.token, "linked")
+    success, reason, data = db.consume_telegram_link(
+        token=req.token,
+        chat_id=req.chat_id or "98765432",
+        telegram_user_id=req.telegram_user_id or "12345678",
+        username=req.username or "demo_owner"
+    )
+    if success:
+        fresh_user = db.get_user_by_id(link["user_id"])
+        if fresh_user:
+            sync_user_to_supabase(fresh_user)
         return {"status": "connected"}
     else:
-        db.update_telegram_link_status(req.token, "mismatch")
-        return {"status": "mismatch"}
+        return {"status": reason}
+
+
+class TelegramConfigRequest(BaseModel):
+    bot_token: Optional[str] = None
+    bot_username: Optional[str] = None
+
+
+@app.post("/api/telegram/config")
+def api_telegram_config(
+    req: TelegramConfigRequest,
+    user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    db: EventDatabase = Depends(get_db),
+    settings: EdgeSettings = Depends(get_settings)
+):
+    """Allows setting BotFather HTTP bot token & username, launching the poller immediately."""
+    from vyzn.alerts.telegram import start_telegram_poller
+    if req.bot_token:
+        clean_tok = req.bot_token.strip()
+        settings.telegram_bot_token = clean_tok
+        os.environ["TELEGRAM_BOT_TOKEN"] = clean_tok
+        os.environ["VYZN_TELEGRAM_BOT_TOKEN"] = clean_tok
+        calibrator = getattr(_pipeline_instance, "calibrator", None) if _pipeline_instance else None
+        start_telegram_poller(bot_token=clean_tok, db=db, calibrator=calibrator)
+    if req.bot_username:
+        clean_user = req.bot_username.strip().lstrip("@")
+        os.environ["TELEGRAM_BOT_USERNAME"] = clean_user
+        os.environ["VYZN_TELEGRAM_BOT_USERNAME"] = clean_user
+        settings.telegram_bot_username = clean_user
+
+    return {
+        "ok": True,
+        "bot_token_set": bool(os.environ.get("TELEGRAM_BOT_TOKEN") or getattr(settings, "telegram_bot_token", None)),
+        "bot_username": os.environ.get("TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_bot") or "Vyzn_security_bot"
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2610,6 +2791,14 @@ def get_user_profile(user: Optional[Dict[str, Any]] = Depends(get_optional_user)
         "phone_e164": user.get("phone_e164"),
         "phone_verified": bool(user.get("phone_verified")),
         "security_pin_set": bool(user.get("security_pin")),
+        "telegram_status": user.get("telegram_status", "not_linked"),
+        "telegram_chat_id": user.get("telegram_chat_id"),
+        "telegram_username": user.get("telegram_username"),
+        "telegram_alerts_enabled": bool(user.get("telegram_alerts_enabled", 1)),
+        "telegram_linked_at_ms": user.get("telegram_linked_at_ms"),
+        "full_name": user.get("full_name"),
+        "business_name": user.get("business_name"),
+        "business_type": user.get("business_type") or "society",
         "disk_free_pct": disk_free_pct,
         "retention_hours": 72
     }
@@ -2752,7 +2941,8 @@ def serve_auth_page(request: Request, db: EventDatabase = Depends(get_db)):
     token = request.cookies.get("vyzn_session")
     user = db.get_session_user(token) if token else None
     if user:
-        return RedirectResponse(url="/overview", status_code=302)
+        if request.url.path not in ("/setup/phone", "/setup/telegram"):
+            return RedirectResponse(url="/overview", status_code=302)
 
     auth_file = frontend_dir / "auth.html"
     if auth_file.exists():

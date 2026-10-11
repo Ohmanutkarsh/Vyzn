@@ -27,7 +27,7 @@ async function loadCameras() {
   const countEl = document.getElementById('txt-cameras-count');
 
   try {
-    const res = await fetch('/api/cameras');
+    const res = await fetch('/api/cameras', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load cameras');
     camerasList = await res.json();
 
@@ -155,6 +155,7 @@ function attachEventListeners() {
       try {
         const res = await fetch(`/api/cameras/${encodeURIComponent(targetId)}`, {
           method: 'DELETE',
+          credentials: 'include',
           headers: {
             'X-Security-Pin': pin
           }
@@ -188,6 +189,7 @@ function attachEventListeners() {
       try {
         const res = await fetch(`/api/cameras/${encodeURIComponent(pendingRenameId)}`, {
           method: 'PATCH',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: newName })
         });

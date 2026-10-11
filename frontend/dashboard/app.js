@@ -222,7 +222,8 @@ function applyUserToUI(user) {
     return;
   }
   dom.userEmail.textContent = user.email;
-  dom.userRoleBadge.textContent = (user.role || "SHOPKEEPER").toUpperCase();
+  const displayRole = user.role === 'admin' ? 'ADMIN' : (user.business_type === 'society' || !user.business_type ? 'SOCIETY ADMIN' : (user.role || 'PREMISES').toUpperCase());
+  dom.userRoleBadge.textContent = displayRole;
   dom.btnAuthModalOpen.textContent = "Sign Out";
   if (dom.btnPhoneModalOpen) dom.btnPhoneModalOpen.style.display = "inline-block";
 

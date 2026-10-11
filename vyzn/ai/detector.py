@@ -13,19 +13,35 @@ import logging
 logger = logging.getLogger("vyzn.ai.detector")
 
 
+CONFIDENCE_GATES = {
+    "person": {"start": 0.35, "continue": 0.25},
+    "vehicle": {"start": 0.40, "continue": 0.30},
+    "animal": {"start": 0.45, "continue": 0.35},
+    "carried_item": {"start": 0.50, "continue": 0.40},
+}
+
+
+def get_confidence_gate(category: str, is_night_ir: bool = False, mode: str = "start") -> float:
+    """Returns the calibrated confidence gate for start/continue with IR night offset."""
+    gates = CONFIDENCE_GATES.get(category, {"start": 0.40, "continue": 0.30})
+    base = gates.get(mode, 0.35)
+    return round(base + (0.05 if is_night_ir else 0.0), 3)
+
+
 @dataclass
 class Detection:
     box: List[float]       # [x1, y1, x2, y2] normalized to 0.0 - 1.0
     confidence: float      # 0.0 to 1.0
     class_id: int          # COCO class id (0 = person)
-    label: str             # 'person', 'vehicle', 'animal'
+    label: str             # 'person', 'vehicle', 'animal', 'carried_item'
+    raw_label: str = ""    # 'backpack', 'car', 'dog', etc.
 
 
 class BaseDetector(ABC):
     """Abstract interface for all computer vision detectors."""
 
     @abstractmethod
-    def detect(self, frame: np.ndarray) -> List[Detection]:
+    def detect(self, frame: np.ndarray, is_night_ir: bool = False) -> List[Detection]:
         """Runs inference on a single BGR image."""
         pass
 
@@ -45,20 +61,22 @@ class YOLOv8Detector(BaseDetector):
         7: ("truck", "vehicle"),
         15: ("cat", "animal"),
         16: ("dog", "animal"),
-        24: ("backpack", "object"),
-        26: ("handbag", "object"),
-        28: ("suitcase", "object"),
+        24: ("backpack", "carried_item"),
+        26: ("handbag", "carried_item"),
+        28: ("suitcase", "carried_item"),
     }
 
-    def __init__(self, model_name: str = "yolov8n.pt", conf_thresh: float = 0.25):
+    def __init__(self, model_name: str = "yolov8n.pt", conf_thresh: float = 0.20):
         from ultralytics import YOLO
         logger.info(f"Loading YOLO model: {model_name}")
         self.model = YOLO(model_name)
         self.conf_thresh = conf_thresh
 
-    def detect(self, frame: np.ndarray) -> List[Detection]:
+    def detect(self, frame: np.ndarray, is_night_ir: bool = False) -> List[Detection]:
         h, w = frame.shape[:2]
-        results = self.model(frame, conf=self.conf_thresh, verbose=False)
+        # Run raw model with minimum continue threshold (0.20) to capture candidates
+        min_thresh = 0.25 if is_night_ir else 0.20
+        results = self.model(frame, conf=min_thresh, verbose=False)
         detections: List[Detection] = []
 
         if not results:
@@ -88,7 +106,8 @@ class YOLOv8Detector(BaseDetector):
                         box=norm_box,
                         confidence=conf,
                         class_id=cls_id,
-                        label=category
+                        label=category,
+                        raw_label=raw_label
                     ))
 
         return detections

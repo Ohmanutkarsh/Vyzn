@@ -1,0 +1,162 @@
+{
+  "scoring_version": "2.0",
+  "tiers": {
+    "alert_threshold": 70,
+    "review_min_score": 30,
+    "severity_labels": {
+      "critical_min": 85,
+      "high_min": 70,
+      "medium_min": 50,
+      "notable_min": 30,
+      "low_min": 0
+    }
+  },
+  "retention": {
+    "low_retention_hours": 72,
+    "review_retention_days": null,
+    "alert_retention_days": null
+  },
+  "level1_motion": {
+    "history": 500,
+    "var_threshold": 25.0,
+    "detect_shadows": true,
+    "shadow_threshold": 200,
+    "learning_rate": 0.003,
+    "start_motion_ratio": 0.010,
+    "continue_motion_ratio": 0.003,
+    "min_contour_area_ratio": 0.0015,
+    "global_change_ratio": 0.60,
+    "brightness_jump_threshold": 25.0,
+    "smooth_window_sec": 2.0
+  },
+  "level2_detection": {
+    "confidence_gates": {
+      "person": { "start": 0.35, "continue": 0.25 },
+      "vehicle": { "start": 0.40, "continue": 0.30 },
+      "animal": { "start": 0.45, "continue": 0.35 },
+      "carried_item": { "start": 0.50, "continue": 0.40 }
+    },
+    "night_ir_confidence_offset": 0.05,
+    "tracker": {
+      "new_track_thresh": 0.40,
+      "track_buffer_sec": 5.0,
+      "reid_merge_window_sec": 3.0,
+      "reid_merge_dist_ratio": 0.10
+    }
+  },
+  "level3_layers": {
+    "layer0": {
+      "shoulder_window_minutes": 15,
+      "confirmed_min_hits": 5,
+      "confirmed_min_confidence": 0.45,
+      "confirmed_min_reliability": 0.80,
+      "confirmed_min_active_sec": 3.0
+    },
+    "layer1_motion_extent": {
+      "max_points": 10,
+      "scale": 0.03
+    },
+    "layer2_confidence": {
+      "max_points": 15,
+      "conf_min": 0.35,
+      "conf_range": 0.50
+    },
+    "layer3_object_weights": {
+      "person": 20,
+      "vehicle": 14,
+      "animal": 5,
+      "carried_item": 3,
+      "unclassified": 0
+    },
+    "layer4_nuisance_penalties": {
+      "person": -12,
+      "vehicle": -12,
+      "animal": -4,
+      "unclassified": -35,
+      "unclassified_relaxed": -15
+    },
+    "layer4_threat_floors": {
+      "person_after_hours_or_restricted": 70,
+      "vehicle_after_hours": 55,
+      "vehicle_restricted_after_hours": 70,
+      "animal_layer0": 30,
+      "unexplained_motion_restricted_after_hours": 30
+    },
+    "layer5_loitering": {
+      "max_points": 20,
+      "grace_period_sec": 10.0,
+      "rate_per_sec": 0.4,
+      "business_hours_context_factor": 0.5,
+      "after_hours_context_factor": 1.0
+    },
+    "layer6_zone": {
+      "restricted_weight": 15,
+      "watch_weight": 6,
+      "business_hours_factor": 0.4,
+      "after_hours_factor": 1.0,
+      "dwell_threshold_sec": 2.0
+    },
+    "layer7_velocity": {
+      "fast_thresh": 0.6,
+      "fast_penalty": -10,
+      "moderate_thresh": 0.4,
+      "moderate_penalty": -5
+    },
+    "layer8_multiframe_multipliers": {
+      "1": 0.30,
+      "2": 0.55,
+      "3": 0.80,
+      "4": 0.92,
+      "5_plus": 1.00
+    },
+    "layer9_reliability": {
+      "min_multiplier": 0.50,
+      "small_bbox_penalty": 0.70,
+      "small_bbox_height_ratio": 0.06,
+      "high_conf_variance_penalty": 0.85,
+      "high_conf_std_thresh": 0.20,
+      "frequent_id_switch_penalty": 0.75,
+      "implausible_ir_aspect_penalty": 0.80,
+      "centroid_teleport_penalty": 0.75,
+      "teleport_dist_ratio": 0.30
+    },
+    "layer10_baseline": {
+      "routine_p_thresh_high": 0.70,
+      "routine_penalty_high": -15,
+      "routine_p_thresh_med": 0.40,
+      "routine_penalty_med": -8,
+      "novel_p_thresh": 0.10,
+      "novel_bonus": 8,
+      "min_days_history_for_novel": 14,
+      "cold_start_days": 7
+    },
+    "layer11_behavior": {
+      "repeated_passes_bonus": 5,
+      "repeated_passes_count": 3,
+      "repeated_passes_window_sec": 300,
+      "approaching_restricted_bonus": 5,
+      "approaching_distance_ratio": 0.10
+    },
+    "layer12_unattended_object": {
+      "enabled": true,
+      "stationary_30s_bonus": 10,
+      "stationary_60s_bonus": 20,
+      "min_confidence": 0.50,
+      "person_proximity_bbox_multiplier": 2.0
+    }
+  },
+  "level4_forensic_modifiers": {
+    "person_present": 5,
+    "multiple_people": 8,
+    "outside_business_hours": 10,
+    "infrared_night": 4,
+    "loitering_30s": 6,
+    "extended_duration_45s": 4,
+    "max_d4": 37
+  },
+  "governance": {
+    "cooldown_sec": 60,
+    "max_alerts_per_camera_per_hour": 6,
+    "critical_bypass_threshold": 85
+  }
+}

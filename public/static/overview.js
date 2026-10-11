@@ -37,7 +37,7 @@ async function loadOverviewData() {
   const activeContent = document.getElementById('overview-active-content');
 
   try {
-    const res = await fetch('/api/cameras');
+    const res = await fetch('/api/cameras', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load cameras');
     camerasList = await res.json();
 
@@ -153,20 +153,7 @@ function startLiveStream(cid) {
   if (offlineOverlay) offlineOverlay.style.display = 'none';
   if (stalledTimer) clearTimeout(stalledTimer);
 
-  if (cam.status !== 'online') {
-    // Show Offline state per Section 6.2
-    if (streamImg) streamImg.src = cam.snapshot_url || `/api/cameras/${cid}/snapshot.jpg`;
-    if (offlineOverlay) {
-      offlineOverlay.style.display = 'flex';
-      const banner = document.getElementById('offline-banner-text');
-      if (banner) banner.textContent = cam.offline_since ? `Offline since ${cam.offline_since}` : 'Offline';
-    }
-    if (statusBadge) statusBadge.textContent = 'Offline';
-    if (pulseDot) pulseDot.style.display = 'none';
-    return;
-  }
-
-  // Camera is marked online: show Connecting shimmer first
+  // Always start connecting live stream immediately upon entering website
   if (connectingOverlay) connectingOverlay.style.display = 'flex';
   if (statusBadge) statusBadge.textContent = 'Connecting…';
   if (pulseDot) pulseDot.style.display = 'none';
@@ -186,9 +173,16 @@ function startLiveStream(cid) {
 
     streamImg.onerror = () => {
       if (connectingOverlay) connectingOverlay.style.display = 'none';
-      if (offlineOverlay) offlineOverlay.style.display = 'flex';
+      if (offlineOverlay) {
+        offlineOverlay.style.display = 'flex';
+        const banner = document.getElementById('offline-banner-text');
+        if (banner) banner.textContent = cam.offline_since ? `Offline since ${cam.offline_since}` : 'Offline';
+      }
       if (statusBadge) statusBadge.textContent = 'Offline';
       if (pulseDot) pulseDot.style.display = 'none';
+      if (cam.snapshot_url) {
+        streamImg.src = `${cam.snapshot_url}?t=${Date.now()}`;
+      }
     };
   }
 }

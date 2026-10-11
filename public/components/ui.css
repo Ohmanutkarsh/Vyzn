@@ -203,6 +203,12 @@
   border: 1px solid var(--review-border);
 }
 
+.tier-badge.low {
+  background-color: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
 .tier-badge.reviewed, .tier-badge.not-an-issue {
   background-color: var(--bg-raised);
   color: var(--text-3);

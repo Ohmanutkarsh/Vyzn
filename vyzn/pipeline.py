@@ -68,9 +68,11 @@ class EdgePipeline:
         self.clip_writer = ClipWriter(data_root=self.settings.data_dir)
 
         # Alerting
+        bot_token = self.settings.telegram_bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
         alert_provider = TelegramAlertProvider(
-            bot_token=self.settings.telegram_bot_token,
-            chat_id=self.settings.telegram_chat_id
+            bot_token=bot_token,
+            chat_id=self.settings.telegram_chat_id,
+            db=self.db
         )
         self.dispatcher = AlertDispatcher(provider=alert_provider, cooldown_sec=45.0)
 
@@ -200,9 +202,11 @@ class EdgePipeline:
         self.worker_thread.start()
 
         # 4. Start Telegram interactive long-polling worker if configured
-        if self.settings.telegram_bot_token:
+        bot_token = self.settings.telegram_bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
+        if bot_token:
+            self.settings.telegram_bot_token = bot_token
             start_telegram_poller(
-                bot_token=self.settings.telegram_bot_token,
+                bot_token=bot_token,
                 db=self.db,
                 calibrator=self.calibrator
             )
@@ -313,15 +317,71 @@ class EdgePipeline:
                 in_roi = has_motion or (len(tracks_in_roi) > 0)
                 alive_tracks = tracks_in_roi
 
-            # 3. Step the Explicit Clip Lifecycle State Machine
+            # 3. Evaluate Live Score Breakdown for current frame
+            top_track = alive_tracks[0] if alive_tracks else None
+            top_det = detections[0] if detections else None
+
+            cand_obj = getattr(top_track, "label", getattr(top_det, "label", "unclassified"))
+            cand_conf = getattr(top_track, "confidence", getattr(top_det, "confidence", 0.0))
+            cand_box = getattr(top_track, "box", getattr(top_det, "box", [0.0, 0.0, 1.0, 1.0]))
+            cand_dur = getattr(top_track, "duration_sec", 0.0) if top_track else 0.0
+            cand_hits = getattr(top_track, "hits", 1) if top_track else (1 if detections else 0)
+            cand_c_mean = getattr(top_track, "c_mean", cand_conf) if top_track else cand_conf
+            cand_c_std = getattr(top_track, "c_std", 0.0) if top_track else 0.0
+            cand_switches = getattr(top_track, "id_switch_count", 0) if top_track else 0
+            cand_h_ratio = getattr(top_track, "bbox_height_ratio", cand_box[3] - cand_box[1]) if top_track else (cand_box[3] - cand_box[1])
+
+            # Check restricted zone intersection
+            in_restricted = False
+            if cam_config and getattr(cam_config, "restricted_zones", None):
+                for rz in cam_config.restricted_zones:
+                    if check_box_intersects_zone(cand_box, rz):
+                        in_restricted = True
+                        break
+
+            bias = self.calibrator.get_camera_bias(camera_id) if hasattr(self, "calibrator") and self.calibrator else 0
+            candidate = DetectionCandidate(
+                camera_id=camera_id,
+                object_type=cand_obj,
+                confidence=cand_conf,
+                motion_ratio=motion_ratio,
+                track_duration_sec=cand_dur,
+                bounding_box=cand_box,
+                is_after_hours=after_hours,
+                is_in_restricted_zone=in_restricted,
+                is_night_ir=bool(getattr(cam_config, "is_night_ir", False))
+            )
+            candidate.track_hits = cand_hits
+            candidate.c_mean = cand_c_mean
+            candidate.c_std = cand_c_std
+            candidate.id_switch_count = cand_switches
+            candidate.bbox_height_ratio = cand_h_ratio
+
+            _, should_alert_live, live_breakdown = self.scoring_engine.evaluate(candidate, camera_bias=bias)
+
+            # Step the Explicit Clip Lifecycle State Machine
             finalized_segment = sm.step(
                 pts=frame_time,
                 frame_ref=frame,
                 motion_score=motion_ratio,
                 detections=detections,
                 tracks=alive_tracks,
-                in_roi=in_roi
+                in_roi=in_roi,
+                live_score_breakdown=live_breakdown
             )
+
+            # Immediate alert dispatch check during active recording
+            if sm.current_event_id and sm.state in (ClipState.RECORDING, ClipState.HANGOVER):
+                root_id = sm.parent_event_id or sm.current_event_id
+                if should_alert_live and root_id not in self.dispatched_alert_events:
+                    self.dispatched_alert_events.add(root_id)
+                    self._dispatch_immediate_alert(
+                        camera_id=camera_id,
+                        event_id=sm.current_event_id,
+                        score=live_breakdown.get("final_score", 70),
+                        candidate=candidate,
+                        frames=list(sm.active_frames)
+                    )
 
             # Keep active_event_ids mirror updated for legacy callers
             if sm.current_event_id and sm.state in (ClipState.RECORDING, ClipState.HANGOVER):
@@ -376,6 +436,11 @@ class EdgePipeline:
         watch_areas = getattr(cam_config, "watch_areas", None)
         keyframe_urls = [f"/api/clips/{segment.event_group_id}/keyframe_{i}.jpg" for i in range(len(write_result.keyframe_paths))]
 
+        score = getattr(segment, "score", segment.highest_score)
+        tier = getattr(segment, "tier", "review")
+        severity_label = getattr(segment, "severity_label", "Medium")
+        score_breakdown = getattr(segment, "score_breakdown", {})
+
         # Generate rich forensic analysis, timeline, and natural-language summary
         analysis = ClipDescriptionEngine.generate_analysis(
             camera_id=camera_id,
@@ -390,17 +455,16 @@ class EdgePipeline:
             is_night_ir=is_night_ir,
             is_after_hours=after_hours,
             part_index=segment.part_index,
-            parent_event_id=segment.parent_event_id
+            parent_event_id=segment.parent_event_id,
+            final_score=score
         )
 
         title = analysis.get("title")
         summary = analysis.get("summary")
         trigger_reason = analysis.get("trigger_reason") or segment.trigger_reason
         imp = analysis.get("importance", {})
-        score = imp.get("score", segment.highest_score)
-        importance_level = imp.get("level", "medium")
+        importance_level = imp.get("level", severity_label.lower())
 
-        tier = "alert" if (score >= self.settings.alert_score_threshold or segment.is_alert) else "review"
         clip_num = self.db.get_next_clip_number()
 
         # SHA-256 integrity hash
@@ -416,8 +480,12 @@ class EdgePipeline:
             sha256_hash = hashlib.sha256(f"{segment.event_group_id}:{start_time}".encode()).hexdigest()
 
         start_ms = int(start_dt.timestamp() * 1000)
-        retention_hours = getattr(self.settings, "raw_retention_hours", 72.0)
-        expires_at_ms = start_ms + int(retention_hours * 3600 * 1000)
+        # Retention Policy: Only 'low' tier clips expire after 72 hours.
+        # 'review' and 'alert' tiers are kept saved permanently (expires_at_ms = None).
+        if tier == "low":
+            expires_at_ms = start_ms + int(72 * 3600 * 1000)
+        else:
+            expires_at_ms = None
         trigger_ms = start_ms + int(max(0.0, segment.trigger_pts - segment.start_pts) * 1000)
 
         # Legacy reasons compatibility for existing cards and export
@@ -455,7 +523,12 @@ class EdgePipeline:
             "objects": [{"cls": segment.primary_object, "confidence": round(segment.max_confidence, 2)}],
             "boxes": boxes,
             "detector": {"name": "YOLOv8n-VYZN", "version": "8.0.196"},
-            "analysis": analysis
+            "analysis": analysis,
+            "scoring_version": 2,
+            "score_raw": getattr(segment, "score_raw", float(score)),
+            "tier": tier,
+            "severity_label": severity_label,
+            "score_breakdown": score_breakdown
         }
 
         record = EventRecord(

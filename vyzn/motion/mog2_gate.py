@@ -22,11 +22,11 @@ class MOG2MotionGate:
         history: int = 500,
         var_threshold: float = 25.0,
         min_motion_ratio: float = 0.010,  # 1.0% frame change default threshold
-        learning_rate: float = 0.004,     # Slow background adaptation rate
-        min_contour_area_ratio: float = 0.004,  # 0.4% ROI contour filter
+        learning_rate: float = 0.003,     # 0.003 fixed background adaptation rate
+        min_contour_area_ratio: float = 0.0015,  # 0.15% ROI contour filter (auto-tunable)
         warmup_frames: int = 0,           # Configurable warmup suppression window
         global_change_ratio: float = 0.60, # Reject sudden full-frame lighting spikes (>60%)
-        smooth_window: int = 4            # Moving average smoothing over ~1s
+        smooth_window: int = 8            # Moving average smoothing over 2.0s (~8 frames @ 4fps)
     ):
         self.history = history
         self.var_threshold = var_threshold
@@ -40,11 +40,16 @@ class MOG2MotionGate:
         self._subtractors: Dict[str, cv2.BackgroundSubtractorMOG2] = {}
         self._camera_areas: Dict[str, List[List[List[float]]]] = {}
         self._osd_polygons: Dict[str, List[List[List[float]]]] = {}
+        self._camera_contour_ratios: Dict[str, float] = {}
         self._dropped_outside: Dict[str, bool] = {}
         self._frame_counts: Dict[str, int] = {}
         self._prev_mean_brightness: Dict[str, float] = {}
         self._history_ratios: Dict[str, deque] = {}
         self._had_global_change: Dict[str, bool] = {}
+
+    def set_camera_contour_ratio(self, camera_id: str, ratio: float):
+        """Sets per-camera minimum contour area ratio override."""
+        self._camera_contour_ratios[camera_id] = max(0.0001, float(ratio))
 
     def _get_subtractor(self, camera_id: str) -> cv2.BackgroundSubtractorMOG2:
         if camera_id not in self._subtractors:
@@ -131,7 +136,7 @@ class MOG2MotionGate:
 
         # 5. Check for global lighting / camera shift
         raw_foreground_ratio = cv2.countNonZero(fg_binary) / float(total_pixels)
-        if raw_foreground_ratio >= self.global_change_ratio or (brightness_jump >= 35.0 and raw_foreground_ratio >= 0.40 and frame_idx > 5):
+        if raw_foreground_ratio >= self.global_change_ratio or (brightness_jump >= 25.0 and raw_foreground_ratio >= 0.25 and frame_idx > 5):
             # Sudden massive change: reject as global illumination event, re-seed background model
             self._had_global_change[camera_id] = True
             # Quickly re-seed subtractor
@@ -177,7 +182,8 @@ class MOG2MotionGate:
         roi_pixels = cv2.countNonZero(roi_mask)
 
         # 9. Minimum Contour Area Filter: eliminate noise smaller than min_contour_area_ratio of ROI
-        min_contour_area = max(16.0, float(roi_pixels) * self.min_contour_area_ratio)
+        contour_ratio = self._camera_contour_ratios.get(camera_id, self.min_contour_area_ratio)
+        min_contour_area = max(16.0, float(roi_pixels) * contour_ratio)
         contours, _ = cv2.findContours(masked_fg, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         final_fg = np.zeros_like(masked_fg)
         for cnt in contours:

@@ -133,27 +133,55 @@ class StorageReaperDaemon(threading.Thread):
                 self.db.log_audit("FIFO_QUOTA_PURGE", ev.event_group_id, f"Freed {freed // 1024} KB. Reason: {trigger_reason}")
 
         # --- B. Standard 72h Tiered Retention ---
+        # Strictly purges ONLY 'low' tier clips that have expired (72h window) and are NOT pinned/starred.
+        # 'review' and 'alert' tier clips are KEPT SAVED and never purged by this job.
         now = datetime.now(timezone.utc)
+        now_ms = int(now.timestamp() * 1000)
         retention_cutoff = (now - timedelta(hours=self.raw_retention_hours)).isoformat()
-        recent_events = self.db.query_events(limit=200)
 
-        for ev in recent_events:
-            if ev.starred or ev.status == "deleted":
-                continue
+        conn = self.db._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT event_group_id, file_path, thumb_path, score, tier, is_pinned, starred, expires_at_ms, start_time
+                FROM events
+                WHERE tier = 'low'
+                  AND status != 'deleted'
+                  AND is_pinned = 0
+                  AND starred = 0
+                  AND (
+                    (expires_at_ms IS NOT NULL AND expires_at_ms <= ?)
+                    OR (expires_at_ms IS NULL AND start_time < ?)
+                  )
+                LIMIT 300
+            """, (now_ms, retention_cutoff))
+            expired_low_rows = cursor.fetchall()
+        finally:
+            conn.close()
 
-            is_past_cutoff = ev.start_time < retention_cutoff
-            if is_past_cutoff and ev.status == "raw":
-                if ev.score < 40:
-                    if ev.file_path and os.path.exists(ev.file_path):
-                        try:
-                            os.remove(ev.file_path)
-                        except OSError:
-                            pass
-                    self.db.update_event_status(ev.event_group_id, "deleted")
-                    self.db.log_audit("PURGE_LOW_SCORE", ev.event_group_id, f"Score: {ev.score}")
-                elif 40 <= ev.score < 70:
-                    self.db.update_event_status(ev.event_group_id, "compressed")
-                    self.db.log_audit("TIER_COMPRESSED", ev.event_group_id, f"Score: {ev.score}")
+        for row in expired_low_rows:
+            ev_id = row["event_group_id"]
+            fp = row["file_path"]
+            tp = row["thumb_path"]
+
+            # 1. Delete physical files on disk / R2
+            freed = 0
+            if fp and os.path.exists(fp):
+                try:
+                    freed += os.path.getsize(fp)
+                    os.remove(fp)
+                except OSError:
+                    pass
+            if tp and os.path.exists(tp):
+                try:
+                    freed += os.path.getsize(tp)
+                    os.remove(tp)
+                except OSError:
+                    pass
+
+            # 2. Update status to deleted
+            self.db.update_event_status(ev_id, "deleted")
+            self.db.log_audit("PURGE_LOW_TIER_72H", ev_id, f"Auto-deleted expired low-tier clip (Score: {row['score']}, Freed: {freed // 1024} KB)")
 
     def stop(self):
         self.running = False

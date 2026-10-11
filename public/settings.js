@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initThemeControls();
   initPhoneControls();
   initSecurityPinControls();
+  await initTelegramControls();
 });
 
 function showToast(message, isError = false) {
@@ -34,8 +35,35 @@ async function loadProfile() {
     const emailEl = document.getElementById('val-user-email');
     if (emailEl) emailEl.textContent = data.email || 'vyzntechnologies@gmail.com';
 
+    const businessEl = document.getElementById('val-user-business');
+    if (businessEl) businessEl.textContent = data.business_name || 'Society / Premises';
+
+    const businessTypeEl = document.getElementById('val-user-business-type');
+    if (businessTypeEl) {
+      const typeMap = {
+        'society': '🏢 Housing Society / CHS',
+        'gated_community': '🏡 Gated Community',
+        'commercial_complex': '🏬 Commercial Complex',
+        'retail': '🛍️ Retail Shop',
+        'supermarket': '🛒 Grocery / Supermarket',
+        'jewellery': '💎 Jewellery & Gold',
+        'godown': '📦 Warehouse / Godown',
+        'restaurant': '🍽️ Restaurant / Cafe',
+        'other': '🏢 Premises'
+      };
+      businessTypeEl.textContent = typeMap[data.business_type] || data.business_type || 'Housing Society';
+    }
+
     const roleEl = document.getElementById('val-user-role');
-    if (roleEl) roleEl.textContent = data.role === 'admin' ? 'Administrator' : 'Shop Owner';
+    if (roleEl) {
+      if (data.role === 'admin') {
+        roleEl.textContent = 'Administrator';
+      } else if (data.business_type === 'society' || !data.business_type) {
+        roleEl.textContent = 'Society Admin / Premises Manager';
+      } else {
+        roleEl.textContent = 'Premises / Property Owner';
+      }
+    }
 
     const idEl = document.getElementById('val-user-id');
     if (idEl) idEl.textContent = data.id || 'usr_primary';
@@ -149,6 +177,18 @@ function initPhoneControls() {
       btnSave.textContent = 'Save Number';
     }
   });
+
+  const btnPhoneConnectTg = document.getElementById('btn-phone-card-connect-tg');
+  if (btnPhoneConnectTg) {
+    btnPhoneConnectTg.addEventListener('click', () => {
+      const tgCard = document.getElementById('card-telegram-title');
+      if (tgCard) tgCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const tgBtn = document.getElementById('btn-connect-telegram');
+      if (tgBtn && tgBtn.offsetParent !== null) {
+        tgBtn.click();
+      }
+    });
+  }
 }
 
 function initSecurityPinControls() {
@@ -211,3 +251,215 @@ function initSecurityPinControls() {
     }
   });
 }
+
+let tgPollInterval = null;
+let currentTgToken = null;
+
+async function initTelegramControls() {
+  const btnConnect = document.getElementById('btn-connect-telegram');
+  const btnDisconnect = document.getElementById('btn-disconnect-telegram');
+  const btnToggleAlerts = document.getElementById('btn-toggle-tg-alerts');
+  const btnTestAlert = document.getElementById('btn-test-tg-alert');
+  const btnSimulate = document.getElementById('tg-test-simulate-btn');
+  const feedback = document.getElementById('tg-feedback');
+
+  await refreshTelegramStatus();
+
+  if (btnSimulate) {
+    btnSimulate.addEventListener('click', async () => {
+      if (!currentTgToken) {
+        showToast('Click Connect VYZN Telegram first to generate a link.', true);
+        return;
+      }
+      btnSimulate.disabled = true;
+      try {
+        const res = await fetch('/api/telegram/simulate-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ token: currentTgToken, username: 'demo_user' })
+        });
+        const d = await res.json();
+        if (d.status === 'connected') {
+          showToast('Simulated Telegram link confirmed!');
+          await refreshTelegramStatus();
+        }
+      } catch (e) {
+        showToast('Simulation failed', true);
+      } finally {
+        btnSimulate.disabled = false;
+      }
+    });
+  }
+
+  if (btnConnect) {
+    btnConnect.addEventListener('click', async () => {
+      btnConnect.disabled = true;
+      btnConnect.textContent = 'Generating Link…';
+      if (feedback) feedback.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/telegram/link', {
+          method: 'POST',
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to generate link');
+
+        currentTgToken = data.token;
+        const drawer = document.getElementById('tg-connect-drawer');
+        const openLink = document.getElementById('tg-open-deep-link');
+        if (openLink) openLink.href = data.deepLink;
+        if (drawer) drawer.style.display = 'block';
+
+        // Automatically open the deep link in a new tab for seamless UX
+        window.open(data.deepLink, '_blank', 'noopener');
+
+        startTgPolling();
+      } catch (err) {
+        showToast(err.message, true);
+        if (feedback) {
+          feedback.textContent = err.message;
+          feedback.style.color = '#ef4444';
+          feedback.style.display = 'block';
+        }
+      } finally {
+        btnConnect.disabled = false;
+        btnConnect.textContent = 'Connect VYZN Telegram';
+      }
+    });
+  }
+
+  if (btnDisconnect) {
+    btnDisconnect.addEventListener('click', async () => {
+      if (!confirm('Are you sure you want to disconnect Telegram notifications?')) return;
+      btnDisconnect.disabled = true;
+      try {
+        const res = await fetch('/api/telegram/disconnect', {
+          method: 'POST',
+          credentials: 'include'
+        });
+        if (!res.ok) throw new Error('Failed to disconnect');
+        showToast('Telegram disconnected successfully.');
+        await refreshTelegramStatus();
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        btnDisconnect.disabled = false;
+      }
+    });
+  }
+
+  if (btnToggleAlerts) {
+    btnToggleAlerts.addEventListener('click', async () => {
+      const isCurrentlyEnabled = btnToggleAlerts.getAttribute('data-enabled') === 'true';
+      const nextState = !isCurrentlyEnabled;
+      btnToggleAlerts.disabled = true;
+      try {
+        const res = await fetch('/api/telegram/toggle-alerts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ enabled: nextState })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to toggle alerts');
+        showToast(nextState ? 'Alerts unmuted.' : 'Alerts muted.');
+        await refreshTelegramStatus();
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        btnToggleAlerts.disabled = false;
+      }
+    });
+  }
+
+  if (btnTestAlert) {
+    btnTestAlert.addEventListener('click', async () => {
+      btnTestAlert.disabled = true;
+      btnTestAlert.textContent = 'Sending…';
+      try {
+        const res = await fetch('/api/telegram/test', {
+          method: 'POST',
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to deliver test alert');
+        showToast(`Test alert delivered in ${data.latencyMs || 800}ms! Check Telegram.`);
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        btnTestAlert.disabled = false;
+        btnTestAlert.textContent = 'Send Test Alert';
+      }
+    });
+  }
+}
+
+function startTgPolling() {
+  if (tgPollInterval) clearInterval(tgPollInterval);
+  tgPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/telegram/status', { credentials: 'include' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.status === 'connected') {
+        clearInterval(tgPollInterval);
+        tgPollInterval = null;
+        showToast('Telegram successfully connected!');
+        await refreshTelegramStatus();
+      }
+    } catch (e) {}
+  }, 2500);
+}
+
+async function refreshTelegramStatus() {
+  try {
+    const res = await fetch('/api/telegram/status', { credentials: 'include' });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const badge = document.getElementById('tg-status-badge');
+    const disconnectedView = document.getElementById('tg-disconnected-view');
+    const connectedView = document.getElementById('tg-connected-view');
+    const usernameEl = document.getElementById('val-tg-username');
+    const toggleBtn = document.getElementById('btn-toggle-tg-alerts');
+    const sublabel = document.getElementById('lbl-tg-alert-sublabel');
+
+    if (data.status === 'connected') {
+      if (badge) {
+        badge.textContent = 'Connected';
+        badge.className = 'settings-badge success';
+      }
+      if (disconnectedView) disconnectedView.style.display = 'none';
+      if (connectedView) connectedView.style.display = 'block';
+
+      if (usernameEl) {
+        const u = data.telegram_username ? `@${data.telegram_username}` : `Chat ID: ${data.telegram_chat_id || 'Active'}`;
+        usernameEl.textContent = u;
+      }
+
+      const alertsEnabled = data.telegram_alerts_enabled !== false;
+      if (toggleBtn) {
+        toggleBtn.setAttribute('data-enabled', alertsEnabled ? 'true' : 'false');
+        toggleBtn.textContent = alertsEnabled ? 'Mute Alerts' : 'Unmute Alerts';
+      }
+      if (sublabel) {
+        sublabel.textContent = alertsEnabled
+          ? 'Active: Real-time photo alerts are delivered to your chat'
+          : 'Muted: Threat notifications are temporarily paused';
+        sublabel.style.color = alertsEnabled ? 'var(--text-3)' : '#f59e0b';
+      }
+    } else {
+      if (badge) {
+        badge.textContent = 'Disconnected';
+        badge.className = 'settings-badge info';
+      }
+      if (disconnectedView) disconnectedView.style.display = 'block';
+      if (connectedView) connectedView.style.display = 'none';
+    }
+  } catch (err) {
+    console.warn('Failed to refresh telegram status:', err);
+  }
+}
+

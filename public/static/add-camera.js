@@ -406,6 +406,7 @@ function attachStep3Events() {
       try {
         const res = await fetch('/api/cameras', {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             'X-Security-Pin': pin
