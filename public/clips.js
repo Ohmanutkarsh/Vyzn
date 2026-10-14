@@ -65,6 +65,41 @@ function populateCameraDropdowns() {
   if (mobileSelect) mobileSelect.innerHTML = optionsHtml;
 }
 
+// In simple terms: if clips exist from cameras that were removed, add them as "(Archived)" in the camera filter dropdown
+function updateCameraDropdownsWithArchived(clips) {
+  const activeIds = new Set(allCameras.map(c => c.id || c.camera_id));
+  const archivedMap = new Map();
+  (clips || []).forEach(clip => {
+    const cid = clip.cameraId || clip.camera_id;
+    if (cid && !activeIds.has(cid) && !archivedMap.has(cid)) {
+      archivedMap.set(cid, clip.cameraName || clip.camera_name || `Camera ${cid.slice(-4)}`);
+    }
+  });
+
+  if (archivedMap.size > 0) {
+    const desktopSelect = document.getElementById('filter-camera');
+    const mobileSelect = document.getElementById('m-filter-camera');
+    const currentVal = desktopSelect ? desktopSelect.value : 'all';
+
+    let optionsHtml = ['<option value="all">All</option>']
+      .concat(allCameras.map(c => `<option value="${escapeHtml(c.id || c.camera_id)}">${escapeHtml(c.name)}</option>`));
+
+    archivedMap.forEach((name, cid) => {
+      optionsHtml.push(`<option value="${escapeHtml(cid)}">${escapeHtml(name)} (Archived)</option>`);
+    });
+
+    const finalHtml = optionsHtml.join('');
+    if (desktopSelect) {
+      desktopSelect.innerHTML = finalHtml;
+      desktopSelect.value = currentVal;
+    }
+    if (mobileSelect) {
+      mobileSelect.innerHTML = finalHtml;
+      mobileSelect.value = currentVal;
+    }
+  }
+}
+
 /**
  * Reads initial filter state from URL search params.
  */
@@ -298,6 +333,9 @@ async function loadClips() {
     loadedClips = data.clips || [];
     const total = data.total !== undefined ? data.total : loadedClips.length;
 
+    // In simple terms: update the camera dropdown so any cameras with existing clips can be selected
+    updateCameraDropdownsWithArchived(loadedClips);
+
     if (summaryBadge) {
       summaryBadge.textContent = t('clips.summary', { count: total }, `${total} clips in the last 72 h`);
     }
@@ -324,6 +362,9 @@ async function loadClips() {
 
     grid.innerHTML = loadedClips.map(clip => renderClipCard({ clip })).join('');
 
+    // Start managing inline video previews so visible clips auto-play up to 3 at once
+    initInlinePreviews(grid);
+
     // Attach card click handlers to open drawer
     grid.querySelectorAll('.clip-card').forEach(card => {
       const cid = card.getAttribute('data-clip-id');
@@ -342,6 +383,115 @@ async function loadClips() {
   } catch (e) {
     console.error('Error fetching clips:', e);
   }
+}
+
+// Global observer variable that monitors which preview videos are currently visible on screen
+let inlinePreviewObserver = null;
+
+// This function manages inline video playback so clips automatically play when visible on screen.
+// To keep the computer running fast and smooth, at most 3 videos can play at the same time.
+function initInlinePreviews(container) {
+  // Clean up any previous screen observer before setting up new clips
+  if (inlinePreviewObserver) {
+    inlinePreviewObserver.disconnect();
+  }
+
+  // Keeps track of the videos that are currently playing right now (max 3)
+  const activePlaying = new Set();
+  // Keeps track of all videos currently in view on the screen
+  const visibleVideos = [];
+
+  // Helper function to balance playback: stop out-of-view videos and start visible ones up to 3
+  const syncPlayback = () => {
+    // Stop any video that has scrolled out of view
+    for (const vid of Array.from(activePlaying)) {
+      if (!visibleVideos.includes(vid)) {
+        vid.pause();
+        vid.style.opacity = '0';
+        activePlaying.delete(vid);
+      }
+    }
+
+    // Play visible videos up to the 3-video maximum limit
+    for (const vid of visibleVideos) {
+      if (activePlaying.size >= 3) break;
+      if (!activePlaying.has(vid)) {
+        // Set video source URL right before playing to save bandwidth
+        if (!vid.src && vid.dataset.src) {
+          vid.src = vid.dataset.src;
+        }
+        vid.play().then(() => {
+          vid.style.opacity = '1';
+          activePlaying.add(vid);
+        }).catch(() => {
+          // Browser may block automatic playback; silently ignore
+        });
+      }
+    }
+  };
+
+  // Watch the screen to detect when clip cards appear or scroll away
+  inlinePreviewObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      const vid = entry.target;
+      if (entry.isIntersecting) {
+        if (!visibleVideos.includes(vid)) {
+          visibleVideos.push(vid);
+        }
+      } else {
+        const idx = visibleVideos.indexOf(vid);
+        if (idx !== -1) {
+          visibleVideos.splice(idx, 1);
+        }
+      }
+    });
+    syncPlayback();
+  }, {
+    root: null,
+    rootMargin: '50px',
+    threshold: 0.3 // Trigger when at least 30% of the clip is visible
+  });
+
+  // Find all inline preview videos in the gallery
+  const videoElements = container.querySelectorAll('.clip-inline-preview');
+  videoElements.forEach(vid => {
+    // Observe this video for screen visibility
+    inlinePreviewObserver.observe(vid);
+
+    // Track playback time to move the blue playhead marker across the bottom seek bar
+    const card = vid.closest('.clip-card');
+    const playhead = card ? card.querySelector('.clip-playhead-marker') : null;
+    if (playhead) {
+      vid.addEventListener('timeupdate', () => {
+        if (vid.duration > 0) {
+          const pct = (vid.currentTime / vid.duration) * 100;
+          playhead.style.left = `${pct}%`;
+        }
+      });
+    }
+
+    // Desktop hover support: preview plays immediately if user moves the mouse over the card
+    if (card) {
+      card.addEventListener('mouseenter', () => {
+        if (!vid.src && vid.dataset.src) vid.src = vid.dataset.src;
+        if (!activePlaying.has(vid)) {
+          // If already at 3 playing, pause the oldest one to make room
+          if (activePlaying.size >= 3) {
+            const oldest = activePlaying.values().next().value;
+            if (oldest) {
+              oldest.pause();
+              oldest.style.opacity = '0';
+              activePlaying.delete(oldest);
+            }
+          }
+          vid.play().then(() => {
+            vid.style.opacity = '1';
+            activePlaying.add(vid);
+          }).catch(() => {});
+        }
+      });
+    }
+  });
 }
 
 /**

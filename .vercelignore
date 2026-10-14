@@ -1,0 +1,42 @@
+# Development and tests
+.git
+.github
+.gemini
+.pytest_cache
+tests/
+tools/
+scratch/
+data/
+*.log
+
+# Heavy local assets and dossiers
+*.png
+*.jpg
+*.pdf
+cockpit_b64.txt
+*.db
+*.db-wal
+*.db-shm
+
+# Edge and Docker specific
+vyzn/
+run_edge.py
+Dockerfile
+docker-compose.yml
+Procfile
+requirements.txt
+generate_pdf_dossier.py
+ROADMAP.md
+SCORING_SPEC.md
+spec_v1_1.md
+vyzn_plan.md
+vyzn_prd.md
+vyzn_style_guide.md
+vyzn_tech_stack.md
+VYZN_Prototype_Dossier.html
+
+# Environments
+.env
+.venv/
+env/
+venv/
