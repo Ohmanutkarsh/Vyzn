@@ -1,45 +1,22 @@
 {
+  "outputDirectory": "public",
   "cleanUrls": true,
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index.py"
-    },
-    {
-      "source": "/overview",
-      "destination": "/overview.html"
+      "destination": "/api"
     },
     {
       "source": "/cameras/new",
       "destination": "/add-camera.html"
     },
     {
-      "source": "/cameras",
-      "destination": "/cameras.html"
-    },
-    {
       "source": "/areas/(.*)",
-      "destination": "/areas.html"
-    },
-    {
-      "source": "/areas",
       "destination": "/areas.html"
     },
     {
       "source": "/clips/(.*)",
       "destination": "/clips.html"
-    },
-    {
-      "source": "/clips",
-      "destination": "/clips.html"
-    },
-    {
-      "source": "/settings",
-      "destination": "/settings.html"
-    },
-    {
-      "source": "/design",
-      "destination": "/design.html"
     },
     {
       "source": "/login/(.*)",
@@ -51,10 +28,6 @@
     },
     {
       "source": "/setup/(.*)",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/",
       "destination": "/index.html"
     }
   ]

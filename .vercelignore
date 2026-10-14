@@ -24,7 +24,7 @@ run_edge.py
 Dockerfile
 docker-compose.yml
 Procfile
-requirements.txt
+requirements-edge.txt
 generate_pdf_dossier.py
 ROADMAP.md
 SCORING_SPEC.md
