@@ -16,13 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="VYZN Cloud Serverless Console", version="2.0.0")
-
-try:
-    from mangum import Mangum
-    handler = Mangum(app)
-except Exception:
-    handler = app
+app = FastAPI(title="VYZN Cloud Serverless Console", version="2.0.0", redirect_slashes=False)
 
 app.add_middleware(
     CORSMiddleware,
