@@ -18,6 +18,12 @@ from pydantic import BaseModel
 
 app = FastAPI(title="VYZN Cloud Serverless Console", version="2.0.0")
 
+try:
+    from mangum import Mangum
+    handler = Mangum(app)
+except Exception:
+    handler = app
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -1,72 +1,61 @@
 {
-  "version": 2,
   "cleanUrls": true,
-  "builds": [
+  "rewrites": [
     {
-      "src": "api/index.py",
-      "use": "@vercel/python"
-    }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/index.py"
+      "source": "/api/(.*)",
+      "destination": "/api/index.py"
     },
     {
-      "src": "/static/(.*)",
-      "dest": "/public/static/$1"
+      "source": "/overview",
+      "destination": "/overview.html"
     },
     {
-      "src": "/overview",
-      "dest": "/public/overview.html"
+      "source": "/cameras/new",
+      "destination": "/add-camera.html"
     },
     {
-      "src": "/cameras",
-      "dest": "/public/cameras.html"
+      "source": "/cameras",
+      "destination": "/cameras.html"
     },
     {
-      "src": "/cameras/new",
-      "dest": "/public/add-camera.html"
+      "source": "/areas/(.*)",
+      "destination": "/areas.html"
     },
     {
-      "src": "/areas",
-      "dest": "/public/areas.html"
+      "source": "/areas",
+      "destination": "/areas.html"
     },
     {
-      "src": "/areas/(.*)",
-      "dest": "/public/areas.html"
+      "source": "/clips/(.*)",
+      "destination": "/clips.html"
     },
     {
-      "src": "/clips",
-      "dest": "/public/clips.html"
+      "source": "/clips",
+      "destination": "/clips.html"
     },
     {
-      "src": "/clips/(.*)",
-      "dest": "/public/clips.html"
+      "source": "/settings",
+      "destination": "/settings.html"
     },
     {
-      "src": "/settings",
-      "dest": "/public/settings.html"
+      "source": "/design",
+      "destination": "/design.html"
     },
     {
-      "src": "/design",
-      "dest": "/public/design.html"
+      "source": "/login/(.*)",
+      "destination": "/index.html"
     },
     {
-      "src": "/login",
-      "dest": "/public/index.html"
+      "source": "/login",
+      "destination": "/index.html"
     },
     {
-      "src": "/login/(.*)",
-      "dest": "/public/index.html"
+      "source": "/setup/(.*)",
+      "destination": "/index.html"
     },
     {
-      "src": "/setup/(.*)",
-      "dest": "/public/index.html"
-    },
-    {
-      "src": "/",
-      "dest": "/public/index.html"
+      "source": "/",
+      "destination": "/index.html"
     }
   ]
 }
