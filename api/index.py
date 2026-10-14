@@ -26,13 +26,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def normalize_api_path(request: Request, call_next):
-    path = request.scope.get("path", "")
-    if path and not path.startswith("/api"):
-        request.scope["path"] = f"/api{path}"
-    return await call_next(request)
-
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
@@ -496,6 +489,17 @@ def get_status():
             "active_cameras": len(CAMERAS_STORE)
         }
     }
+
+# Register route aliases so endpoints resolve whether called with or without /api
+for route in list(app.routes):
+    if hasattr(route, "path") and route.path.startswith("/api/"):
+        alt_path = route.path[4:]  # e.g., '/status'
+        app.add_api_route(
+            alt_path,
+            route.endpoint,
+            methods=getattr(route, "methods", ["GET"]),
+            name=f"{route.name}_alias"
+        )
 
 # ---------------------------------------------------------------------------
 # Fallback Static Page Routes
