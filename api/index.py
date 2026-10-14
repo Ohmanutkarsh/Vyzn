@@ -32,6 +32,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def normalize_api_path(request: Request, call_next):
+    path = request.scope.get("path", "")
+    if path and not path.startswith("/api"):
+        request.scope["path"] = f"/api{path}"
+    return await call_next(request)
+
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 
 # ---------------------------------------------------------------------------
