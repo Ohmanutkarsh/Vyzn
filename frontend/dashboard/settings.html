@@ -254,13 +254,15 @@
             <div id="phone-feedback" style="font-size: 12px; margin-top: 6px; display: none;"></div>
           </div>
 
-          <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+          <!-- Connect VYZN Security Bot button (Where add number is) -->
+          <!-- In simple terms: this lets users click one button to open the Telegram bot and link alerts -->
+          <div style="background: var(--bg-2); border: 1px solid var(--border-subtle); border-radius: 8px; padding: 16px; margin-top: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
             <div>
-              <div style="font-size: 13px; font-weight: 500; color: var(--text-1);">Prefer Telegram Alerts?</div>
-              <div style="font-size: 12px; color: var(--text-3);">Get real-time CCTV alerts & screenshots without SMS limits.</div>
+              <div style="font-size: 14px; font-weight: 600; color: var(--text-1);">Connect VYZN Security Bot</div>
+              <div style="font-size: 12px; color: var(--text-3); margin-top: 2px;">Official bot: <strong style="color: #60a5fa;">@Vyzn_security_bot</strong></div>
             </div>
-            <button type="button" class="btn btn-secondary" id="btn-phone-card-connect-tg" style="display: inline-flex; align-items: center; gap: 6px;">
-              <span>✈️</span> Connect Telegram
+            <button type="button" class="btn btn-primary" id="btn-phone-card-connect-tg" style="display: inline-flex; align-items: center; gap: 6px;">
+              <span>✈️</span> Connect VYZN Telegram
             </button>
           </div>
         </section>
@@ -344,9 +346,61 @@
                 </button>
               </div>
             </div>
+          <!-- Telegram Bot Token Configuration from BotFather -->
+          <!-- In simple terms: paste the token given by Telegram's @BotFather so the server can talk to Telegram -->
+          <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-subtle);">
+            <div style="font-size: 13px; font-weight: 500; color: var(--text-1); margin-bottom: 4px;">Telegram Bot Token (@BotFather)</div>
+            <div style="font-size: 12px; color: var(--text-3); margin-bottom: 8px;">Enter your Telegram Bot Token to activate the long-polling dispatcher for instant notifications.</div>
+            <div class="settings-input-wrap">
+              <input type="password" class="settings-input" id="input-tg-bot-token" placeholder="Paste bot token (e.g. 123456789:ABCdef...)" autocomplete="off">
+              <button type="button" class="btn btn-secondary" id="btn-save-tg-bot-token">Save Token</button>
+            </div>
+            <div id="tg-token-feedback" style="font-size: 12px; margin-top: 6px; display: none;"></div>
           </div>
 
           <div id="tg-feedback" style="font-size: 12px; margin-top: 10px; display: none;"></div>
+        </section>
+
+        <!-- Business Hours & Operating Schedule -->
+        <!-- In simple terms: lets the user set their business opening and closing times -->
+        <section class="settings-card" aria-labelledby="card-bh-title">
+          <div class="settings-card-header">
+            <h3 class="settings-card-title" id="card-bh-title">
+              <span>🕒</span> Business Hours & Schedule
+            </h3>
+            <span class="settings-badge info" id="bh-status-badge">Active</span>
+          </div>
+
+          <p style="font-size: 13px; color: var(--text-2); margin: 0 0 16px 0; line-height: 1.5;">
+            Configure your shop or society operating hours. During operating hours, routine customer visits are reviewed normally. Outside these hours (after-hours), unexpected intrusions trigger elevated alerts.
+          </p>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Enforce Business Hours</div>
+              <div class="settings-sublabel">Enable after-hours threat monitoring when premises is closed</div>
+            </div>
+            <div>
+              <input type="checkbox" id="cb-bh-enabled" checked style="width: 18px; height: 18px; cursor: pointer;">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px;">
+            <div>
+              <label class="settings-label" for="input-bh-start" style="display: block; margin-bottom: 6px;">Opening Time</label>
+              <input type="time" class="settings-input" id="input-bh-start" value="09:00" style="width: 100%;">
+            </div>
+            <div>
+              <label class="settings-label" for="input-bh-end" style="display: block; margin-bottom: 6px;">Closing Time</label>
+              <input type="time" class="settings-input" id="input-bh-end" value="21:00" style="width: 100%;">
+            </div>
+          </div>
+
+          <div style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 12px; color: var(--text-3);">Standard: <strong>09:00 AM – 09:00 PM</strong></span>
+            <button type="button" class="btn btn-primary" id="btn-save-bh">Save Business Hours</button>
+          </div>
+          <div id="bh-feedback" style="font-size: 12px; margin-top: 8px; display: none;"></div>
         </section>
 
         <!-- 4. Appearance & Theme -->
@@ -401,36 +455,78 @@
           <div id="pin-feedback" style="font-size: 12px; margin-top: 8px; display: none;"></div>
         </section>
 
-        <!-- 5. 72-Hour Hard Purge & Storage Status -->
+        <!-- 5. Storage Space Folder & Safe Video Retention -->
         <section class="settings-card" aria-labelledby="card-purge-title">
           <div class="settings-card-header">
             <h3 class="settings-card-title" id="card-purge-title">
-              <span>⏳</span> 72-Hour Hard Purge & Edge Storage
+              <span>💾</span> Storage Space & Video Footages Folder
             </h3>
-            <span class="settings-badge info">Active</span>
+            <span class="settings-badge success" id="storage-status-badge">Active</span>
           </div>
 
           <div class="purge-guarantee-box">
             <span style="font-size: 20px;">🛡️</span>
             <div>
-              <strong>72-Hour Privacy Hard Purge Guarantee:</strong> All continuous video recordings and motion evidence clips are preserved on local encrypted NVMe storage for exactly 72 hours, after which they are permanently shredded automatically.
+              <strong>Crash-Resistant Storage Protection:</strong> All continuous video footages, camera recordings, and incident clips are stored in this dedicated directory. Your recordings are permanently protected and will <strong>never</strong> be removed or wiped on system errors or restarts.
             </div>
           </div>
 
-          <div class="settings-row" style="margin-top: 14px;">
+          <!-- Configurable Storage Space Folder Input -->
+          <div style="margin-top: 16px;">
+            <label class="settings-label" for="input-storage-folder" style="display: block; margin-bottom: 6px;">
+              Video & Clips Storage Directory
+            </label>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <input type="text" class="settings-input" id="input-storage-folder" placeholder="e.g. C:\Vyzn Ai\data\clips or D:\Recordings" style="flex: 1; min-width: 260px; font-family: var(--font-mono, monospace);">
+              <input type="file" id="input-folder-picker" webkitdirectory directory style="display: none;">
+              <button type="button" class="btn btn-secondary" id="btn-browse-folder" style="white-space: nowrap;">📁 Choose Folder</button>
+              <button type="button" class="btn btn-primary" id="btn-save-storage" style="white-space: nowrap;">Save Storage Folder</button>
+            </div>
+            <div id="storage-feedback" style="font-size: 12px; margin-top: 6px; display: none;"></div>
+          </div>
+
+          <div class="settings-row" style="margin-top: 16px;">
             <div>
-              <div class="settings-label">Edge Disk Free Space</div>
-              <div class="settings-sublabel">Local solid-state video buffer headroom</div>
+              <div class="settings-label">Active Storage Folder</div>
+              <div class="settings-sublabel">Full path on disk where camera 1 & clips are written</div>
+            </div>
+            <div class="settings-value" id="val-storage-path" style="font-size: 12px; word-break: break-all;">Loading…</div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Disk Space Available</div>
+              <div class="settings-sublabel">Headroom on selected storage partition</div>
             </div>
             <div class="settings-value" id="val-disk-free">Calculating…</div>
           </div>
 
           <div class="settings-row">
             <div>
-              <div class="settings-label">Ring Buffer Retention</div>
-              <div class="settings-sublabel">Maximum age before automatic purge</div>
+              <div class="settings-label">Total Preserved Clips</div>
+              <div class="settings-sublabel">Verified video evidence events safely stored</div>
+            </div>
+            <div class="settings-value" id="val-clips-stored">—</div>
+          </div>
+
+          <div class="settings-row">
+            <div>
+              <div class="settings-label">Ring Buffer Maximum Retention</div>
+              <div class="settings-sublabel">Standard retention period before automatic cleanup</div>
             </div>
             <div class="settings-value">72 hours</div>
+          </div>
+
+          <div class="settings-row" style="border-top: 1px dashed var(--border, rgba(255,255,255,0.08)); padding-top: 14px; margin-top: 14px;">
+            <div>
+              <div class="settings-label" style="color: var(--alert, #ef4444);">Purge Previous Clips</div>
+              <div class="settings-sublabel">Delete all historical clips and test footages from database & disk</div>
+            </div>
+            <div>
+              <button type="button" class="btn btn-secondary" id="btn-purge-all-clips" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">
+                🗑️ Delete All Previous Clips
+              </button>
+            </div>
           </div>
         </section>
       </div>

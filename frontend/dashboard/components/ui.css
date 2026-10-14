@@ -1585,6 +1585,12 @@
   stroke-width: 2.5px;
 }
 
+/* In simple terms: visual styling for ignore areas - dashed grey border to signify motion exclusion */
+.area-polygon.is-ignore {
+  stroke: var(--text-3);
+  stroke-dasharray: 6 4;
+}
+
 .area-polygon.draft-polygon {
   stroke-dasharray: 4 4;
 }
@@ -1650,11 +1656,11 @@
 }
 
 .area-handle-midpoint-vis {
-  fill: var(--bg-surface);
-  stroke: var(--text-3);
-  stroke-width: 1.5px;
-  stroke-dasharray: 2 2;
+  fill: #ffffff;
+  stroke: var(--action, #3b82f6);
+  stroke-width: 2px;
   pointer-events: none;
+  transition: transform 120ms ease;
 }
 
 .areas-canvas-footer {
@@ -1801,6 +1807,11 @@
 
 .area-tier-icon.review {
   color: var(--review);
+}
+
+/* In simple terms: icon color for ignore areas (neutral muted grey) */
+.area-tier-icon.ignore {
+  color: var(--text-3);
 }
 
 .area-item-name {
@@ -2472,18 +2483,28 @@
   overflow-y: auto;
 }
 
-/* Custom Player 16:9 */
+/* Custom Player 16:9 container */
+/* In simple terms: this box holds the CCTV video inside the drawer. We set width to 100% and min-height to 240px so it never collapses to zero height. */
 .drawer-player-box {
   position: relative;
+  width: 100%;
+  min-height: 240px;
   aspect-ratio: 16 / 9;
-  background: var(--video-bg);
+  background: #000000;
   border-radius: var(--radius-interactive);
   overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+/* In simple terms: this makes the video tag fill the box completely without overflowing */
 .drawer-video-el {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  display: block;
+  background: #000000;
 }
 .drawer-overlay-canvas {
   position: absolute;

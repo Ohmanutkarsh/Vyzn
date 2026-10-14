@@ -240,3 +240,124 @@ def test_snapshot_refresh_endpoint(setup_env):
     data = res.json()
     assert data["ok"] is True
     assert "snapshot_url" in data
+
+
+# ---------------------------------------------------------------------------
+# Tests for Ignore Area Response and Business Hours Settings
+# ---------------------------------------------------------------------------
+
+def test_ignore_area_creation_and_restricted_exclusion(setup_env):
+    """
+    Verifies that a watch area can be configured with response='ignore',
+    is preserved in watch_areas, and is NOT synced to restricted_zones.
+    """
+    db, settings = setup_env
+    client = TestClient(app)
+    cam_id = "cam_test_entrance"
+
+    payload = {
+        "areas": [
+            {
+                "name": "Ceiling Fan",
+                "polygon": [[0.1, 0.1], [0.4, 0.1], [0.4, 0.4], [0.1, 0.4]],
+                "response": "ignore",
+                "min_stay_seconds": 0,
+                "schedule": "always"
+            },
+            {
+                "name": "Front Door",
+                "polygon": [[0.6, 0.6], [0.9, 0.6], [0.9, 0.9], [0.6, 0.9]],
+                "response": "alert",
+                "min_stay_seconds": 0,
+                "schedule": "always"
+            }
+        ]
+    }
+
+    res = client.put(f"/api/cameras/{cam_id}/areas", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert len(data["areas"]) == 2
+    assert data["areas"][0]["response"] == "ignore"
+    assert data["areas"][1]["response"] == "alert"
+
+    # Check camera object in settings
+    cam = next(c for c in settings.cameras if c.camera_id == cam_id)
+    assert len(cam.watch_areas) == 2
+    # restricted_zones must ONLY have the alert area, NOT the ignore area
+    assert len(cam.restricted_zones) == 1
+    assert cam.restricted_zones[0].name == "Front Door"
+
+
+def test_mog2_ignore_polygon_exclusion():
+    """
+    Verifies that motion occurring inside an ignore area polygon is masked out
+    and excluded from triggering motion alarms.
+    """
+    gate = MOG2MotionGate(history=50, var_threshold=16.0, min_motion_ratio=0.01)
+    cam_id = "cam_ignore_test"
+
+    # Define an ignore polygon in the top-left corner: [0.0, 0.0] to [0.4, 0.4]
+    fan_ignore_polygon = [
+        [0.0, 0.0],
+        [0.4, 0.0],
+        [0.4, 0.4],
+        [0.0, 0.4]
+    ]
+
+    # Clean background
+    bg = np.zeros((100, 100, 3), dtype=np.uint8)
+    for _ in range(20):
+        gate.process_frame(cam_id, bg)
+
+    # Simulate fan motion inside the ignore area (x from 10 to 30, y from 10 to 30)
+    fan_motion = bg.copy()
+    cv2.rectangle(fan_motion, (10, 10), (30, 30), (255, 255, 255), -1)
+
+    has_motion, ratio, _ = gate.process_frame(
+        cam_id,
+        fan_motion,
+        ignore_polygons=[fan_ignore_polygon]
+    )
+    assert not has_motion, "Motion inside ignore area must be completely suppressed!"
+    assert ratio < 0.005
+
+
+def test_business_hours_settings_api(setup_env):
+    """
+    Verifies GET and POST /api/settings/business-hours endpoints:
+    1. Reads default business hours.
+    2. Updates opening and closing hours.
+    3. Confirms new hours are saved to camera configuration.
+    """
+    db, settings = setup_env
+    client = TestClient(app)
+
+    # 1. GET business hours
+    res = client.get("/api/settings/business-hours")
+    assert res.status_code == 200
+    data = res.json()
+    assert "start_time" in data
+    assert "end_time" in data
+    assert data["enabled"] is True
+
+    # 2. POST updated business hours
+    update_payload = {
+        "enabled": True,
+        "start_time": "10:30",
+        "end_time": "22:15"
+    }
+    post_res = client.post("/api/settings/business-hours", json=update_payload)
+    assert post_res.status_code == 200
+    post_data = post_res.json()
+    assert post_data["ok"] is True
+    assert post_data["business_hours"]["start_time"] == "10:30"
+    assert post_data["business_hours"]["end_time"] == "22:15"
+
+    # 3. Verify camera in settings was updated
+    for cam in settings.cameras:
+        assert cam.business_hours.start_hour == 10
+        assert cam.business_hours.start_minute == 30
+        assert cam.business_hours.end_hour == 22
+        assert cam.business_hours.end_minute == 15

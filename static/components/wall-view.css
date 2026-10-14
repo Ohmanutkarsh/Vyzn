@@ -1,0 +1,461 @@
+/* ==========================================================================
+   VYZN Wall View Stylesheet (End-to-End Fullscreen Camera Grid)
+   ========================================================================== */
+
+/* Fullscreen Wall Container */
+#wall-view-container {
+  display: none;
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #000000;
+  z-index: 999999;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  font-family: var(--font-ui, "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#wall-view-container.is-active,
+#wall-view-container:fullscreen,
+#wall-view-container:-webkit-full-screen {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  height: 100% !important;
+  background-color: #000000 !important;
+  z-index: 999999 !important;
+}
+
+/* In simple terms: auto-hide cursor and control bars when idle for 3 seconds */
+#wall-view-container.is-idle {
+  cursor: none;
+}
+
+#wall-view-container.is-idle .wall-top-bar,
+#wall-view-container.is-idle .tile-overlay,
+#wall-view-container.is-idle .wall-page-dots {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+/* Top Navigation Bar */
+.wall-top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.4) 75%, transparent 100%);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  z-index: 100;
+  color: #F8FAFC;
+  transition: opacity 0.25s ease;
+}
+
+.wall-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.wall-clock {
+  font-family: var(--font-mono, "IBM Plex Mono", monospace);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #F8FAFC;
+}
+
+.wall-connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #94A3B8;
+}
+
+.wall-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #10B981;
+}
+
+.wall-status-dot.reconnecting {
+  background-color: #F59E0B;
+}
+
+.wall-status-dot.offline {
+  background-color: #EF4444;
+}
+
+.wall-bar-center {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wall-mode-toggle {
+  display: inline-flex;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.wall-mode-btn {
+  background: transparent;
+  border: none;
+  color: #94A3B8;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.wall-mode-btn.is-active {
+  background: #3B82F6;
+  color: #FFFFFF;
+}
+
+.wall-lock-btn {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #94A3B8;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.wall-lock-btn.is-locked {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #F87171;
+}
+
+.wall-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wall-spotlight-indicator {
+  font-size: 12px;
+  color: #38BDF8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: none;
+}
+
+.wall-exit-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #F8FAFC;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color 0.15s ease;
+}
+
+.wall-exit-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Page Indicator Dots */
+.wall-page-dots {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 4px 12px;
+  border-radius: 16px;
+  z-index: 100;
+  transition: opacity 0.25s ease;
+}
+
+.wall-page-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.wall-page-dot.is-active {
+  background: #3B82F6;
+  width: 10px;
+  height: 10px;
+}
+
+.wall-rotation-status {
+  font-size: 11px;
+  color: #94A3B8;
+  margin-left: 6px;
+}
+
+/* End-to-End Grid Container */
+.wall-grid-area {
+  flex: 1;
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  gap: 2px;
+  background-color: #000000;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+/* Single Camera Tile */
+.wall-tile {
+  position: relative;
+  background-color: #0B0F19;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-sizing: border-box;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* In simple terms: border colored by real 3-second threat score */
+.wall-tile.border-neutral {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.wall-tile.border-amber {
+  border-color: #F59E0B;
+}
+
+.wall-tile.border-red {
+  border-color: #EF4444;
+  box-shadow: inset 0 0 10px rgba(239, 68, 68, 0.5), 0 0 6px rgba(239, 68, 68, 0.5);
+  animation: wallPulse 1.8s infinite ease-in-out;
+}
+
+@keyframes wallPulse {
+  0% { border-color: #EF4444; }
+  50% { border-color: rgba(239, 68, 68, 0.35); }
+  100% { border-color: #EF4444; }
+}
+
+/* Video Frame Inside Tile */
+/* RULE: object-fit: contain, never crop or stretch! */
+.wall-tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background-color: #050811;
+}
+
+/* Tile Overlay Text & Badges */
+.tile-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px 10px;
+  transition: opacity 0.25s ease;
+  z-index: 10;
+}
+
+.tile-top-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tile-camera-name-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 3px 8px;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+}
+
+.tile-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #10B981;
+}
+
+.tile-dot.offline {
+  background-color: #EF4444;
+}
+
+.tile-dot.stale {
+  background-color: #F59E0B;
+}
+
+.tile-cam-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #F8FAFC;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.tile-status-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tile-status-pill.live {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34D399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.tile-status-pill.rec {
+  background: rgba(239, 68, 68, 0.25);
+  color: #F87171;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tile-status-pill.rec::before {
+  content: "●";
+  color: #EF4444;
+  animation: wallPulse 1s infinite;
+}
+
+.tile-bottom-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #CBD5E1;
+  font-family: var(--font-mono, "IBM Plex Mono", monospace);
+}
+
+.tile-score-tag {
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.tile-age-tag {
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* Stale Warning Overlay (no new frame > 5s) */
+.tile-stale-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(245, 158, 11, 0.9);
+  color: #000;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 4px;
+  z-index: 20;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  display: none;
+}
+
+/* Offline Overlay with Exponential Backoff Retry */
+.tile-offline-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(11, 15, 25, 0.94);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #94A3B8;
+  z-index: 25;
+  text-align: center;
+  padding: 16px;
+}
+
+.tile-offline-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #F87171;
+}
+
+.tile-offline-msg {
+  font-size: 12px;
+  color: #94A3B8;
+}
+
+.tile-retry-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #F8FAFC;
+  padding: 4px 12px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 4px;
+  pointer-events: auto;
+}
+
+.tile-retry-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Spotlight Fullscreen View */
+.wall-tile.is-spotlight {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  width: 100vw;
+  height: 100vh;
+  border: none;
+  box-shadow: none;
+  animation: none;
+}

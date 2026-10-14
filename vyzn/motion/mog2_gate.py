@@ -6,6 +6,7 @@ Hardened against OSD timestamp noise, lighting shifts, compression artifacts, an
 
 from __future__ import annotations
 import cv2
+import math
 import numpy as np
 from collections import deque
 from typing import Tuple, Dict, List, Optional
@@ -46,6 +47,9 @@ class MOG2MotionGate:
         self._prev_mean_brightness: Dict[str, float] = {}
         self._history_ratios: Dict[str, deque] = {}
         self._had_global_change: Dict[str, bool] = {}
+        # In simple terms: track motion centroid history to detect and suppress periodic stationary motion (e.g. spinning fans, hair flutter)
+        self._motion_centroid_history: Dict[str, deque] = {}
+        self._periodic_motion_detected: Dict[str, bool] = {}
 
     def set_camera_contour_ratio(self, camera_id: str, ratio: float):
         """Sets per-camera minimum contour area ratio override."""
@@ -61,6 +65,8 @@ class MOG2MotionGate:
             self._frame_counts[camera_id] = 0
             self._history_ratios[camera_id] = deque(maxlen=self.smooth_window)
             self._had_global_change[camera_id] = False
+            self._motion_centroid_history[camera_id] = deque(maxlen=30)
+            self._periodic_motion_detected[camera_id] = False
         return self._subtractors[camera_id]
 
     def set_camera_areas(self, camera_id: str, polygons: Optional[List[List[List[float]]]] = None):
@@ -89,17 +95,23 @@ class MOG2MotionGate:
         """Returns True if the most recent frame had a global lighting / IR switch spike."""
         return self._had_global_change.get(camera_id, False)
 
+    def is_periodic_motion_detected(self, camera_id: str) -> bool:
+        """Returns True if the camera is currently detecting periodic stationary motion (e.g. spinning fan)."""
+        return self._periodic_motion_detected.get(camera_id, False)
+
     def process_frame(
         self,
         camera_id: str,
         frame: np.ndarray,
         watch_polygons: Optional[List[List[List[float]]]] = None,
         osd_polygons: Optional[List[List[List[float]]]] = None,
-        learning_rate: Optional[float] = None
+        learning_rate: Optional[float] = None,
+        tracked_boxes: Optional[List[List[float]]] = None,
+        ignore_polygons: Optional[List[List[List[float]]]] = None
     ) -> Tuple[bool, float, np.ndarray]:
         """
         Applies hardened MOG2 subtraction to frame with watch area ROI masking,
-        OSD exclusion, shadow suppression, morphological noise removal,
+        OSD exclusion, ignore area exclusion, shadow suppression, morphological noise removal,
         contour area filtering, warmup suppression, and lighting spike rejection.
 
         Returns:
@@ -121,6 +133,23 @@ class MOG2MotionGate:
         total_pixels = h * w
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
+        # In simple terms: prevent stationary tracked persons from being absorbed into background
+        feed_image = blurred
+        if tracked_boxes and frame_idx > self.warmup_frames:
+            try:
+                bg_img = subtractor.getBackgroundImage()
+                if bg_img is not None:
+                    bg_gray = cv2.cvtColor(bg_img, cv2.COLOR_BGR2GRAY) if len(bg_img.shape) == 3 else bg_img
+                    feed_image = blurred.copy()
+                    for box in tracked_boxes:
+                        bx1, by1, bx2, by2 = int(box[0] * w), int(box[1] * h), int(box[2] * w), int(box[3] * h)
+                        bx1, by1 = max(0, bx1), max(0, by1)
+                        bx2, by2 = min(w, bx2), min(h, by2)
+                        if bx2 > bx1 and by2 > by1:
+                            feed_image[by1:by2, bx1:bx2] = bg_gray[by1:by2, bx1:bx2]
+            except Exception:
+                feed_image = blurred
+
         # 2. Global lighting jump check (auto-exposure, day/night IR switch)
         cur_mean_brightness = float(np.mean(blurred))
         prev_mean = self._prev_mean_brightness.get(camera_id, cur_mean_brightness)
@@ -128,11 +157,20 @@ class MOG2MotionGate:
         brightness_jump = abs(cur_mean_brightness - prev_mean)
 
         # 3. Apply MOG2 with controlled learning rate
-        raw_fg = subtractor.apply(blurred, learningRate=lr)
+        raw_fg = subtractor.apply(feed_image, learningRate=lr)
 
         # 4. Shadow Elimination: drop shadow pixels (value 127 in OpenCV MOG2)
         # Foreground is 255; shadows are 127; background is 0. Threshold at 200 keeps only true foreground.
         _, fg_binary = cv2.threshold(raw_fg, 200, 255, cv2.THRESH_BINARY)
+
+        # Mark tracked object regions as foreground in fg_binary so stationary persons are never lost
+        if tracked_boxes:
+            for box in tracked_boxes:
+                bx1, by1, bx2, by2 = int(box[0] * w), int(box[1] * h), int(box[2] * w), int(box[3] * h)
+                bx1, by1 = max(0, bx1), max(0, by1)
+                bx2, by2 = min(w, bx2), min(h, by2)
+                if bx2 > bx1 and by2 > by1:
+                    fg_binary[by1:by2, bx1:bx2] = 255
 
         # 5. Check for global lighting / camera shift
         raw_foreground_ratio = cv2.countNonZero(fg_binary) / float(total_pixels)
@@ -170,11 +208,18 @@ class MOG2MotionGate:
         else:
             roi_mask = np.full((h, w), 255, dtype=np.uint8)
 
-        # Exclude OSD / Timestamp regions (zero out of roi_mask)
+        # In simple terms: zero out OSD text regions and ignore areas (like ceiling fans) from the ROI mask
+        # so motion occurring inside them is completely erased and produces zero motion pixels.
+        combined_exclusions = []
         if osd_list and len(osd_list) > 0:
-            for osd in osd_list:
-                if len(osd) >= 3:
-                    pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in osd], dtype=np.int32)
+            combined_exclusions.extend(osd_list)
+        if ignore_polygons and len(ignore_polygons) > 0:
+            combined_exclusions.extend(ignore_polygons)
+
+        if combined_exclusions:
+            for exc in combined_exclusions:
+                if len(exc) >= 3:
+                    pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in exc], dtype=np.int32)
                     cv2.fillPoly(roi_mask, [pts], 0)
 
         # Apply ROI mask to cleaned foreground
@@ -193,6 +238,42 @@ class MOG2MotionGate:
         # 10. Compute Motion Ratio & Moving Average Smoothing
         filtered_motion_pixels = cv2.countNonZero(final_fg)
         instant_ratio = filtered_motion_pixels / float(roi_pixels) if roi_pixels > 0 else 0.0
+
+        # Periodic stationary motion filter (e.g. spinning ceiling fans, hair flutter in front of camera)
+        # In simple terms: if moving pixels stay trapped in the exact same spot without translating across
+        # the camera view, and there is no verified tracked person there, classify it as periodic noise and suppress.
+        if camera_id not in self._motion_centroid_history:
+            self._motion_centroid_history[camera_id] = deque(maxlen=30)
+            self._periodic_motion_detected[camera_id] = False
+
+        if instant_ratio > 0.003 and contours:
+            c_largest = max(contours, key=cv2.contourArea)
+            M = cv2.moments(c_largest)
+            if M["m00"] > 0:
+                cx = (M["m10"] / M["m00"]) / float(w)
+                cy = (M["m01"] / M["m00"]) / float(h)
+                self._motion_centroid_history[camera_id].append((cx, cy))
+            else:
+                self._motion_centroid_history[camera_id].append((0.5, 0.5))
+        else:
+            self._motion_centroid_history[camera_id].clear()
+
+        # Check if centroid has zero spatial translation across 15+ frames
+        hist = self._motion_centroid_history[camera_id]
+        if len(hist) >= 15:
+            std_x = float(np.std([p[0] for p in hist]))
+            std_y = float(np.std([p[1] for p in hist]))
+            spatial_spread = math.hypot(std_x, std_y)
+            has_tracked_person = bool(tracked_boxes and len(tracked_boxes) > 0)
+            # If motion is stationary periodic oscillation and no confirmed tracked person is present
+            if spatial_spread < 0.018 and not has_tracked_person:
+                self._periodic_motion_detected[camera_id] = True
+                # Attenuate the motion ratio so a spinning fan doesn't keep the pipeline recording
+                instant_ratio = instant_ratio * 0.15
+            else:
+                self._periodic_motion_detected[camera_id] = False
+        else:
+            self._periodic_motion_detected[camera_id] = False
 
         ratios_hist = self._history_ratios[camera_id]
         ratios_hist.append(instant_ratio)
@@ -226,3 +307,7 @@ class MOG2MotionGate:
             del self._history_ratios[camera_id]
         if camera_id in self._had_global_change:
             del self._had_global_change[camera_id]
+        if camera_id in self._motion_centroid_history:
+            del self._motion_centroid_history[camera_id]
+        if camera_id in self._periodic_motion_detected:
+            del self._periodic_motion_detected[camera_id]

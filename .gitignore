@@ -16,4 +16,6 @@ node_modules/
 .vercel/
 *.log
 scratch/
+.gemini/
+config/storage.json
 

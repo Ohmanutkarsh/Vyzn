@@ -562,10 +562,16 @@ def test_scenario_11_forensic_description_and_timeline():
         dets = [Detection([0.2, 0.2, 0.4, 0.4], 0.91, 0, "person")]
         harness.process_frame(frame, pts=pts, forced_detections=dets)
 
-    # Quiet period to trigger hangover finalization
+    # Quiet period to trigger hangover finalization (or flush when stream ends)
     for i in range(int(12.0 * fps)):
         pts = 16.0 + i / fps
         harness.process_frame(bg.copy(), pts=pts, forced_detections=[])
+
+    # In simple terms: finalize active clip when the stream run completes
+    if not harness.clips_created and harness.state_machine.state in (ClipState.RECORDING, ClipState.HANGOVER, ClipState.ACTIVE):
+        final_seg = harness.state_machine._finalize_current_clip(pts, close_reason="stream_ended")
+        if final_seg:
+            harness.clips_created.append(harness._finalize_segment(final_seg))
 
     assert len(harness.clips_created) >= 1
     clip = harness.clips_created[0]

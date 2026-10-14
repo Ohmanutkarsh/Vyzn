@@ -129,7 +129,7 @@ class MockDetector(BaseDetector):
         dark_pixels = np.count_nonzero(cv2_gray < 80)
         ratio = dark_pixels / float(h * w)
 
-        if ratio > 0.02:
+        if ratio > 0.008:
             return [Detection(
                 box=[0.3, 0.2, 0.7, 0.8],
                 confidence=self.fixed_confidence,

@@ -1,11 +1,15 @@
-"""
-VYZN Scoring Engine v2.0 - 13-Layer Threat Scoring & Tier Determination.
-Deterministic, mathematically verified, fully explainable scoring pipeline.
-Levels 1-5, Layers 0-12 with strict tier boundaries:
-  - ALERT:  >= 70 (Immediate Telegram alert + Priority index)
-  - REVIEW: 30 - 69 (Kept saved, never auto-deleted by 72h job)
-  - LOW:    < 30 (Kept 72 hours, auto-purged by reaper)
-"""
+# ==============================================================================
+# VYZN AI THREAT SCORING ENGINE (THE BRAIN & JUDGE)
+#
+# WHY THIS EXISTS (FOR NON-PROGRAMMERS):
+# Standard CCTV cameras send hundreds of annoying false alarms (spiders, car lights,
+# shadows, wind). Nobody wants their phone buzzing 500 times a night.
+#
+# This Scoring Engine evaluates every single movement from 0 to 100 points:
+# - ALERT (Score >= 70): Real emergency! Sends immediate Telegram alert to your phone.
+# - REVIEW (Score 30 to 69): Kept saved on the website for you to see. Never auto-deleted.
+# - LOW (Score < 30): Harmless noise (bugs, shadows). Auto-purged after 72 hours.
+# ==============================================================================
 
 from __future__ import annotations
 import math
@@ -16,14 +20,20 @@ from vyzn.core.events import DetectionCandidate
 from vyzn.core.config import BusinessHours, ZonePolygon, get_scoring_config
 
 
+# ------------------------------------------------------------------------------
+# MATH HELPER: Round half up (0.5 always rounds up to 1, guaranteeing exact scores)
+# ------------------------------------------------------------------------------
 def round_half_up(val: float) -> int:
-    """Deterministic round half up implementation."""
     d = decimal.Decimal(str(round(val, 6)))
     return int(d.quantize(decimal.Decimal('1'), rounding=decimal.ROUND_HALF_UP))
 
 
+# ------------------------------------------------------------------------------
+# GEOMETRY HELPER: Check if a point (X, Y) is inside a drawn polygon area
+# Uses the classic "Ray Casting" algorithm: imagine shooting a laser from the
+# point to infinity. If it crosses the fence an odd number of times, it's inside!
+# ------------------------------------------------------------------------------
 def is_point_in_polygon(x: float, y: float, polygon_points: List[List[float]]) -> bool:
-    """Standard ray-casting algorithm for 2D point-in-polygon test."""
     n = len(polygon_points)
     if n < 3:
         return False
@@ -43,8 +53,10 @@ def is_point_in_polygon(x: float, y: float, polygon_points: List[List[float]]) -
     return inside
 
 
+# ------------------------------------------------------------------------------
+# BOUNDING BOX HELPER: Check if a detected person or car box touches a watch area
+# ------------------------------------------------------------------------------
 def check_box_intersects_zone(box: List[float], zone: ZonePolygon) -> bool:
-    """Checks if bounding box [x1, y1, x2, y2] intersects zone polygon."""
     if not zone.points or len(zone.points) < 3:
         return False
     x1, y1, x2, y2 = box
@@ -199,6 +211,16 @@ class ScoringEngine:
         """
         Evaluates candidate against Layers 0-12 and returns (final_score, should_alert, breakdown).
         """
+        # ==============================================================================
+        # STEP 1: LOAD RISK SCORING RULES & READ DETECTION DATA
+        # ------------------------------------------------------------------------------
+        # The AI grabs the rules configuration (or custom overrides for this specific camera)
+        # and extracts everything the camera just detected:
+        # - What was seen? (person, car, animal, carried bag, or unexplained motion)
+        # - How confident is the AI model? (0% to 100%)
+        # - Where is the object located on screen? (x, y coordinates and box size)
+        # - Is the camera in night infrared mode? Is it after business hours?
+        # ==============================================================================
         cfg = camera_override or self.get_config()
         l_cfg = cfg.get("level3_layers", {})
 
@@ -237,11 +259,21 @@ class ScoringEngine:
         is_shoulder_window = bool(getattr(candidate, "is_shoulder_window", False))
         d4_modifier_input = getattr(candidate, "d4_modifier", None)
 
-        # Authorized & shoulder window neutrality
+        # Authorized & shoulder window neutrality (e.g., scheduled morning trash pickup or guards)
         if is_authorized_window or is_shoulder_window:
             is_after_hours = False
 
-        # ── Layer 9: Reliability Multiplier R9 in [0.5, 1.0] ────────────────
+        # ==============================================================================
+        # STEP 2 (LAYER 9): CAMERA RELIABILITY MULTIPLIER (R9)
+        # ------------------------------------------------------------------------------
+        # Real-world CCTV cameras have glitches: rain drops, spider webs, headlights,
+        # or tiny distant objects.
+        # This layer checks if the detection looks "suspiciously fake or noisy":
+        # - Is the box tiny (less than 6% of the screen height)? Penalty applied.
+        # - Is AI confidence wildly flickering up and down? Penalty applied.
+        # - In night vision, does the shape look like an impossible wide streak (car headlight glare)?
+        # Multiplier scales the score between 0.5 (half confidence) and 1.0 (clean detection).
+        # ==============================================================================
         l9_cfg = l_cfg.get("layer9_reliability", {})
         r9 = 1.0
         if obj_type != "unclassified":
@@ -260,15 +292,26 @@ class ScoringEngine:
 
         r9 = max(l9_cfg.get("min_multiplier", 0.50), min(1.0, float(r9)))
 
-        # ── Layer 0: Context & Confirmation Gating ──────────────────────────
+        # ==============================================================================
+        # STEP 3 (LAYER 0): CONFIRMATION GATE & MINIMUM THREAT FLOORS
+        # ------------------------------------------------------------------------------
+        # To avoid buzzing the user's phone on single-frame glitches, an event must be
+        # "CONFIRMED": seen for at least 5 frames with solid confidence and clean image.
+        # If an intruder (person or vehicle) enters a restricted zone or appears after
+        # hours, we set a "threat floor" (e.g., minimum score 70) so critical threats
+        # cannot be accidentally dismissed.
+        # ==============================================================================
         l0_cfg = l_cfg.get("layer0", {})
         conf_min_hits = l0_cfg.get("confirmed_min_hits", 5)
         conf_min_conf = l0_cfg.get("confirmed_min_confidence", 0.45)
         conf_min_rel = l0_cfg.get("confirmed_min_reliability", 0.80)
 
+        # In simple terms: a real target must have verified confidence (>= 0.35 in restricted, >= 0.45 elsewhere)
+        # to avoid hair or spinning fan flicker from being falsely confirmed as an intruder.
+        min_required_conf = 0.35 if is_restricted else conf_min_conf
         is_confirmed = (
             track_hits >= conf_min_hits
-            and (c_mean >= conf_min_conf or is_restricted)
+            and c_mean >= min_required_conf
             and r9 >= conf_min_rel
             and obj_type in ["person", "vehicle", "animal", "carried_item"]
         )
@@ -277,7 +320,7 @@ class ScoringEngine:
         floors_cfg = l_cfg.get("layer4_threat_floors", {})
         threat_floor = 0
         is_active_restricted = is_restricted and (is_after_hours or not staff_expected)
-        if is_confirmed or (is_active_restricted and obj_type in ["person", "vehicle"] and track_hits >= 3):
+        if is_confirmed or (is_active_restricted and obj_type in ["person", "vehicle"] and track_hits >= 3 and c_mean >= 0.40):
             if obj_type == "person":
                 if is_after_hours or is_active_restricted:
                     base_floor = float(floors_cfg.get("person_after_hours_or_restricted", 70))
@@ -296,14 +339,24 @@ class ScoringEngine:
         elif obj_type == "unclassified" and is_restricted and is_after_hours and track_dur >= 3.0:
             threat_floor = float(floors_cfg.get("unexplained_motion_restricted_after_hours", 30))
 
-        # ── Layer 1: Motion Extent (0-10 pts) ────────────────────────────────
+        # ==============================================================================
+        # STEP 4 (LAYER 1): MOTION EXTENT (0 to 10 points)
+        # ------------------------------------------------------------------------------
+        # Measures how much of the camera's field of view is moving. A tiny flutter of leaves
+        # gets near 0 points; a full human body moving across the yard gets up to 10 points.
+        # ==============================================================================
         l1_cfg = l_cfg.get("layer1_motion_extent", {})
         l1_scale = l1_cfg.get("scale", 0.03)
         l1_max = l1_cfg.get("max_points", 10.0)
         l1 = l1_max * (1.0 - math.exp(-motion_ratio / max(1e-4, l1_scale)))
         l1 = max(0.0, min(float(l1_max), l1))
 
-        # ── Layer 2: Classification Confidence (0-15 pts) ───────────────────
+        # ==============================================================================
+        # STEP 5 (LAYER 2): AI CLASSIFICATION CONFIDENCE (0 to 15 points)
+        # ------------------------------------------------------------------------------
+        # The clearer the AI model sees the object (e.g. 95% confident it's a person),
+        # the more points it earns (up to 15 points).
+        # ==============================================================================
         l2_cfg = l_cfg.get("layer2_confidence", {})
         l2_min = l2_cfg.get("conf_min", 0.35)
         l2_range = l2_cfg.get("conf_range", 0.50)
@@ -314,13 +367,24 @@ class ScoringEngine:
             norm_c = max(0.0, min(1.0, (c_mean - l2_min) / max(1e-4, l2_range)))
             l2 = l2_max * norm_c
 
-        # ── Layer 3: Object Base Weight ─────────────────────────────────────
+        # ==============================================================================
+        # STEP 6 (LAYER 3): OBJECT BASE WEIGHT
+        # ------------------------------------------------------------------------------
+        # Humans are inherently higher security risks than cars, and cars are higher than cats.
+        # Persons get 20 points, vehicles 14 points, animals 5 points, unknown motion 0 points.
+        # ==============================================================================
         l3_weights = l_cfg.get("layer3_object_weights", {
             "person": 20, "vehicle": 14, "animal": 5, "carried_item": 3, "unclassified": 0
         })
         l3 = float(l3_weights.get(obj_type, 0.0))
 
-        # ── Layer 4: Nuisance Penalties ─────────────────────────────────────
+        # ==============================================================================
+        # STEP 7 (LAYER 4): NUISANCE DEDUCTIONS (FILTERING EVERYDAY DAYTIME NOISE)
+        # ------------------------------------------------------------------------------
+        # During broad daylight in open areas, people and cars are normal.
+        # We subtract points (-12 pts) so normal daytime foot traffic doesn't spam alerts.
+        # Unknown random motion gets a heavy penalty (-35 pts) to kill false alarms.
+        # ==============================================================================
         l4_penalties = l_cfg.get("layer4_nuisance_penalties", {
             "person": -12, "vehicle": -12, "animal": -4, "unclassified": -35, "unclassified_relaxed": -15
         })
@@ -333,9 +397,17 @@ class ScoringEngine:
         elif not is_after_hours and not is_restricted and not is_authorized_window and not is_shoulder_window:
             l4_pen = float(l4_penalties.get(obj_type, 0.0))
 
-        # ── Layer 5: Loitering (0-20 pts) ───────────────────────────────────
+        # ==============================================================================
+        # STEP 8 (LAYER 5): LOITERING / DWELL TIME (0 to 20 points)
+        # ------------------------------------------------------------------------------
+        # Someone walking past a gate in 3 seconds is normal.
+        # Someone standing still near a boundary for over 10 seconds (grace period) accumulates
+        # points steadily (0.4 points per second, up to 20 points).
+        # ==============================================================================
         dwell_sec = float(getattr(candidate, "dwell_sec", track_dur) if getattr(candidate, "dwell_sec", None) is not None else track_dur)
-        if obj_type != "person":
+        # In simple terms: loitering / dwell time can ONLY accumulate for confirmed person targets.
+        # Fleeting unconfirmed noise (like hair flutter or spinning fan motion) must NEVER accumulate loitering points.
+        if obj_type != "person" or not is_confirmed:
             dwell_sec = 0.0
         if staff_expected and not is_after_hours:
             dwell_sec = 0.0
@@ -347,7 +419,13 @@ class ScoringEngine:
         l5 = rate * max(0.0, dwell_sec - grace) * c_factor
         l5 = max(0.0, min(float(l5_cfg.get("max_points", 20.0)), l5))
 
-        # ── Layer 6: Zone Proximity ─────────────────────────────────────────
+        # ==============================================================================
+        # STEP 9 (LAYER 6): ZONE PROXIMITY (RESTRICTED OR WATCH AREAS)
+        # ------------------------------------------------------------------------------
+        # If the society admin drew a polygon zone on the camera view:
+        # - Entering a "Restricted Zone" (e.g. Back Wall / Generator Room) adds +15 points.
+        # - Entering a "Watch Area" (e.g. Main Lobby Gate) adds +6 points.
+        # ==============================================================================
         l6_cfg = l_cfg.get("layer6_zone", {})
         restr_weight = l6_cfg.get("restricted_weight", 15.0)
         watch_weight = l6_cfg.get("watch_weight", 6.0)
@@ -362,7 +440,12 @@ class ScoringEngine:
         else:
             l6 = zone_pts
 
-        # ── Layer 7: Velocity Penalty ───────────────────────────────────────
+        # ==============================================================================
+        # STEP 10 (LAYER 7): VELOCITY PENALTY (FAST PASSING OBJECTS)
+        # ------------------------------------------------------------------------------
+        # A car driving fast on a nearby street visible at the camera border isn't a threat.
+        # During daytime, high speed objects receive a negative deduction (-5 to -10 points).
+        # ==============================================================================
         l7_cfg = l_cfg.get("layer7_velocity", {})
         if not (is_after_hours or is_restricted):
             if velocity_hint > l7_cfg.get("fast_thresh", 0.6):
@@ -374,7 +457,12 @@ class ScoringEngine:
         else:
             l7_pen = 0.0
 
-        # ── Layer 8: Multi-frame Multiplier M8 ──────────────────────────────
+        # ==============================================================================
+        # STEP 11 (LAYER 8): MULTI-FRAME MULTIPLIER (M8)
+        # ------------------------------------------------------------------------------
+        # Single-frame detections (1 frame) get scaled down to 30% (0.30) to eliminate
+        # camera glitch spikes. As the object stays tracked for 5+ frames, it scales to 100% (1.0).
+        # ==============================================================================
         l8_cfg = l_cfg.get("layer8_multiframe_multipliers", {
             "1": 0.30, "2": 0.55, "3": 0.80, "4": 0.92, "5_plus": 1.00
         })
@@ -389,7 +477,13 @@ class ScoringEngine:
         else:
             m8 = float(l8_cfg.get("5_plus", 1.00))
 
-        # ── Layer 10: Baseline Routine Activity [-15, +8] ───────────────────
+        # ==============================================================================
+        # STEP 12 (LAYER 10): HISTORICAL ROUTINE BASELINE (-15 to +8 points)
+        # ------------------------------------------------------------------------------
+        # Learns patterns over time: if a milk delivery van arrives every day at 6:00 AM,
+        # it is recognized as routine (-15 points penalty). If something novel happens at 3:00 AM,
+        # it receives a bonus (+8 points).
+        # ==============================================================================
         l10_cfg = l_cfg.get("layer10_baseline", {})
         cold_start = l10_cfg.get("cold_start_days", 7)
         if days_history < cold_start or routine_prob is None:
@@ -403,8 +497,13 @@ class ScoringEngine:
         else:
             l10 = 0.0
 
-        # ── Layer 11: Behavioral Pattern ────────────────────────────────────
-        l11_cfg = l_cfg.get("layer11_behavior", {})
+        # ==============================================================================
+        # STEP 13 (LAYER 11): BEHAVIORAL PATTERN (REPEATED PASSES OR APPROACHING ZONE)
+        # ------------------------------------------------------------------------------
+        # If someone walks back and forth pacing repeatedly (+5 points) or heads directly
+        # towards the restricted boundary (+5 points), add extra risk points.
+        # ==============================================================================
+        l11_cfg = l_cfg.get("behavior", {}) if "behavior" in l_cfg else l_cfg.get("layer11_behavior", {})
         l11 = 0.0
         if repeated_passes:
             l11 += float(l11_cfg.get("repeated_passes_bonus", 5.0))
@@ -412,7 +511,13 @@ class ScoringEngine:
             l11 += float(l11_cfg.get("approaching_restricted_bonus", 5.0))
         l11 = min(10.0, l11)
 
-        # ── Layer 12: Unattended Object ─────────────────────────────────────
+        # ==============================================================================
+        # STEP 14 (LAYER 12): UNATTENDED OBJECT (ABANDONED BAGS OR PACKAGES)
+        # ------------------------------------------------------------------------------
+        # If a backpack or box is left behind without an owner:
+        # - Left alone for 30 seconds -> +10 points.
+        # - Left alone for 60 seconds -> +20 points.
+        # ==============================================================================
         l12_cfg = l_cfg.get("layer12_unattended_object", {})
         l12 = 0.0
         if l12_cfg.get("enabled", True):
@@ -422,7 +527,15 @@ class ScoringEngine:
                 elif unattended_dur >= 30.0:
                     l12 = float(l12_cfg.get("stationary_30s_bonus", 10.0))
 
-        # ── Level 4 Forensic Modifier D4 (0..37) ────────────────────────────
+        # ==============================================================================
+        # STEP 15 (LEVEL 4): FORENSIC CONTEXT MODIFIERS (D4: 0 to 37 points)
+        # ------------------------------------------------------------------------------
+        # Additional situational awareness points:
+        # - Person present: +5
+        # - Outside business hours: +10
+        # - Infrared night mode: +4
+        # - Loitering 30+ seconds: +6
+        # ==============================================================================
         d4_cfg = cfg.get("level4_forensic_modifiers", {})
         if d4_modifier_input is not None:
             d4 = float(d4_modifier_input)
@@ -434,14 +547,24 @@ class ScoringEngine:
                 d4 += float(d4_cfg.get("outside_business_hours", 10.0))
             if is_night_ir:
                 d4 += float(d4_cfg.get("infrared_night", 4.0))
-            if dwell_sec >= 30.0 and not (staff_expected and not is_after_hours):
+            if dwell_sec >= 30.0 and is_confirmed and not (staff_expected and not is_after_hours):
                 d4 += float(d4_cfg.get("loitering_30s", 6.0))
-            if track_dur >= 45.0 and not (staff_expected and not is_after_hours):
+            if track_dur >= 45.0 and is_confirmed and not (staff_expected and not is_after_hours):
                 d4 += float(d4_cfg.get("extended_duration_45s", 4.0))
             max_d4 = float(d4_cfg.get("max_d4", 37.0))
             d4 = max(0.0, min(max_d4, d4))
 
-        # ── Score Composition Formula ───────────────────────────────────────
+        # ==============================================================================
+        # STEP 16: FINAL MATHEMATICAL SCORE CALCULATION & CLAMPING
+        # ------------------------------------------------------------------------------
+        # 1. Add all positive points (motion, confidence, object type, dwell, zones, etc.).
+        # 2. Add adjustments (nuisance deductions, speed penalties, routine penalty).
+        # 3. Multiply by multi-frame stability (M8) and camera reliability (R9).
+        # 4. Add forensic modifiers (D4).
+        # 5. Cap unconfirmed glitches and background noise at max 20 (strictly below the 30 active threshold).
+        # 6. Apply threat floor only when real confirmed targets are detected in restricted zones.
+        # 7. Clamp final score strictly between 0 and 100.
+        # ==============================================================================
         positives = l1 + l2 + l3 + l5 + l6 + l11 + l12
         adjust = l4_pen + l7_pen + l10 + min(0, camera_bias)
         raw3 = max(0.0, positives + adjust)
@@ -449,20 +572,30 @@ class ScoringEngine:
         s_live = max(0.0, min(100.0, s3 + d4))
 
         # ── Caps & Floors Order ─────────────────────────────────────────────
-        # 1. Caps: Unconfirmed (< 3 hits) or pure motion with no object -> cap at 29
+        # In simple terms: background movement (like fans, leaves, hair, or curtains) has no confirmed person
+        # or vehicle, so it is strictly capped at 20 points (strictly below the 30 active threshold).
+        # This prevents false alarms and stops clips from recording forever.
         s_final = s_live
-        if (not is_confirmed and track_hits < 3) or (obj_type == "unclassified" and not (is_restricted and is_after_hours)):
-            s_final = min(s_final, 29.0)
+        if not is_confirmed:
+            s_final = min(s_final, 20.0)
+        if obj_type == "unclassified" and not (is_restricted and is_after_hours and track_dur >= 3.0 and r9 >= 0.85):
+            s_final = min(s_final, 20.0)
 
-        # 2. Floors: Applied ONLY to confirmed events or unexplained motion in restricted after hours
-        if threat_floor > 0 and (is_confirmed or (obj_type == "unclassified" and is_restricted and is_after_hours)):
+        # In simple terms: apply threat floor for confirmed targets or unexplained sustained motion inside restricted zone after hours
+        if threat_floor > 0 and (is_confirmed or (obj_type == "unclassified" and is_restricted and is_after_hours and track_dur >= 3.0 and r9 >= 0.85)):
             s_final = max(s_final, float(threat_floor))
 
-        # 3. Round half-up, clamp 0..100
+        # Round to nearest whole number and ensure it stays between 0 and 100
         final_score = max(0, min(100, round_half_up(s_final)))
         score_raw = round(float(s_final), 2)
 
-        # Tier assignment
+        # ==============================================================================
+        # STEP 17: TIER ASSIGNMENT (ALERT vs REVIEW vs LOW)
+        # ------------------------------------------------------------------------------
+        # - Score >= 70: TIER = "ALERT" -> Immediate Telegram alert to owner/guard with photo.
+        # - Score 30-69: TIER = "REVIEW" -> Saved in dashboard for security guard to review.
+        # - Score < 30:  TIER = "LOW" -> Minor motion/nuisance; auto-deleted by disk cleaner.
+        # ==============================================================================
         tiers_cfg = cfg.get("tiers", {})
         alert_thresh = self.alert_threshold if self.alert_threshold is not None else tiers_cfg.get("alert_threshold", 70)
         review_min = tiers_cfg.get("review_min_score", 30)
@@ -478,6 +611,7 @@ class ScoringEngine:
             should_alert = False
 
         severity_info = self.get_severity_tier(final_score)
+
 
         breakdown: Dict[str, Any] = {
             "scoring_version": 2,

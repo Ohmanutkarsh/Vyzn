@@ -63,7 +63,29 @@ def test_api_endpoints_and_dashboard_serving(tmp_path: Path):
     assert res.status_code == 200
     assert res.json()["starred"] == 1
 
-    # 5. Test Dashboard Serving
+    # 5. Test Storage Folder Settings Endpoints
+    # In simple terms: verify GET returns storage info and POST updates the target folder
+    import os
+    orig_env = os.environ.get("VYZN_STORAGE_CONFIG_PATH")
+    os.environ["VYZN_STORAGE_CONFIG_PATH"] = str(tmp_path / "storage.json")
+    try:
+        res_storage = client.get("/api/settings/storage")
+        assert res_storage.status_code == 200
+        assert "storage_dir" in res_storage.json()
+        assert res_storage.json()["is_writable"] is True
+
+        new_custom_folder = tmp_path / "custom_recordings"
+        res_update = client.post("/api/settings/storage", json={"storage_dir": str(new_custom_folder)})
+        assert res_update.status_code == 200
+        assert res_update.json()["ok"] is True
+        assert str(new_custom_folder) in res_update.json()["storage_dir"]
+    finally:
+        if orig_env is not None:
+            os.environ["VYZN_STORAGE_CONFIG_PATH"] = orig_env
+        else:
+            os.environ.pop("VYZN_STORAGE_CONFIG_PATH", None)
+
+    # 6. Test Dashboard Serving
     res = client.get("/")
     assert res.status_code == 200
     assert "VYZN" in res.text

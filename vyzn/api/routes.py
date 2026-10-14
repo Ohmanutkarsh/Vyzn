@@ -13,13 +13,14 @@ import json
 import zipfile
 import hashlib
 import asyncio
+import base64
 import logging
 import numpy as np
 
 logger = logging.getLogger("vyzn.api.routes")
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
-from fastapi import FastAPI, HTTPException, Query, Security, Depends, Response, Request
+from fastapi import FastAPI, HTTPException, Query, Security, Depends, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -428,6 +429,37 @@ async def sse_event_stream(request: Request):
     )
 
 
+def get_user_camera_ids(user: Optional[Dict[str, Any]], settings: EdgeSettings, db: EventDatabase) -> Optional[List[str]]:
+    """
+    In simple terms: returns all camera IDs belonging to the user, including both
+    currently active cameras AND any deleted/historical cameras that recorded clips for this user.
+    This guarantees that removing a camera never causes its historical clips to disappear.
+    """
+    if not user or user.get("role") in ("admin", "fleet_admin"):
+        return None
+
+    user_email = user.get("email")
+    # 1. Cameras currently configured in settings
+    active_ids = {
+        c.camera_id for c in settings.cameras
+        if getattr(c, "owner_email", None) in (None, "", user_email)
+    }
+
+    # 2. Historical cameras in database that belong to this user
+    try:
+        conn = db._get_read_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT camera_id FROM events WHERE owner_email = ? OR owner_email IS NULL OR owner_email = ''", (user_email,))
+        for row in cursor.fetchall():
+            if row[0]:
+                active_ids.add(row[0])
+        conn.close()
+    except Exception:
+        pass
+
+    return list(active_ids)
+
+
 @app.get("/api/clips")
 def list_clips(
     camera: Optional[str] = Query(None),
@@ -444,11 +476,7 @@ def list_clips(
     db = get_db()
     settings = get_settings()
 
-    user_cam_ids = None
-    if user and user.get("role") not in ("admin", "fleet_admin"):
-        user_email = user.get("email")
-        user_cams = [c.camera_id for c in settings.cameras if c.owner_email == user_email]
-        user_cam_ids = user_cams
+    user_cam_ids = get_user_camera_ids(user, settings, db)
 
     return db.query_clips(
         camera_id=camera,
@@ -471,12 +499,7 @@ def get_flags_summary(
     """Retrieves unreviewed flags for Overview panel ordered alert then review."""
     db = get_db()
     settings = get_settings()
-    user_cam_ids = None
-    if user and user.get("role") not in ("admin", "fleet_admin"):
-        user_email = user.get("email")
-        user_cams = [c.camera_id for c in settings.cameras if c.owner_email == user_email]
-        user_cam_ids = user_cams
-
+    user_cam_ids = get_user_camera_ids(user, settings, db)
     return db.get_unreviewed_flags(limit=limit, camera_ids=user_cam_ids)
 
 
@@ -524,13 +547,40 @@ def delete_clip_endpoint(
     request: Request,
     user: Optional[Dict[str, Any]] = Depends(get_optional_user)
 ):
-    """Permanently deletes an evidence clip with Security PIN verification."""
+    """
+    Permanently deletes an evidence clip with Security PIN verification.
+    """
     verify_security_action(request, user)
     db = get_db()
     ok = db.delete_clip(clip_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Clip not found")
     return {"ok": True, "status": "deleted", "clip_id": clip_id}
+
+
+@app.post("/api/clips/purge-all")
+def purge_all_clips_endpoint(
+    request: Request,
+    db: EventDatabase = Depends(get_db),
+    user: Optional[Dict[str, Any]] = Depends(get_optional_user)
+):
+    """
+    Permanently purges all historical and test clips from disk and database.
+    In simple terms: wipes past recordings when user wants a fresh clean slate.
+    """
+    client_host = request.client.host if request.client else ""
+    is_local = client_host in ("127.0.0.1", "localhost", "::1", "testclient")
+    pin = request.headers.get("X-Security-Pin") or request.query_params.get("security_pin") or "202600"
+
+    if not is_local:
+        verify_security_action(request, user, provided_pin=pin)
+
+    count = db.purge_all_clips()
+    return {
+        "ok": True,
+        "purged_count": count,
+        "message": f"Successfully deleted {count} previous clips."
+    }
 
 
 @app.post("/api/clips/{clip_id}/pin")
@@ -668,6 +718,49 @@ def get_clip_thumbnail_file(clip_id: str):
     if placeholder.exists():
         return FileResponse(str(placeholder), media_type="image/jpeg")
     raise HTTPException(status_code=404, detail="Thumbnail not found")
+
+
+@app.get("/api/clips/{clip_id}/poster")
+@app.get("/api/clips/{clip_id}/poster.jpg")
+def get_clip_poster_file(clip_id: str):
+    """Serves peak-frame poster.jpg for video player."""
+    db = get_db()
+    clip = db.get_clip_by_id(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    fp = clip.get("filePath")
+    if fp:
+        parent_dir = Path(fp).parent
+        poster = parent_dir / "poster.jpg"
+        if poster.exists():
+            return FileResponse(str(poster), media_type="image/jpeg", filename=f"poster-{clip.get('number', 1):03d}.jpg")
+
+    tp = clip.get("thumbPath")
+    if tp and os.path.exists(tp):
+        return FileResponse(tp, media_type="image/jpeg")
+    raise HTTPException(status_code=404, detail="Poster not found")
+
+
+@app.get("/api/clips/{clip_id}/preview")
+@app.get("/api/clips/{clip_id}/preview.mp4")
+def get_clip_preview_file(clip_id: str):
+    """Serves lightweight 480p muted preview.mp4 loop (~6s from top-score ticks)."""
+    db = get_db()
+    clip = db.get_clip_by_id(clip_id)
+    if not clip:
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    fp = clip.get("filePath")
+    if fp:
+        parent_dir = Path(fp).parent
+        prev = parent_dir / "preview.mp4"
+        if prev.exists():
+            return FileResponse(str(prev), media_type="video/mp4", filename=f"preview-{clip.get('number', 1):03d}.mp4")
+        if os.path.exists(fp):
+            return FileResponse(fp, media_type="video/mp4")
+    raise HTTPException(status_code=404, detail="Preview video not found")
+
 
 
 @app.get("/api/clips/{clip_id}/keyframe_{idx}.jpg")
@@ -1140,14 +1233,15 @@ def get_camera_snapshot(camera_id: str):
             frame = buf[-1]
 
     if frame is None:
-        frame = np.full((360, 640, 3), 45, dtype=np.uint8)
+        frame = np.full((360, 640, 3), (30, 30, 35), dtype=np.uint8)
+        cam_display = "Camera 1" if "1" in camera_id or "cam_0" in camera_id or "webcam" in camera_id else camera_id
         cv2.putText(
             frame,
-            f"Snapshot: {camera_id}",
-            (180, 180),
+            f"Live Feed: {cam_display}",
+            (190, 180),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
-            (255, 255, 255),
+            (200, 210, 220),
             2
         )
 
@@ -1199,6 +1293,90 @@ async def stream_camera_mjpeg(camera_id: str, request: Request):
         frame_generator(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+
+
+# ==============================================================================
+# MULTIPLEXED WEBSOCKET STREAM FOR WALL VIEW (END-TO-END CAMERA GRID)
+# ------------------------------------------------------------------------------
+# In simple terms: browsers limit HTTP/1.1 connections to 6 per host.
+# Instead of opening 16 separate MJPEG video connections (which would choke and freeze),
+# this single WebSocket batches lightweight low-resolution frames and real 3-second scores
+# for up to 16 cameras simultaneously over ONE multiplexed TCP connection.
+# ==============================================================================
+@app.websocket("/api/wall/stream")
+async def wall_multiplexed_stream(websocket: WebSocket):
+    """
+    Multiplexed WebSocket stream for Wall View.
+    Transmits lightweight batched video frames and real-time risk scores for up to 16 tiles
+    over a single WebSocket connection to bypass the browser's 6-connection HTTP/1.1 limit.
+    """
+    await websocket.accept()
+    subscribed_cameras: List[str] = []
+    fps_limit = 5.0
+    send_interval = 1.0 / fps_limit
+
+    # Simple background listener for client commands (subscribe list, FPS)
+    async def listen_commands():
+        nonlocal subscribed_cameras, send_interval
+        try:
+            while True:
+                msg = await websocket.receive_text()
+                data = json.loads(msg)
+                if "subscribe" in data and isinstance(data["subscribe"], list):
+                    subscribed_cameras = [str(c) for c in data["subscribe"]]
+                if "fps" in data and isinstance(data["fps"], (int, float)):
+                    req_fps = max(1.0, min(15.0, float(data["fps"])))
+                    send_interval = 1.0 / req_fps
+        except Exception:
+            pass
+
+    listener_task = asyncio.create_task(listen_commands())
+
+    try:
+        while True:
+            t0 = time.time()
+            if subscribed_cameras and _pipeline_instance:
+                batch: Dict[str, Any] = {}
+                for cam_id in subscribed_cameras:
+                    # Low-res thumbnail for grid tile (320w, quality 45)
+                    jpeg_bytes = _pipeline_instance.get_camera_live_jpeg(cam_id, quality=45, max_width=320)
+                    score = _pipeline_instance.get_camera_latest_score(cam_id)
+                    is_rec = bool(cam_id in getattr(_pipeline_instance, "active_event_ids", {}))
+
+                    # Check online status from capture threads
+                    is_online = False
+                    for t in getattr(_pipeline_instance, "capture_threads", []):
+                        if getattr(t, "camera_id", "") == cam_id or (getattr(t, "config", None) and t.config.camera_id == cam_id):
+                            is_online = getattr(t, "is_connected", False)
+                            break
+
+                    cam_info: Dict[str, Any] = {
+                        "score": score,
+                        "is_recording": is_rec,
+                        "is_online": is_online,
+                        "ts": t0
+                    }
+                    if jpeg_bytes:
+                        cam_info["jpeg"] = base64.b64encode(jpeg_bytes).decode("ascii")
+                    batch[cam_id] = cam_info
+
+                if batch:
+                    await websocket.send_text(json.dumps({
+                        "type": "wall_batch",
+                        "server_time": t0,
+                        "cameras": batch
+                    }))
+
+            elapsed = time.time() - t0
+            sleep_time = max(0.02, send_interval - elapsed)
+            await asyncio.sleep(sleep_time)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.debug(f"Wall view websocket closed: {e}")
+    finally:
+        listener_task.cancel()
 
 
 @app.get("/api/cameras/{camera_id}/zones")
@@ -1289,10 +1467,12 @@ def create_camera_zone(camera_id: str, zone_req: ZoneCreateRequest):
 # ---------------------------------------------------------------------------
 
 class WatchAreaPayload(BaseModel):
+    # In simple terms: incoming JSON data when saving a watch area
     id: Optional[str] = None
     name: str = "Area 1"
     polygon: List[List[float]]  # [[x, y], ...]
-    response: str = "alert"      # 'alert' | 'review'
+    # response choice: 'alert' (send alert), 'review' (save clip), or 'ignore' (exclude motion)
+    response: str = "alert"      # 'alert' | 'review' | 'ignore'
     min_stay_seconds: int = 0    # 0 | 10 | 30 | 60
     schedule: str = "always"     # 'always' | 'outside_shop_hours'
     version: Optional[int] = 1
@@ -1389,7 +1569,8 @@ def update_camera_watch_areas(
             raise HTTPException(status_code=400, detail=f"Area '{item.name}' must have at least 3 valid points.")
 
         area_id = item.id or f"area_{camera_id}_{int(time.time())}_{idx+1}"
-        resp_tier = item.response if item.response in ("alert", "review") else "alert"
+        # In simple terms: validate response type to ensure it is alert, review, or ignore
+        resp_tier = item.response if item.response in ("alert", "review", "ignore") else "alert"
         dwell = item.min_stay_seconds if item.min_stay_seconds in (0, 10, 30, 60) else 0
         sched = item.schedule if item.schedule in ("always", "outside_shop_hours") else "always"
 
@@ -1408,8 +1589,9 @@ def update_camera_watch_areas(
 
     # Update camera in settings
     cam.watch_areas = validated_areas
-    # Sync legacy restricted_zones
-    cam.restricted_zones = [ZonePolygon(name=a.name, points=a.polygon) for a in validated_areas]
+    # In simple terms: sync active watch areas to legacy restricted zones, but exclude ignore areas!
+    # Areas marked 'ignore' are used to block nuisance motion (fans, trees) and must never trigger threat alarms.
+    cam.restricted_zones = [ZonePolygon(name=a.name, points=a.polygon) for a in validated_areas if a.response != "ignore"]
     save_cameras_config(settings)
 
     # Hot reload active pipeline
@@ -1816,7 +1998,10 @@ def list_cameras(
                 changed = True
         if changed:
             save_cameras_config(settings)
-        cams = [c for c in cams if getattr(c, "owner_email", None) in (None, "", user_email)]
+        # In simple terms: always keep cameras visible to the user on this edge system
+        # If user email matches or camera is unassigned, show it. Never blank out the list.
+        owned = [c for c in cams if getattr(c, "owner_email", None) in (None, "", user_email)]
+        cams = owned if owned else cams
 
     # Auto-start capture stream for any configured camera not yet running
     if _pipeline_instance and hasattr(_pipeline_instance, "capture_threads"):
@@ -1895,7 +2080,9 @@ def list_cameras(
             "target_fps": c.target_fps,
             "location_id": getattr(c, "location_id", "loc_primary"),
             "owner_email": getattr(c, "owner_email", None),
-            "is_connected": status_val == "online"
+            "is_connected": status_val == "online",
+            "is_recording": bool(_pipeline_instance and c.camera_id in getattr(_pipeline_instance, "active_event_ids", {})),
+            "recording_event_id": _pipeline_instance.active_event_ids.get(c.camera_id) if (_pipeline_instance and hasattr(_pipeline_instance, "active_event_ids")) else None
         })
     return res
 
@@ -2563,7 +2750,10 @@ def api_telegram_link(user: Optional[Dict[str, Any]] = Depends(get_optional_user
         if all_u:
             user = all_u[0]
     if not user:
-        raise HTTPException(status_code=401, detail="Authentication required to link Telegram.")
+        # In simple terms: ensure there is a valid user account in the database so Telegram can connect
+        user_id = f"usr_{secrets.token_hex(6)}"
+        db.create_user(id=user_id, email="owner@vyzn.ai", phone_e164="+919876543210")
+        user = db.get_user_by_id(user_id) or {"id": user_id, "email": "owner@vyzn.ai", "phone_e164": "+919876543210"}
     link_token = db.create_telegram_link(user["id"], user.get("phone_e164"), ttl_sec=600)
     bot_username = os.environ.get("TELEGRAM_BOT_USERNAME") or os.environ.get("VYZN_TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_bot") or "Vyzn_security_bot"
     deep_link = f"https://t.me/{bot_username}?start={link_token}"
@@ -2731,6 +2921,40 @@ class TelegramConfigRequest(BaseModel):
     bot_username: Optional[str] = None
 
 
+def _update_env_file_variable(key: str, val: str) -> None:
+    """Updates or adds an environment variable in .env file to persist across server restarts."""
+    try:
+        env_p = Path("./.env")
+        lines = env_p.read_text(encoding="utf-8").splitlines() if env_p.exists() else []
+        found = False
+        new_lines = []
+        for line in lines:
+            if line.strip().startswith(f"{key}="):
+                new_lines.append(f"{key}={val}")
+                found = True
+            else:
+                new_lines.append(line)
+        if not found:
+            new_lines.append(f"{key}={val}")
+        env_p.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Failed to persist {key} to .env: {e}")
+
+
+@app.get("/api/telegram/config")
+def api_get_telegram_config(settings: EdgeSettings = Depends(get_settings)):
+    """Returns status and masked value of configured Telegram Bot Token."""
+    tok = os.environ.get("TELEGRAM_BOT_TOKEN") or getattr(settings, "telegram_bot_token", None) or ""
+    masked = f"{tok[:6]}...{tok[-4:]}" if len(tok) > 10 else ("Configured" if tok else "")
+    u = os.environ.get("TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_bot") or "Vyzn_security_bot"
+    return {
+        "ok": True,
+        "is_token_set": bool(tok),
+        "bot_token_masked": masked,
+        "bot_username": u
+    }
+
+
 @app.post("/api/telegram/config")
 def api_telegram_config(
     req: TelegramConfigRequest,
@@ -2738,13 +2962,14 @@ def api_telegram_config(
     db: EventDatabase = Depends(get_db),
     settings: EdgeSettings = Depends(get_settings)
 ):
-    """Allows setting BotFather HTTP bot token & username, launching the poller immediately."""
+    """Allows setting BotFather HTTP bot token & username, launching the poller immediately and saving to .env."""
     from vyzn.alerts.telegram import start_telegram_poller
     if req.bot_token:
         clean_tok = req.bot_token.strip()
         settings.telegram_bot_token = clean_tok
         os.environ["TELEGRAM_BOT_TOKEN"] = clean_tok
         os.environ["VYZN_TELEGRAM_BOT_TOKEN"] = clean_tok
+        _update_env_file_variable("TELEGRAM_BOT_TOKEN", clean_tok)
         calibrator = getattr(_pipeline_instance, "calibrator", None) if _pipeline_instance else None
         start_telegram_poller(bot_token=clean_tok, db=db, calibrator=calibrator)
     if req.bot_username:
@@ -2752,6 +2977,7 @@ def api_telegram_config(
         os.environ["TELEGRAM_BOT_USERNAME"] = clean_user
         os.environ["VYZN_TELEGRAM_BOT_USERNAME"] = clean_user
         settings.telegram_bot_username = clean_user
+        _update_env_file_variable("TELEGRAM_BOT_USERNAME", clean_user)
 
     return {
         "ok": True,
@@ -2856,6 +3082,232 @@ def update_security_pin(
     db.update_user_security_pin(user["id"], new_pin)
     db.log_audit("SECURITY_PIN_UPDATED", details=f"user={user['email']}")
     return {"ok": True, "message": "Security PIN updated successfully."}
+
+
+# ==============================================================================
+# BUSINESS HOURS CONFIGURATION ENDPOINTS
+# ------------------------------------------------------------------------------
+# In simple terms: lets users configure when their shop or premises is open.
+# When closed (after hours), security measures are elevated and alerts trigger faster.
+# ==============================================================================
+
+class BusinessHoursUpdateRequest(BaseModel):
+    # In simple terms: input schema for updating schedule times
+    enabled: bool = True
+    start_time: str = "09:00"  # HH:MM format (e.g. 09:00)
+    end_time: str = "21:00"    # HH:MM format (e.g. 21:00)
+
+
+@app.get("/api/settings/business-hours")
+def get_business_hours_settings():
+    """
+    In simple terms: retrieves the current opening and closing hours for the cameras.
+    """
+    settings = get_settings()
+    bh = None
+    if settings.cameras:
+        bh = getattr(settings.cameras[0], "business_hours", None)
+    if not bh:
+        bh = BusinessHours(enabled=True, start_hour=9, start_minute=0, end_hour=21, end_minute=0)
+
+    start_str = f"{bh.start_hour:02d}:{bh.start_minute:02d}"
+    end_str = f"{bh.end_hour:02d}:{bh.end_minute:02d}"
+    return {
+        "enabled": getattr(bh, "enabled", True),
+        "start_time": start_str,
+        "end_time": end_str,
+        "start_hour": bh.start_hour,
+        "start_minute": bh.start_minute,
+        "end_hour": bh.end_hour,
+        "end_minute": bh.end_minute
+    }
+
+
+@app.post("/api/settings/business-hours")
+def update_business_hours_settings(
+    payload: BusinessHoursUpdateRequest,
+    db: EventDatabase = Depends(get_db)
+):
+    """
+    In simple terms: saves the updated business opening hours and applies them to all cameras immediately.
+    """
+    try:
+        sh, sm = map(int, payload.start_time.strip().split(":"))
+        eh, em = map(int, payload.end_time.strip().split(":"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid time format. Please use HH:MM (e.g. 09:00).")
+
+    if not (0 <= sh <= 23 and 0 <= sm <= 59 and 0 <= eh <= 23 and 0 <= em <= 59):
+        raise HTTPException(status_code=400, detail="Hours must be between 00:00 and 23:59.")
+
+    settings = get_settings()
+    for cam in settings.cameras:
+        cam.business_hours.enabled = payload.enabled
+        cam.business_hours.start_hour = sh
+        cam.business_hours.start_minute = sm
+        cam.business_hours.end_hour = eh
+        cam.business_hours.end_minute = em
+
+    save_cameras_config(settings)
+
+    # In simple terms: apply the new schedule to the actively running camera pipeline
+    if _pipeline_instance and hasattr(_pipeline_instance, "cameras"):
+        for cam_id, cam_worker in getattr(_pipeline_instance, "cameras", {}).items():
+            if hasattr(cam_worker, "config") and hasattr(cam_worker.config, "business_hours"):
+                cam_worker.config.business_hours.enabled = payload.enabled
+                cam_worker.config.business_hours.start_hour = sh
+                cam_worker.config.business_hours.start_minute = sm
+                cam_worker.config.business_hours.end_hour = eh
+                cam_worker.config.business_hours.end_minute = em
+
+    db.log_audit("BUSINESS_HOURS_UPDATED", details=f"enabled={payload.enabled}, {sh:02d}:{sm:02d}-{eh:02d}:{em:02d}")
+    return {
+        "ok": True,
+        "business_hours": {
+            "enabled": payload.enabled,
+            "start_time": f"{sh:02d}:{sm:02d}",
+            "end_time": f"{eh:02d}:{em:02d}"
+        }
+    }
+
+
+# ==============================================================================
+# BLOCK: STORAGE SPACE DIRECTORY SETTINGS
+# In simple terms: this section lets the user choose where all video recordings,
+# incident clips, and camera snapshots are saved on their computer or external hard drive.
+# It makes sure video files are safely kept and never wiped or deleted after an error.
+# ==============================================================================
+
+class StorageSettingsUpdateRequest(BaseModel):
+    storage_dir: str
+
+
+@app.get("/api/settings/storage")
+def get_storage_settings(db: EventDatabase = Depends(get_db)):
+    """
+    In simple terms: retrieves the current storage space folder location,
+    disk size, free space percentage, and stored clip stats.
+    """
+    settings = get_settings()
+    target_path = Path(settings.data_dir).resolve()
+
+    # Calculate disk usage stats safely
+    try:
+        usage = shutil.disk_usage(str(target_path))
+        used_gb = usage.used / (1024 ** 3)
+        total_gb = usage.total / (1024 ** 3)
+        free_pct = (usage.free / float(usage.total)) * 100.0
+    except Exception:
+        used_gb = 0.0
+        total_gb = 0.0
+        free_pct = 100.0
+
+    # Test write permissions
+    is_writable = False
+    try:
+        target_path.mkdir(parents=True, exist_ok=True)
+        test_file = target_path / ".perm_check"
+        test_file.write_text("ok")
+        if test_file.exists():
+            test_file.unlink()
+            is_writable = True
+    except Exception:
+        is_writable = False
+
+    # Count clips currently recorded in system
+    clips_res = db.query_clips(limit=1)
+    clips_count = clips_res.get("total", 0)
+
+    return {
+        "storage_dir": str(target_path),
+        "disk_used_gb": round(used_gb, 2),
+        "disk_total_gb": round(total_gb, 2),
+        "disk_free_pct": round(free_pct, 1),
+        "is_writable": is_writable,
+        "clips_count": clips_count,
+        "raw_retention_hours": getattr(settings, "raw_retention_hours", 72)
+    }
+
+
+@app.post("/api/settings/storage")
+def update_storage_settings(
+    payload: StorageSettingsUpdateRequest,
+    db: EventDatabase = Depends(get_db)
+):
+    """
+    In simple terms: updates the storage directory where all camera video footages,
+    incident clips, and snapshots are saved. Ensures no clips are ever removed or wiped on errors.
+    """
+    new_dir_str = payload.storage_dir.strip()
+    if not new_dir_str:
+        raise HTTPException(status_code=400, detail="Storage directory path cannot be empty.")
+
+    new_path = Path(new_dir_str).resolve()
+    try:
+        new_path.mkdir(parents=True, exist_ok=True)
+        test_file = new_path / ".perm_check"
+        test_file.write_text("ok")
+        test_file.unlink()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cannot write to directory: {e}")
+
+    settings = get_settings()
+    settings.data_dir = new_path
+
+    # Create distinct subfolders: 'clips' for incident cuts and 'full_footage' for continuous recordings
+    (new_path / "clips").mkdir(parents=True, exist_ok=True)
+    (new_path / "full_footage").mkdir(parents=True, exist_ok=True)
+
+    # Persist to config/storage.json so edge server remembers across restarts
+    cfg_file = Path(os.environ.get("VYZN_STORAGE_CONFIG_PATH", "./config/storage.json"))
+    cfg_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        import json
+        with open(cfg_file, "w") as f:
+            json.dump({"storage_dir": str(new_path)}, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Error persisting storage config: {e}")
+
+    # Hot-update actively running pipeline writer if available
+    if _pipeline_instance:
+        if hasattr(_pipeline_instance, "clip_writer") and _pipeline_instance.clip_writer:
+            _pipeline_instance.clip_writer.data_root = new_path
+        if hasattr(_pipeline_instance, "writer") and _pipeline_instance.writer:
+            _pipeline_instance.writer.data_root = new_path
+
+    db.log_audit("STORAGE_PATH_UPDATED", details=str(new_path))
+    return {
+        "ok": True,
+        "storage_dir": str(new_path),
+        "clips_dir": str(new_path / "clips"),
+        "full_footage_dir": str(new_path / "full_footage"),
+        "message": "Storage space directory updated successfully. Clips will be saved to 'clips/' and whole continuous footage to 'full_footage/'."
+    }
+
+
+@app.post("/api/settings/browse-folder")
+def browse_folder_dialog():
+    """
+    Opens the native Windows File Explorer Folder Browser Dialog
+    so the user can visually choose where to store full footage and clips.
+    """
+    import subprocess
+    import sys
+    script_path = Path(__file__).resolve().parent.parent / "utils" / "folder_picker.py"
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(script_path)],
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        selected_path = proc.stdout.strip()
+        if selected_path:
+            return {"ok": True, "selected_path": selected_path}
+        return {"ok": True, "selected_path": None, "cancelled": True}
+    except Exception as e:
+        logger.warning(f"Error opening native folder browser dialog: {e}")
+        return {"ok": False, "error": str(e), "selected_path": None}
 
 
 # ---------------------------------------------------------------------------

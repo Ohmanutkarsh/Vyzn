@@ -1,9 +1,12 @@
-"""
-Telegram Bot Alert Provider with Rich Media (Video/Photo) and Inline Keyboard Triage.
-Delivers instant security cards with quick-reply buttons ([⭐ Star Clip] / [❌ False Alarm])
-to business owners without Meta Business verification delays or per-conversation fees.
-Includes CGNAT-immune long-polling worker for two-way interactive triage callbacks.
-"""
+# ==============================================================================
+# VYZN TELEGRAM NOTIFICATION SYSTEM
+#
+# WHY THIS EXISTS (FOR NON-PROGRAMMERS):
+# When an intruder enters a restricted area at night, sending an email is too slow.
+# This file connects VYZN to the official Telegram Bot (@Vyzn_security_bot) so
+# high-priority security threats are sent directly to your phone as an instant
+# photo alert with action buttons ("Open clip", "Not an issue") in 1-2 seconds.
+# ==============================================================================
 
 from __future__ import annotations
 import os
@@ -22,8 +25,12 @@ from vyzn.api.mobile_viewer import build_viewer_url
 logger = logging.getLogger("vyzn.alerts.telegram")
 
 
+# ==============================================================================
+# HELPER 1: PHONE NUMBER CLEANER
+# Standardizes Indian phone numbers so "+91 98765 43210" or "9876543210"
+# both become "+919876543210" for clean database storage.
+# ==============================================================================
 def normalize_phone(phone: Optional[str]) -> str:
-    """Normalizes phone numbers to standard E.164 +91XXXXXXXXXX format for Indian numbers."""
     if not phone:
         return ""
     digits = "".join(ch for ch in str(phone) if ch.isdigit())
@@ -34,8 +41,14 @@ def normalize_phone(phone: Optional[str]) -> str:
     return f"+{digits}" if digits else ""
 
 
+# ==============================================================================
+# HELPER 2: PLAIN-ENGLISH HEADLINE GENERATOR
+# Converts raw mathematical AI numbers into natural sentences a human understands.
+# Examples:
+# - Instead of "OBJECT:0, ZONE:2, TIME:12s" -> "Person stayed 12 seconds in Building lobby"
+# - Instead of "BOUNDS_INTERSECT:true"       -> "Person entered Main gate security"
+# ==============================================================================
 def format_alert_headline(event: EventRecord, camera_name: str = "") -> str:
-    """Computes plain-language headline according to Section 6.3 headline table."""
     meta = {}
     if getattr(event, "metadata_json", None):
         try:
@@ -47,6 +60,7 @@ def format_alert_headline(event: EventRecord, camera_name: str = "") -> str:
     if area_name in ("general", "unspecified", "", None):
         area_name = None
 
+    # Check the specific security rule that was broken
     if reasons and isinstance(reasons, list) and len(reasons) > 0:
         primary = reasons[0]
         code = primary.get("code") or primary.get("id")
@@ -147,34 +161,42 @@ def push_telegram_alert(
     )
 
 
+# ==============================================================================
+# CLASS: TelegramAlertProvider
+# This class acts as the postman between VYZN and the Telegram Bot API:
+# 1. Takes the camera snapshot image.
+# 2. Generates the caption with camera name, event description, and timestamp.
+# 3. Attaches interactive clickable buttons: [Open clip] and [Not an issue].
+# 4. Uploads the photo securely to Telegram.
+# ==============================================================================
 class TelegramAlertProvider(AlertProvider):
-    """
-    Sends interactive video or photo alert cards to Telegram with native inline keyboard triage.
-    Supports single chats, broadcast channels, and multi-owner monitoring groups.
-    """
-
     def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None, db: Optional[Any] = None):
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.db = db
         self.api_url = f"https://api.telegram.org/bot{bot_token}" if bot_token else None
 
+    # --------------------------------------------------------------------------
+    # Step 1: Format the message text and clickable action buttons
+    # --------------------------------------------------------------------------
     def build_alert_payload(
         self,
         event: EventRecord,
         base_url: str = "http://localhost:8000",
         camera_name: str = ""
     ) -> Dict[str, Any]:
-        """Generates Appendix B Telegram alert message and inline keyboard markup."""
         cam_display = camera_name or getattr(event, "camera_name", None) or event.camera_id
         headline = format_alert_headline(event, cam_display)
         when_str = format_alert_when(event.start_time)
 
+        # The message text shown underneath the photo in Telegram
         caption = f"🚨 VYZN Security Alert · {cam_display}\n{headline}\n{when_str}"
 
+        # Web link so the owner can tap to watch the full recorded video
         clip_id = str(event.event_group_id)
         clip_url = f"{base_url.rstrip('/')}/clips/{clip_id}"
 
+        # Interactive buttons that appear below the photo
         inline_keyboard = {
             "inline_keyboard": [
                 [
@@ -188,6 +210,12 @@ class TelegramAlertProvider(AlertProvider):
             "reply_markup": inline_keyboard
         }
 
+    # --------------------------------------------------------------------------
+    # Step 2: Transmit the photo alert to Telegram
+    # Safety Checks before sending:
+    # - Only "Alert" tier events trigger a push notification (low/review clips are kept silent).
+    # - Checks if the owner has paused/muted alerts in their settings.
+    # --------------------------------------------------------------------------
     def send_alert(
         self,
         event: EventRecord,
@@ -196,11 +224,7 @@ class TelegramAlertProvider(AlertProvider):
         base_url: str = "http://localhost:8000",
         camera_name: str = ""
     ) -> bool:
-        """
-        Transmits Appendix B alert to Telegram with photo thumbnail and inline buttons.
-        Review-tier clips are never pushed. Suppresses alerts if user has muted alerts or is disconnected.
-        """
-        # Rule: Review-tier clips are never pushed
+        # Check A: Only high-priority 'alert' tier events send phone alerts!
         if getattr(event, "tier", "review") != "alert":
             logger.info(
                 f"[TELEGRAM ALERT FILTER] Skipping push for {event.event_group_id}: "
@@ -208,7 +232,7 @@ class TelegramAlertProvider(AlertProvider):
             )
             return False
 
-        # Determine target chat ID and verify notification permissions
+        # Check B: Look up the user's Telegram Chat ID from the database
         target_chat_id = self.chat_id
         if not target_chat_id and self.db:
             owner_email = getattr(event, "owner_email", None)

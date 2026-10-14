@@ -1,6 +1,13 @@
 /**
- * VYZN Auth & Onboarding Controller (Screens S1 to S4)
- * Strict spec compliance: 100% real data, i18n localization, WCAG 2.2 AA.
+ * ==============================================================================
+ * VYZN USER AUTHENTICATION & TELEGRAM ONBOARDING CONTROLLER (FRONTEND JAVASCRIPT)
+ * ==============================================================================
+ * This script runs in the user's web browser. It controls:
+ * 1. Sign In & Registration forms (supporting Housing Societies, Apartments, Shops).
+ * 2. Sending & verifying email verification codes (OTP).
+ * 3. The "Connect Telegram" button: generates a one-time link to @Vyzn_security_bot,
+ *    launches Telegram, and waits for the user to tap "Start" to link their account.
+ * ==============================================================================
  */
 
 import { initI18n, t } from './i18n.js';
@@ -14,7 +21,7 @@ let tgPollTimer = null;
 let currentDeepLink = '';
 let currentPhone = '';
 
-// Helper to mask email: n••••@gmail.com
+// Helper to mask email for privacy: e.g. "utkarsh@gmail.com" becomes "u••••@gmail.com"
 function maskEmail(email) {
   if (!email) return '••••@••••';
   const parts = email.split('@');
@@ -25,7 +32,7 @@ function maskEmail(email) {
   return `${first}••••@${domain}`;
 }
 
-// Helper to mask phone: +91 98••• ••210
+// Helper to mask phone number: e.g. "+91 9876543210" becomes "+91 98••• ••210"
 function maskPhone(phone) {
   if (!phone) return '+91 ••••• •••••';
   const digits = phone.replace(/\D/g, '');
@@ -874,7 +881,16 @@ function renderS3PhoneInput(container) {
   const submitBtn = document.getElementById('s3-submit-btn');
   const skipBtn = document.getElementById('s3-skip-btn');
 
-  // Telegram Connect flow
+  // ==============================================================================
+  // TELEGRAM BOT CONNECT & DEEP-LINKING FLOW
+  // ------------------------------------------------------------------------------
+  // 1. When the user clicks "Connect Telegram", we call /api/telegram/link.
+  // 2. The server creates a cryptographically secure, single-use linking token.
+  // 3. We open the official Telegram bot link: https://t.me/Vyzn_security_bot?start=<TOKEN>
+  // 4. We start a background timer checking /api/telegram/status every 1.5 seconds.
+  // 5. As soon as the user taps "Start" in Telegram, the bot confirms the link,
+  //    we display a green success banner, and redirect to the CCTV overview dashboard!
+  // ==============================================================================
   let tgPollTimer = null;
   const tgBtn = document.getElementById('s3-btn-connect-telegram');
   const tgPanel = document.getElementById('s3-tg-status-panel');
@@ -890,6 +906,7 @@ function renderS3PhoneInput(container) {
       errorBox.style.display = 'none';
 
       try {
+        // Request a unique, secure one-time connection token from the server
         const res = await fetch('/api/telegram/link', {
           method: 'POST',
           credentials: 'include'
@@ -901,10 +918,10 @@ function renderS3PhoneInput(container) {
         if (tgReopenLink) tgReopenLink.href = data.deepLink;
         if (tgPanel) tgPanel.style.display = 'block';
 
-        // Open Telegram bot directly
+        // Open Telegram app / web directly to @Vyzn_security_bot
         window.open(data.deepLink, '_blank', 'noopener');
 
-        // Start polling Telegram connection status
+        // Check every 1.5 seconds if the user pressed "Start" in Telegram
         if (tgPollTimer) clearInterval(tgPollTimer);
         tgPollTimer = setInterval(async () => {
           try {

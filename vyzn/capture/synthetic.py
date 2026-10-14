@@ -39,11 +39,14 @@ class SyntheticCameraThread(threading.Thread):
         self.ring_buffer: deque[bytes] = deque(maxlen=int(config.target_fps * 10))
         self._ring_lock = threading.Lock()
 
-    def get_latest_jpeg(self, quality: int = 75) -> Optional[bytes]:
+    def get_latest_jpeg(self, quality: int = 75, max_width: int = 960) -> Optional[bytes]:
         with self._latest_lock:
             if self.latest_frame is None:
                 return None
             frame = self.latest_frame.copy()
+        h, w = frame.shape[:2]
+        if w > max_width:
+            frame = cv2.resize(frame, (max_width, int(max_width * h / w)))
         ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
         return jpeg.tobytes() if ret else None
 
@@ -85,19 +88,26 @@ class SyntheticCameraThread(threading.Thread):
                 if obj_x > w - 80 or obj_x < 40:
                     direction *= -1
 
-                # Draw a simulated human bounding area
+                # Dynamically calculate body size based on frame resolution so it scales nicely (e.g. 480p, 720p)
+                pw = max(40, int(w * 0.10))
+                ph = max(120, int(h * 0.35))
+                half_ph = ph // 2
+                half_pw = pw // 2
+
+                # Draw a simulated human bounding area (torso and legs)
                 cv2.rectangle(
                     frame,
-                    (int(obj_x), int(obj_y) - 60),
-                    (int(obj_x) + 40, int(obj_y) + 60),
+                    (int(obj_x), max(0, int(obj_y) - half_ph)),
+                    (int(obj_x) + pw, min(h, int(obj_y) + half_ph)),
                     (60, 60, 60) if self.config.is_night_ir else (40, 50, 120),
                     -1
                 )
-                # Head circle
+                # Head circle scaled proportionally
+                head_r = max(12, int(ph * 0.15))
                 cv2.circle(
                     frame,
-                    (int(obj_x) + 20, int(obj_y) - 80),
-                    18,
+                    (int(obj_x) + half_pw, max(head_r + 2, int(obj_y) - half_ph - head_r)),
+                    head_r,
                     (50, 50, 50) if self.config.is_night_ir else (200, 180, 160),
                     -1
                 )
@@ -105,12 +115,15 @@ class SyntheticCameraThread(threading.Thread):
             elif self.motion_profile == "cash_counter":
                 # Person loitering inside the cash drawer zone (fixed at center right)
                 cx, cy = int(w * 0.7), int(h * 0.5)
+                # Dynamically size counter actor based on resolution
+                pw = max(50, int(w * 0.12))
+                ph = max(100, int(h * 0.30))
                 # Small breathing/hand motion
                 offset = int(np.sin(step * 0.2) * 5)
                 cv2.rectangle(
                     frame,
-                    (cx - 25 + offset, cy - 50),
-                    (cx + 25 + offset, cy + 50),
+                    (cx - pw // 2 + offset, cy - ph // 2),
+                    (cx + pw // 2 + offset, cy + ph // 2),
                     (50, 80, 50),
                     -1
                 )
@@ -120,7 +133,9 @@ class SyntheticCameraThread(threading.Thread):
                 if (step % 60) > 20:
                     ix = int(w * 0.3) + int((step % 60) * 2)
                     iy = int(h * 0.4)
-                    cv2.rectangle(frame, (ix, iy), (ix + 35, iy + 70), (120, 120, 120), -1)
+                    pw = max(35, int(w * 0.09))
+                    ph = max(70, int(h * 0.25))
+                    cv2.rectangle(frame, (ix, iy), (ix + pw, iy + ph), (120, 120, 120), -1)
 
             # Timestamp and queue push
             now = time.time()

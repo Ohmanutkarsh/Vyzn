@@ -53,11 +53,29 @@ class EdgePipeline:
         detector: Optional[BaseDetector] = None,
         use_synthetic: bool = False
     ):
+        # ==============================================================================
+        # STEP 1: CONFIGURE BASIC SETTINGS & OPERATIONAL FLAGS
+        # ------------------------------------------------------------------------------
+        # Saves edge device settings (site ID, storage directory, alert sensitivity threshold)
+        # and prepares internal flags.
+        # ==============================================================================
         self.settings = settings
         self.use_synthetic = use_synthetic
         self.running = False
 
-        # Core subsystems
+        # ==============================================================================
+        # STEP 2: INITIALIZE CORE SUBSYSTEMS & INTELLIGENT WORKERS
+        # ------------------------------------------------------------------------------
+        # 1. Database: Stores security events, camera statuses, and audit logs locally.
+        # 2. Privacy Masker: Blurs private areas (like neighboring balconies or washrooms)
+        #    to comply with Indian DPDP Act 2023 regulations.
+        # 3. Motion Gate: Fast lightweight filter (MOG2) that detects pixel changes so
+        #    heavy AI models don't run when nothing is moving.
+        # 4. Detector & Tracker: YOLOv8 AI model to recognize objects (person, vehicle, bag)
+        #    and IOU tracker to follow their movements across consecutive frames.
+        # 5. Scoring Engine: 13-layer risk assessment brain (0 to 100 risk score).
+        # 6. Clip Writer: Encodes video clips and creates instant image thumbnails.
+        # ==============================================================================
         self.db = EventDatabase(self.settings.db_path)
         self.privacy_masker = PrivacyMasker()
         self.motion_gate = MOG2MotionGate(min_motion_ratio=self.settings.motion_gate_threshold)
@@ -67,7 +85,12 @@ class EdgePipeline:
         self.scoring_engine = ScoringEngine(alert_threshold=self.settings.alert_score_threshold)
         self.clip_writer = ClipWriter(data_root=self.settings.data_dir)
 
-        # Alerting
+        # ==============================================================================
+        # STEP 3: TELEGRAM BOT ALERT NOTIFIER
+        # ------------------------------------------------------------------------------
+        # Connects to the official Telegram Bot (@Vyzn_security_bot) using the bot token.
+        # Dispatcher has a 45-second cooldown to avoid repeatedly buzzing the user's phone.
+        # ==============================================================================
         bot_token = self.settings.telegram_bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
         alert_provider = TelegramAlertProvider(
             bot_token=bot_token,
@@ -76,7 +99,14 @@ class EdgePipeline:
         )
         self.dispatcher = AlertDispatcher(provider=alert_provider, cooldown_sec=45.0)
 
-        # Storage & Observability Daemons
+        # ==============================================================================
+        # STEP 4: STORAGE & HEALTH MONITORING BACKGROUND WORKERS
+        # ------------------------------------------------------------------------------
+        # - Storage Reaper: Automatically deletes low-risk footage when hard drive reaches 85%.
+        # - Cloud Sync: Uploads important security alerts to the central Supabase server.
+        # - Telemetry Heartbeat: Sends device health checks (CPU, RAM, camera uptime) every minute.
+        # - OTA Sync: Checks if new software updates or configuration changes are available.
+        # ==============================================================================
         self.reaper = StorageReaperDaemon(
             db=self.db,
             data_root=self.settings.data_dir,
@@ -104,7 +134,14 @@ class EdgePipeline:
         )
         self.resource_governor = ResourceGovernor()
 
-        # Queues & Capture Threads
+        # ==============================================================================
+        # STEP 5: PRE-ROLL RING BUFFERS & INCOMING FRAME QUEUE
+        # ------------------------------------------------------------------------------
+        # Cameras capture video into a shared queue (up to 40 frames buffered).
+        # Each camera has a "Ring Buffer" in memory holding the last 10 seconds of video.
+        # That way, when an intruder trips the alarm, the recorded clip includes
+        # the 10 seconds *before* they even entered the camera frame!
+        # ==============================================================================
         self.frame_queue: queue.Queue = queue.Queue(maxsize=40)
         self.capture_threads: List[threading.Thread] = []
 
@@ -125,7 +162,7 @@ class EdgePipeline:
         self.state_machines: Dict[str, ClipStateMachine] = {}
         self.dispatched_alert_events: set = set()
 
-        # Initialize motion gate camera watch areas
+        # Load user-drawn watch polygons and restricted zones into the motion detector
         for cam in self.settings.cameras:
             areas = getattr(cam, "watch_areas", None)
             if areas:
@@ -136,6 +173,13 @@ class EdgePipeline:
                 self.motion_gate.set_osd_polygons(cam.camera_id, [cam.osd_exclude_polygon])
 
         self.worker_thread: Optional[threading.Thread] = None
+        # Buffers for continuous full video footage recording (saved under <storage_dir>/full_footage)
+        self.full_footage_buffers: Dict[str, List[np.ndarray]] = {}
+        self.full_footage_last_flush: Dict[str, float] = {}
+
+        # In simple terms: store the latest real-time 3-second score for each camera
+        # so the Wall View can color-code camera borders and sort active cameras first!
+        self.latest_camera_scores: Dict[str, Tuple[float, int]] = {}
 
     def _get_or_create_state_machine(self, camera_id: str) -> ClipStateMachine:
         if camera_id not in self.state_machines:
@@ -177,7 +221,8 @@ class EdgePipeline:
 
             self.ring_buffers[cam.camera_id] = deque(maxlen=int(cam.target_fps * 10))
 
-            if self.use_synthetic and str(cam.rtsp_url).startswith("sim://"):
+            # In simple terms: if the camera uses a simulation or test address, use our built-in video generator
+            if self.use_synthetic and (str(cam.rtsp_url).startswith("sim://") or str(cam.rtsp_url).startswith("test://")):
                 profile = "night_intruder" if cam.is_night_ir else "walking_person"
                 thread = SyntheticCameraThread(
                     config=cam,
@@ -234,10 +279,29 @@ class EdgePipeline:
 
         return None
 
+    def get_camera_latest_score(self, camera_id: str) -> int:
+        """
+        In simple terms: returns the latest real-time 3-second risk score for this camera (0 to 100).
+        Used by the Wall View to color borders (neutral <30, amber 30-70, red 70+) and prioritize active cameras.
+        """
+        if hasattr(self, "latest_camera_scores") and camera_id in self.latest_camera_scores:
+            return self.latest_camera_scores[camera_id][1]
+        sm = self.state_machines.get(camera_id)
+        if sm:
+            return int(round(getattr(sm, "highest_score", 0)))
+        return 0
+
     def _inference_worker_loop(self):
         """Sequential inference worker pulling decimated frames from shared queue."""
         logger.info("Shared inference worker started.")
 
+        # ==============================================================================
+        # MAIN AI INFERENCE WORKER LOOP
+        # ------------------------------------------------------------------------------
+        # This background loop runs continuously while the edge server is active.
+        # It takes camera frames one by one from the shared queue and runs them through
+        # the entire processing pipeline.
+        # ==============================================================================
         while self.running:
             try:
                 item = self.frame_queue.get(timeout=0.5)
@@ -246,50 +310,90 @@ class EdgePipeline:
 
             camera_id, frame_time, frame, is_night_ir = item
 
-            # DPDP Act 2023: Apply real-time privacy masking before storage or inference
+            # ==========================================================================
+            # STEP A: INDIAN DPDP ACT 2023 PRIVACY MASKING
+            # --------------------------------------------------------------------------
+            # If the user drew black privacy boxes over neighbors' windows or bathrooms,
+            # this permanently blacks out those pixels BEFORE AI sees the image or video is saved.
+            # ==========================================================================
             cam_config = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
             if cam_config and getattr(cam_config, "privacy_zones", None):
                 p_polys = [pz.points for pz in cam_config.privacy_zones if pz.points]
                 if p_polys:
                     frame = self.privacy_masker.apply_mask(frame, p_polys)
 
-            # Update pre-roll buffer
+            # Store the frame in circular memory (keeps the last 10 seconds of pre-roll)
             if camera_id in self.ring_buffers:
                 self.ring_buffers[camera_id].append(frame)
+
+            # In simple terms: append frame directly into continuous whole daily video in full_footage/
+            # (one single continuous video file per camera per day, up to 24 hours, not split into 60s clips!)
+            try:
+                c_fps = float(getattr(cam_config, "ai_inference_fps", getattr(cam_config, "target_fps", 15.0)) or 15.0)
+                self.clip_writer.append_continuous_frame(camera_id, frame, fps=c_fps, current_pts=frame_time)
+            except Exception as e:
+                logger.warning(f"Continuous footage recording error for {camera_id}: {e}")
 
             sm = self._get_or_create_state_machine(camera_id)
             now_dt = datetime.now(timezone.utc)
             after_hours = is_time_after_hours(now_dt, cam_config.business_hours) if cam_config else True
 
-            # Extract watch areas
+            # In simple terms: find areas the user configured.
+            # We separate areas meant for alerts/review from areas marked "ignore" (like fans or plants).
             watch_polys = None
+            ignore_polys = []
             if cam_config and getattr(cam_config, "watch_areas", None):
-                watch_polys = [a.polygon for a in cam_config.watch_areas if a.polygon]
+                active_areas = [a.polygon for a in cam_config.watch_areas if a.polygon and getattr(a, "response", "alert") != "ignore"]
+                if active_areas:
+                    watch_polys = active_areas
+                ignore_polys = [a.polygon for a in cam_config.watch_areas if a.polygon and getattr(a, "response", "alert") == "ignore"]
             elif cam_config and getattr(cam_config, "restricted_zones", None):
                 watch_polys = [z.points for z in cam_config.restricted_zones if z.points]
 
-            # Extract OSD exclusion polygon if configured
-            osd_polys = None
+            # In simple terms: build the exclusion list. Any region in this list (timestamp text or 'ignore' areas)
+            # has its motion completely erased so it never triggers false alarms.
+            osd_polys = []
             if cam_config and getattr(cam_config, "osd_exclude_polygon", None):
-                osd_polys = [cam_config.osd_exclude_polygon]
+                osd_polys.append(cam_config.osd_exclude_polygon)
+            if ignore_polys:
+                osd_polys.extend(ignore_polys)
+            if not osd_polys:
+                osd_polys = None
 
-            # 1. Hardened MOG2 Motion Pre-Filter
+            # Check if there are existing objects currently being tracked across frames
+            prior_alive_tracks = self.tracker.get_alive_tracks(
+                max_missed_seconds=self.settings.track_lost_tolerance_sec,
+                current_time=frame_time
+            )
+            tracked_boxes = [t.box for t in prior_alive_tracks] if prior_alive_tracks else None
+
+            # ==========================================================================
+            # STEP B: LIGHTWEIGHT MOTION PRE-FILTER (MOG2)
+            # --------------------------------------------------------------------------
+            # Running YOLO deep learning on every frame takes massive electricity/heat.
+            # MOG2 quickly compares pixels. If nothing moved inside our watch area,
+            # we skip deep learning completely to save battery and compute power.
+            # Stationary tracked objects are protected from background absorption.
+            # ==========================================================================
             has_motion, motion_ratio, _ = self.motion_gate.process_frame(
-                camera_id, frame, watch_polygons=watch_polys, osd_polygons=osd_polys
+                camera_id, frame, watch_polygons=watch_polys, osd_polygons=osd_polys,
+                tracked_boxes=tracked_boxes
             )
 
             if self.motion_gate.had_motion_dropped_outside(camera_id):
                 self.db.increment_ignored_moments(camera_id)
 
-            # Check alive coasting tracks
-            alive_tracks = self.tracker.get_alive_tracks(
-                max_missed_seconds=self.settings.track_lost_tolerance_sec,
-                current_time=frame_time
-            )
+            alive_tracks = prior_alive_tracks
 
-            # 2. Skip deep learning inference if completely idle
+            # Only run heavy AI if there is motion OR an object was recently in view
             should_run_ai = has_motion or (sm.state != ClipState.IDLE) or (len(alive_tracks) > 0)
 
+            # ==========================================================================
+            # STEP C: YOLOv8 AI OBJECT DETECTION & MOVEMENT TRACKING
+            # --------------------------------------------------------------------------
+            # Finds people, cars, motorbikes, dogs, backpacks.
+            # The tracker connects bounding boxes between frames to follow paths.
+            # ==========================================================================
             detections = []
             if should_run_ai:
                 detections = self.detector.detect(frame)
@@ -302,28 +406,53 @@ class EdgePipeline:
                 self.tracker.update([], timestamp=frame_time)
                 alive_tracks = []
 
-            # Filter tracks to watch areas / ROI if configured
+            # ==========================================================================
+            # STEP D: WATCH AREA / RESTRICTED ZONE BOUNDARY CHECK
+            # --------------------------------------------------------------------------
+            # Checks if the tracked person's feet are standing inside the user's watch area.
+            # ==========================================================================
             in_roi = True
             has_configured_areas = bool(cam_config and getattr(cam_config, "watch_areas", None))
             if has_configured_areas:
                 tracks_in_roi = []
                 for trk in alive_tracks:
+                    # In simple terms: if an object is inside an 'ignore' area, do not treat it as an alertable target
+                    inside_ignore = False
                     for area in cam_config.watch_areas:
-                        if area.schedule == "outside_shop_hours" and not after_hours:
-                            continue
-                        if is_foot_in_polygon(trk.box, area.polygon):
-                            tracks_in_roi.append(trk)
-                            break
+                        if getattr(area, "response", "alert") == "ignore" and area.polygon:
+                            if is_foot_in_polygon(trk.box, area.polygon):
+                                inside_ignore = True
+                                break
+                    if inside_ignore:
+                        continue
+
+                    active_areas = [a for a in cam_config.watch_areas if getattr(a, "response", "alert") != "ignore" and a.polygon]
+                    if not active_areas:
+                        # Only ignore areas configured: everything outside ignore areas is watched
+                        tracks_in_roi.append(trk)
+                    else:
+                        for area in active_areas:
+                            if area.schedule == "outside_shop_hours" and not after_hours:
+                                continue
+                            if is_foot_in_polygon(trk.box, area.polygon):
+                                tracks_in_roi.append(trk)
+                                break
                 in_roi = has_motion or (len(tracks_in_roi) > 0)
                 alive_tracks = tracks_in_roi
 
-            # 3. Evaluate Live Score Breakdown for current frame
+            # ==========================================================================
+            # STEP E: REAL-TIME RISK SCORING (13 LAYERS)
+            # --------------------------------------------------------------------------
+            # Collects all stats for this frame and asks the ScoringEngine for a 0-100 score.
+            # ==========================================================================
+            # In simple terms: find the main detected object or track in this frame
             top_track = alive_tracks[0] if alive_tracks else None
             top_det = detections[0] if detections else None
+            has_real_target = (top_track is not None) or (top_det is not None)
 
             cand_obj = getattr(top_track, "label", getattr(top_det, "label", "unclassified"))
             cand_conf = getattr(top_track, "confidence", getattr(top_det, "confidence", 0.0))
-            cand_box = getattr(top_track, "box", getattr(top_det, "box", [0.0, 0.0, 1.0, 1.0]))
+            cand_box = getattr(top_track, "box", getattr(top_det, "box", [0.0, 0.0, 0.0, 0.0]))
             cand_dur = getattr(top_track, "duration_sec", 0.0) if top_track else 0.0
             cand_hits = getattr(top_track, "hits", 1) if top_track else (1 if detections else 0)
             cand_c_mean = getattr(top_track, "c_mean", cand_conf) if top_track else cand_conf
@@ -331,9 +460,10 @@ class EdgePipeline:
             cand_switches = getattr(top_track, "id_switch_count", 0) if top_track else 0
             cand_h_ratio = getattr(top_track, "bbox_height_ratio", cand_box[3] - cand_box[1]) if top_track else (cand_box[3] - cand_box[1])
 
-            # Check restricted zone intersection
+            # In simple terms: only check restricted zone intrusion if an actual object was detected.
+            # Pure background motion (fans, leaves) without any object must never trigger an intruder alert.
             in_restricted = False
-            if cam_config and getattr(cam_config, "restricted_zones", None):
+            if has_real_target and cam_config and getattr(cam_config, "restricted_zones", None):
                 for rz in cam_config.restricted_zones:
                     if check_box_intersects_zone(cand_box, rz):
                         in_restricted = True
@@ -359,7 +489,15 @@ class EdgePipeline:
 
             _, should_alert_live, live_breakdown = self.scoring_engine.evaluate(candidate, camera_bias=bias)
 
-            # Step the Explicit Clip Lifecycle State Machine
+            # In simple terms: save the latest calculated 3-second score and timestamp for Wall View
+            self.latest_camera_scores[camera_id] = (frame_time, int(round(live_breakdown.get("final_score", 0))))
+
+            # ==========================================================================
+            # STEP F: CLIP RECORDING STATE MACHINE
+            # --------------------------------------------------------------------------
+            # Manages recording state: IDLE -> CONFIRMING -> RECORDING -> HANGOVER.
+            # Glues together pre-roll frames, live incident frames, and post-roll buffer.
+            # ==========================================================================
             finalized_segment = sm.step(
                 pts=frame_time,
                 frame_ref=frame,
@@ -370,7 +508,12 @@ class EdgePipeline:
                 live_score_breakdown=live_breakdown
             )
 
-            # Immediate alert dispatch check during active recording
+            # ==========================================================================
+            # STEP G: IMMEDIATE TELEGRAM ALERT DISPATCH
+            # --------------------------------------------------------------------------
+            # If the score hits 70+ (ALERT), do NOT wait for the clip to finish recording!
+            # Send an instant screenshot alert to the user's Telegram bot immediately.
+            # ==========================================================================
             if sm.current_event_id and sm.state in (ClipState.RECORDING, ClipState.HANGOVER):
                 root_id = sm.parent_event_id or sm.current_event_id
                 if should_alert_live and root_id not in self.dispatched_alert_events:
@@ -395,6 +538,19 @@ class EdgePipeline:
 
             self.frame_queue.task_done()
 
+    # ==============================================================================
+    # STEP 6: FINALIZING & SAVING THE RECORDED INCIDENT CLIP
+    # ------------------------------------------------------------------------------
+    # When the movement stops and the hangover duration completes, this function:
+    # 1. Stitches frames into a fast-loading MP4 video file.
+    # 2. Generates a thumbnail snapshot image.
+    # 3. Runs AI ClipDescriptionEngine to generate a human summary ("Person in lobby at 02:14 AM").
+    # 4. Applies Retention Policy:
+    #    - LOW tier: expires automatically after 72 hours (disk cleaner will delete it).
+    #    - ALERT and REVIEW tiers: saved permanently on the system.
+    # 5. Saves record to SQLite database and logs an immutable audit trail.
+    # 6. Dispatches to Telegram if it qualifies for the ALERT tier and wasn't already sent.
+    # ==============================================================================
     def _handle_finalized_segment(
         self,
         segment: FinalizedClipSegment,
@@ -406,19 +562,23 @@ class EdgePipeline:
         if len(frames) < 3:
             return
 
+        # Calculate exact duration in video timeline (PTS) seconds
+        clip_dur = round(max(1.0, segment.end_pts - segment.start_pts), 1)
         fps = float(getattr(cam_config, "ai_inference_fps", 4.0) or 4.0)
         write_result = self.clip_writer.write_clip_from_frames(
             camera_id=camera_id,
             event_group_id=segment.event_group_id,
             frames=frames,
-            fps=fps
+            fps=fps,
+            thumb_frame=getattr(segment, "peak_frame", None),
+            peak_idx=getattr(segment, "peak_frame_idx", None),
+            duration_sec=clip_dur
         )
         clip_path = write_result.clip_path
-        thumb_path = write_result.thumb_path
+        thumb_path = write_result.poster_path or write_result.thumb_path
 
         now_utc = datetime.now(timezone.utc)
         if segment.start_pts < 1577836800.0:
-            clip_dur = max(1.0, segment.end_pts - segment.start_pts)
             start_dt = now_utc - timedelta(seconds=clip_dur)
             end_dt = now_utc
         else:
@@ -426,6 +586,7 @@ class EdgePipeline:
             end_dt = datetime.fromtimestamp(segment.end_pts, timezone.utc)
         start_time = start_dt.isoformat()
         end_time = end_dt.isoformat()
+        # In simple terms: ensure video file length, database record, and UI readout are 100% identical
         duration = write_result.duration_sec
 
         cam_name = getattr(cam_config, "name", camera_id) or camera_id
@@ -467,7 +628,7 @@ class EdgePipeline:
 
         clip_num = self.db.get_next_clip_number()
 
-        # SHA-256 integrity hash
+        # SHA-256 integrity hash for court-admissible tampering protection
         import hashlib
         sha256_hash = ""
         if clip_path and os.path.exists(clip_path):
@@ -488,16 +649,34 @@ class EdgePipeline:
             expires_at_ms = None
         trigger_ms = start_ms + int(max(0.0, segment.trigger_pts - segment.start_pts) * 1000)
 
-        # Legacy reasons compatibility for existing cards and export
+        # In simple terms: build the 'Why this clip was saved' checklist using real ground-truth facts.
+        # Only claim someone 'Stayed' if they actually remained stationary / dwelling in the area for >=30s.
         reasons = []
         if after_hours:
             reasons.append({"code": "outside_shop_hours", "params": {}})
+
+        stats = analysis.get("stats", {})
+        stat_dur = stats.get("stationary_duration_sec", 0.0)
+        is_loiter = stats.get("is_loitering", False)
+        clean_area = stats.get("primary_location", cam_name) or cam_name
+
         if segment.primary_object == "person":
-            reasons.append({"code": "person_detected", "params": {"confidence": round(segment.max_confidence, 2), "area": cam_name}})
-            if duration >= 10.0:
-                reasons.insert(0, {"code": "stayed_in_area", "params": {"seconds": int(duration), "duration": f"{int(duration)} seconds", "area": cam_name}})
+            reasons.append({"code": "person_detected", "params": {"confidence": round(segment.max_confidence, 2), "area": clean_area}})
+            if is_loiter and stat_dur >= 30.0:
+                stat_int = int(round(stat_dur))
+                stat_str = f"{stat_int} seconds" if stat_int < 60 else f"{stat_int//60}m {stat_int%60}s"
+                reasons.insert(0, {
+                    "code": "stayed_in_area",
+                    "params": {
+                        "seconds": stat_int,
+                        "duration": stat_str,
+                        "area": clean_area
+                    }
+                })
+            else:
+                reasons.append({"code": "movement", "params": {"area": clean_area}})
         else:
-            reasons.append({"code": "movement", "params": {"area": cam_name}})
+            reasons.append({"code": "movement", "params": {"area": clean_area}})
 
         boxes = []
         for m in segment.frame_metas:
@@ -588,6 +767,13 @@ class EdgePipeline:
                 cam_cfg = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
                 self._handle_finalized_segment(seg, cam_cfg)
 
+    # ==============================================================================
+    # STEP 7: IMMEDIATE LIVE TELEGRAM ALERT DISPATCH
+    # ------------------------------------------------------------------------------
+    # When a high-threat incident occurs, the security guard or home owner shouldn't
+    # have to wait 30 seconds for the clip to finish recording before getting warned.
+    # This immediately extracts the live CCTV frame and sends a Telegram photo alert.
+    # ==============================================================================
     def _dispatch_immediate_alert(
         self,
         camera_id: str,
@@ -700,7 +886,8 @@ class EdgePipeline:
         self.remove_camera_stream(cam.camera_id)
         self.ring_buffers[cam.camera_id] = deque(maxlen=int(cam.target_fps * 10))
 
-        if self.use_synthetic and str(cam.rtsp_url).startswith("sim://"):
+        # In simple terms: if the camera uses a simulation or test address, use our built-in video generator
+        if self.use_synthetic and (str(cam.rtsp_url).startswith("sim://") or str(cam.rtsp_url).startswith("test://")):
             profile = "night_intruder" if cam.is_night_ir else "walking_person"
             thread = SyntheticCameraThread(
                 config=cam,
@@ -741,6 +928,10 @@ class EdgePipeline:
                 self._finalize_event(cam_id)
             except Exception as e:
                 logger.error(f"Error finalizing event for {cam_id} on flush: {e}")
+
+        # In simple terms: flush and cleanly close active continuous daily whole footage writers
+        self.clip_writer.close_continuous_recorders()
+        self.full_footage_buffers.clear()
 
     def stop(self):
         """Stops all threads and closes database."""

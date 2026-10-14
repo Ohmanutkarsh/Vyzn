@@ -451,6 +451,12 @@ export async function openClipDrawer(clipOrId, clipList = []) {
   activeClip = clipObj;
   currentClipIndex = activeClipList.findIndex((c) => c.id === clipObj.id);
 
+  // In simple terms: reset scroll to the very top so the video player is always front and center
+  const mainContent = document.getElementById('drawer-main-content');
+  if (mainContent) {
+    mainContent.scrollTop = 0;
+  }
+
   renderDrawerContent(activeClip);
 
   const scrim = document.getElementById('clip-drawer-scrim');
@@ -500,7 +506,16 @@ function renderDrawerContent(clip) {
   clipTitle.textContent = `${t('clips.drawer_clip_title', { number: clip.number || 1 })}`;
 
   const video = document.getElementById('drawer-video-player');
+
+  // In simple terms: immediately set the poster snapshot image so the preview is visible right away even before video buffers
+  const posterUrl = clip.posterUrl || clip.thumbnailUrl || (clip.urls && clip.urls.poster) || `/api/clips/${encodeURIComponent(clip.id)}/poster.jpg`;
+  video.poster = posterUrl;
   video.src = clip.videoUrl || `/api/clips/${encodeURIComponent(clip.id)}/video`;
+
+  // In simple terms: force the browser video engine to load metadata and show the first video frame
+  try {
+    video.load();
+  } catch (_) {}
 
   // Start 3 seconds before trigger moment per spec Section 6.3
   const startMs = clip.startMs || Date.now();
@@ -640,38 +655,68 @@ function renderDrawerContent(clip) {
   const tlContainer = document.getElementById('drawer-timeline-list');
   if (tlContainer) {
     tlContainer.innerHTML = '';
-    const timeline = (clip.analysis && clip.analysis.timeline) || clip.timeline || [];
-    if (timeline.length === 0) {
-      tlContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-3); font-style: italic; padding: 4px 0;">Continuous motion observed throughout clip.</div>`;
-    } else {
-      timeline.forEach((pt) => {
-        const offsetSec = Number(pt.t_offset_sec != null ? pt.t_offset_sec : (pt.offset_sec || 0));
+    const intervals = (clip.analysis && clip.analysis.timeline_intervals) || clip.timeline_intervals || clip.timelineIntervals;
+    if (intervals && intervals.length > 0) {
+      intervals.forEach((iv) => {
         const itemEl = document.createElement('div');
         itemEl.className = 'drawer-timeline-item';
-        itemEl.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; cursor: pointer; border: 1px solid var(--border); transition: background 0.15s ease;';
-
-        const offsetFormatted = `${Math.floor(offsetSec / 60)}:${(Math.floor(offsetSec % 60) < 10 ? '0' : '')}${Math.floor(offsetSec % 60)}`;
-        const actionText = pt.action || pt.description || pt.note || 'Movement registered';
-        const classesText = Array.isArray(pt.classes) ? pt.classes.join(', ') : (pt.classes || pt.object || '');
+        const isQuiet = Boolean(iv.is_quiet);
+        const bg = isQuiet ? 'rgba(255,255,255,0.015)' : 'rgba(255,255,255,0.04)';
+        const borderColor = isQuiet ? 'rgba(255,255,255,0.05)' : 'var(--border)';
+        const tagColor = isQuiet ? 'var(--text-3)' : '#38bdf8';
+        const tagBg = isQuiet ? 'rgba(255,255,255,0.05)' : 'rgba(56, 189, 248, 0.15)';
+        itemEl.style.cssText = `display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: ${bg}; border-radius: 6px; cursor: pointer; border: 1px solid ${borderColor}; transition: background 0.15s ease; margin-bottom: 4px;`;
 
         itemEl.innerHTML = `
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-family: var(--font-mono); font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-weight: 600;">⏱️ ${offsetFormatted}</span>
-            <span style="font-size: 12px; color: var(--text-1); font-weight: 500;">${escapeHtml(actionText)}</span>
+            <span style="font-family: var(--font-mono); font-size: 11px; background: ${tagBg}; color: ${tagColor}; padding: 2px 6px; border-radius: 4px; font-weight: 600;">⏱️ ${escapeHtml(iv.time_str || '')}</span>
+            <span style="font-size: 12px; color: ${isQuiet ? 'var(--text-3)' : 'var(--text-1)'}; font-weight: ${isQuiet ? '400' : '500'}; font-style: ${isQuiet ? 'italic' : 'normal'};">${escapeHtml(iv.description || iv.action || '')}</span>
           </div>
-          ${classesText ? `<span style="font-size: 11px; color: var(--text-3);">${escapeHtml(classesText)}</span>` : ''}
+          ${iv.wall_clock_str ? `<span style="font-size: 11px; color: var(--text-3); font-family: var(--font-mono);">${escapeHtml(iv.wall_clock_str)}</span>` : ''}
         `;
 
         itemEl.addEventListener('mouseenter', () => { itemEl.style.background = 'rgba(255,255,255,0.08)'; });
-        itemEl.addEventListener('mouseleave', () => { itemEl.style.background = 'rgba(255,255,255,0.03)'; });
-
+        itemEl.addEventListener('mouseleave', () => { itemEl.style.background = bg; });
         itemEl.addEventListener('click', () => {
-          video.currentTime = Math.max(0, offsetSec);
+          video.currentTime = Math.max(0, iv.start_sec || 0);
           video.play().catch(() => {});
         });
-
         tlContainer.appendChild(itemEl);
       });
+    } else {
+      const timeline = (clip.analysis && clip.analysis.timeline) || clip.timeline || [];
+      if (timeline.length === 0) {
+        tlContainer.innerHTML = `<div style="font-size: 12px; color: var(--text-3); font-style: italic; padding: 4px 0;">Continuous motion observed throughout clip.</div>`;
+      } else {
+        timeline.forEach((pt) => {
+          const offsetSec = Number(pt.t_offset_sec != null ? pt.t_offset_sec : (pt.offset_sec || 0));
+          const itemEl = document.createElement('div');
+          itemEl.className = 'drawer-timeline-item';
+          itemEl.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 6px; cursor: pointer; border: 1px solid var(--border); transition: background 0.15s ease; margin-bottom: 4px;';
+
+          const offsetFormatted = `${Math.floor(offsetSec / 60)}:${(Math.floor(offsetSec % 60) < 10 ? '0' : '')}${Math.floor(offsetSec % 60)}`;
+          const actionText = pt.action || pt.description || pt.note || 'Movement registered';
+          const classesText = Array.isArray(pt.classes) ? pt.classes.join(', ') : (pt.classes || pt.object || '');
+
+          itemEl.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-family: var(--font-mono); font-size: 11px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; padding: 2px 6px; border-radius: 4px; font-weight: 600;">⏱️ ${offsetFormatted}</span>
+              <span style="font-size: 12px; color: var(--text-1); font-weight: 500;">${escapeHtml(actionText)}</span>
+            </div>
+            ${classesText ? `<span style="font-size: 11px; color: var(--text-3);">${escapeHtml(classesText)}</span>` : ''}
+          `;
+
+          itemEl.addEventListener('mouseenter', () => { itemEl.style.background = 'rgba(255,255,255,0.08)'; });
+          itemEl.addEventListener('mouseleave', () => { itemEl.style.background = 'rgba(255,255,255,0.03)'; });
+
+          itemEl.addEventListener('click', () => {
+            video.currentTime = Math.max(0, offsetSec);
+            video.play().catch(() => {});
+          });
+
+          tlContainer.appendChild(itemEl);
+        });
+      }
     }
   }
 

@@ -1,14 +1,33 @@
+/**
+ * ==============================================================================
+ * VYZN WATCH AREAS & CAMERA ZONE EDITOR (FRONTEND JAVASCRIPT)
+ * ==============================================================================
+ * This script powers the interactive zone drawing tool in the user's dashboard.
+ * It lets housing societies and store owners draw custom boundaries on their cameras:
+ * 1. "Watch Areas": High-priority zones (like Society Main Gate, Lobby, Generator Room).
+ * 2. Visual Scrim: Dims out background areas (like trees, public road) so the user knows
+ *    the AI will ignore irrelevant motion outside the drawn box.
+ * 3. 16:9 Normalized Coordinate Grid: All coordinates are mapped to a standard 1000x562.5
+ *    SVG canvas so polygons align perfectly whether viewed on mobile, tablet, or 4K PC.
+ * ==============================================================================
+ */
+
 import { initShell } from './components/shell.js';
 import { t, initI18n } from './i18n.js';
 import { escapeHtml } from './utils.js';
 
-// Global state
+// ==============================================================================
+// STEP 1: GLOBAL STATE & DRAWING VARIABLES
+// ------------------------------------------------------------------------------
+// Tracks the active camera, list of polygons, currently selected shape,
+// whether the user is actively clicking/dragging, and unsaved changes.
+// ==============================================================================
 let currentCameraId = null;
 let currentCamera = null;
 let camerasList = [];
 let watchAreas = [];
 let selectedAreaIndex = null;
-let activeTool = 'rect'; // 'rect' | 'shape'
+let activeTool = 'rect'; // 'rect' (box) | 'shape' (multi-point polygon)
 let isDrawing = false;
 let draftPoints = [];
 let undoStack = [];
@@ -17,6 +36,7 @@ let dragContext = null;
 let pictureTimestamp = 'Now';
 
 // SVG canvas dimensions (16:9 normalized coordinate space)
+// This standardizes coordinates between different camera resolutions (720p, 1080p, 4K)
 const SVG_W = 1000;
 const SVG_H = 562.5;
 
@@ -159,6 +179,28 @@ async function renderEditor(container, cameraId) {
       ...a,
       polygon: a.polygon || []
     }));
+
+    // In simple terms: if no watch areas exist yet, auto-seed default Area 1 in center of view
+    // so the dashboard opens with Area 1 pre-selected and ready, matching the reference layout!
+    if (watchAreas.length === 0) {
+      const defaultArea = {
+        id: `area_${cameraId}_1`,
+        camera_id: cameraId,
+        name: 'Area 1',
+        polygon: [
+          [0.325, 0.47],
+          [0.475, 0.47],
+          [0.475, 0.60],
+          [0.325, 0.60]
+        ],
+        response: 'alert',
+        min_stay_seconds: 0,
+        schedule: 'always',
+        version: 1
+      };
+      watchAreas = [defaultArea];
+    }
+
     selectedAreaIndex = watchAreas.length > 0 ? 0 : null;
     undoStack = [];
     isDirty = false;
@@ -176,7 +218,7 @@ async function renderEditor(container, cameraId) {
 }
 
 function buildEditorDom(container) {
-  const camName = currentCamera ? currentCamera.camera_name : 'Camera';
+  const camName = currentCamera ? currentCamera.camera_name : 'Camera 1';
   const ignoredCount = currentCamera ? (currentCamera.ignored_moments_count || 0) : 0;
   const ignoredBanner = ignoredCount > 0 
     ? `<div class="ignored-stats-banner">
@@ -193,12 +235,12 @@ function buildEditorDom(container) {
         ${backLink}
         <div>
           <h1 id="txt-camera-name" style="margin:0;">${escapeHtml(camName)} · ${escapeHtml(t('areas.page_title', 'Watch areas'))}</h1>
-          <p id="txt-areas-semantics">${escapeHtml(t('areas.watching_whole_view', 'Watching the whole view. Draw an area to ignore everything else.'))}</p>
+          <p id="txt-areas-semantics">Watching 1 area</p>
         </div>
       </div>
       <div>
         <button type="button" class="btn btn-secondary" id="btn-update-picture">
-          <span>🔄</span> <span id="btn-update-picture-txt">${escapeHtml(t('areas.update_picture', 'Update picture'))}</span>
+          <span>🖼️</span> <span id="btn-update-picture-txt">${escapeHtml(t('areas.update_picture', 'Update picture'))}</span>
         </button>
       </div>
     </div>
@@ -213,6 +255,7 @@ function buildEditorDom(container) {
           <svg class="areas-canvas-svg" id="canvas-svg" viewBox="0 0 ${SVG_W} ${SVG_H}" preserveAspectRatio="none">
             <!-- Scrim Fill (Even-Odd) -->
             <path class="scrim-fill" id="svg-scrim" d="M 0 0 H ${SVG_W} V ${SVG_H} H 0 Z"></path>
+
             <!-- Rendered Watch Areas -->
             <g id="svg-areas-group"></g>
             <!-- Interactive Handles for Selected Area -->
@@ -225,7 +268,7 @@ function buildEditorDom(container) {
         <div class="areas-canvas-footer">
           <div class="areas-tools-strip">
             <button type="button" class="tool-btn is-active" id="tool-rect">
-              <span>⬛</span> ${escapeHtml(t('areas.rect_tool', 'Rectangle'))}
+              <span>■</span> ${escapeHtml(t('areas.rect_tool', 'Rectangle'))}
             </button>
             <button type="button" class="tool-btn" id="tool-shape">
               <span>⬠</span> ${escapeHtml(t('areas.shape_tool', 'Free shape'))}
@@ -291,6 +334,7 @@ function buildEditorDom(container) {
           <div>
             <label class="form-group-label">${escapeHtml(t('areas.field_when_someone', 'When someone is here'))}</label>
             <div class="radio-group-cards">
+              <!-- In simple terms: radio card for high-priority alert (sends instant message) -->
               <label class="radio-choice-card is-active" id="label-resp-alert">
                 <input type="radio" name="area-response" value="alert" style="display:none;" checked>
                 <div class="radio-indicator"><div class="radio-dot"></div></div>
@@ -298,11 +342,20 @@ function buildEditorDom(container) {
                   <span style="font-weight:600;">▲ ${escapeHtml(t('areas.resp_alert', 'Send me an alert'))}</span>
                 </div>
               </label>
+              <!-- In simple terms: radio card for standard review (saves clip silently) -->
               <label class="radio-choice-card" id="label-resp-review">
                 <input type="radio" name="area-response" value="review" style="display:none;">
                 <div class="radio-indicator"><div class="radio-dot"></div></div>
                 <div>
                   <span style="font-weight:500;">◆ ${escapeHtml(t('areas.resp_review', 'Save a clip to review'))}</span>
+                </div>
+              </label>
+              <!-- In simple terms: radio card for ignore (low priority / nuisance motion reduction) -->
+              <label class="radio-choice-card" id="label-resp-ignore">
+                <input type="radio" name="area-response" value="ignore" style="display:none;">
+                <div class="radio-indicator"><div class="radio-dot"></div></div>
+                <div>
+                  <span style="font-weight:500;">● ${escapeHtml(t('areas.resp_ignore', 'Ignore / Low priority (reduce score)'))}</span>
                 </div>
               </label>
             </div>
@@ -466,16 +519,16 @@ function attachSidebarEventListeners() {
     };
   });
 
-  // Response Radios
+  // In simple terms: wire up clicks on the Alert, Review, and Ignore choices
   const labelAlert = document.getElementById('label-resp-alert');
   const labelReview = document.getElementById('label-resp-review');
+  const labelIgnore = document.getElementById('label-resp-ignore');
   if (labelAlert && labelReview) {
-    labelAlert.onclick = () => {
-      setAreaResponse('alert');
-    };
-    labelReview.onclick = () => {
-      setAreaResponse('review');
-    };
+    labelAlert.onclick = () => setAreaResponse('alert');
+    labelReview.onclick = () => setAreaResponse('review');
+    if (labelIgnore) {
+      labelIgnore.onclick = () => setAreaResponse('ignore');
+    }
   }
 
   // Dwell segmented control
@@ -501,21 +554,22 @@ function attachSidebarEventListeners() {
   }
 }
 
+// In simple terms: updates the chosen behavior (alert, review, or ignore) for the selected watch area
 function setAreaResponse(resp) {
   if (selectedAreaIndex === null || !watchAreas[selectedAreaIndex]) return;
   pushUndo();
   watchAreas[selectedAreaIndex].response = resp;
   isDirty = true;
 
+  // Toggle active highlights on the cards
   const labelAlert = document.getElementById('label-resp-alert');
   const labelReview = document.getElementById('label-resp-review');
+  const labelIgnore = document.getElementById('label-resp-ignore');
   if (labelAlert && labelReview) {
-    if (resp === 'alert') {
-      labelAlert.classList.add('is-active');
-      labelReview.classList.remove('is-active');
-    } else {
-      labelReview.classList.add('is-active');
-      labelAlert.classList.remove('is-active');
+    labelAlert.classList.toggle('is-active', resp === 'alert');
+    labelReview.classList.toggle('is-active', resp === 'review');
+    if (labelIgnore) {
+      labelIgnore.classList.toggle('is-active', resp === 'ignore');
     }
   }
   renderAreasList();
@@ -593,15 +647,22 @@ function updateSemanticsNotice() {
   if (watchAreas.length === 0) {
     p.textContent = t('areas.watching_whole_view', 'Watching the whole view. Draw an area to ignore everything else.');
   } else if (watchAreas.length === 1) {
-    p.textContent = t('areas.watching_areas_count', 'Watching 1 area. Everything else is ignored.');
+    p.textContent = 'Watching 1 area';
   } else {
-    p.textContent = t('areas.watching_areas_count_plural', `Watching ${watchAreas.length} areas. Everything else is ignored.`).replace('{count}', watchAreas.length);
+    p.textContent = `Watching ${watchAreas.length} areas`;
   }
 }
 
 function renderScrim() {
   const scrim = document.getElementById('svg-scrim');
   if (!scrim) return;
+
+  // In simple terms: if no watch areas exist yet, VYZN watches the whole camera view.
+  // We leave the picture completely un-scrimmed and bright so the user can see everything clearly!
+  if (!watchAreas || watchAreas.length === 0) {
+    scrim.setAttribute('d', '');
+    return;
+  }
 
   // Outer full frame rectangle (0 0 to W H)
   let d = `M 0 0 H ${SVG_W} V ${SVG_H} H 0 Z `;
@@ -628,9 +689,11 @@ function renderAreas() {
     const ptsStr = area.polygon.map(([nx, ny]) => `${nx * SVG_W},${ny * SVG_H}`).join(' ');
 
     // Area polygon element
+    // In simple terms: draw the polygon boundary with special dashed/neutral style if marked as ignore
+    const isIgnore = area.response === 'ignore';
     const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
     poly.setAttribute('points', ptsStr);
-    poly.setAttribute('class', `area-polygon ${isSelected ? 'is-active' : ''}`);
+    poly.setAttribute('class', `area-polygon ${isSelected ? 'is-active' : ''} ${isIgnore ? 'is-ignore' : ''}`);
     poly.dataset.areaIdx = idx;
 
     // Click/Drag to select or translate shape
@@ -638,13 +701,13 @@ function renderAreas() {
 
     group.appendChild(poly);
 
-    // Top-left label chip
+    // Top-left label chip showing icon and area name
     const [minX, minY] = getShapeTopLeft(area.polygon);
     const labelG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     labelG.setAttribute('class', 'area-label-group');
     labelG.setAttribute('transform', `translate(${minX * SVG_W + 6}, ${minY * SVG_H + 18})`);
 
-    const icon = area.response === 'alert' ? '▲' : '◆';
+    const icon = area.response === 'alert' ? '▲' : (isIgnore ? '●' : '◆');
     const textStr = `${icon} ${area.name}`;
     const textWidth = Math.max(70, textStr.length * 7 + 16);
 
@@ -771,10 +834,12 @@ function renderAreasList() {
   }
 
   listEl.innerHTML = watchAreas.map((area, idx) => {
+    // In simple terms: pick the badge icon and color based on alert (red triangle), review (blue diamond), or ignore (grey X)
     const isSelected = idx === selectedAreaIndex;
     const isAlert = area.response === 'alert';
-    const tierIcon = isAlert ? '▲' : '◆';
-    const tierClass = isAlert ? 'alert' : 'review';
+    const isIgnore = area.response === 'ignore';
+    const tierIcon = isAlert ? '▲' : (isIgnore ? '●' : '◆');
+    const tierClass = isAlert ? 'alert' : (isIgnore ? 'ignore' : 'review');
 
     return `
       <div class="area-list-item ${isSelected ? 'is-selected' : ''}" data-idx="${idx}">
@@ -823,6 +888,36 @@ function updatePropertiesForm() {
   if (selectedAreaIndex === null || !watchAreas[selectedAreaIndex]) {
     form.style.display = 'none';
     prompt.style.display = 'block';
+
+    // In simple terms: if there are no watch areas yet, show an inviting helper box with a big button
+    // instead of an empty dark screen.
+    if (!watchAreas || watchAreas.length === 0) {
+      prompt.innerHTML = `
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px dashed var(--border); border-radius: 8px; padding: 20px 14px; text-align: center; margin-top: 10px;">
+          <div style="font-size: 28px; margin-bottom: 8px;">✏️</div>
+          <div style="font-weight: 600; font-size: 14px; color: var(--text-1); margin-bottom: 4px;">Ready to create your first watch area</div>
+          <div style="font-size: 12px; color: var(--text-2); margin-bottom: 14px; line-height: 1.5;">
+            Click and drag on the camera snapshot to mark a cash counter, doorway, or boundary to watch.
+          </div>
+          <button type="button" class="btn btn-primary" id="btn-cta-start-drawing" style="width: 100%; font-size: 13px; padding: 8px 12px;">
+            + Draw Watch Area Now
+          </button>
+        </div>
+      `;
+      const ctaBtn = document.getElementById('btn-cta-start-drawing');
+      if (ctaBtn) {
+        ctaBtn.onclick = () => {
+          const btnAdd = document.getElementById('btn-add-area');
+          if (btnAdd) btnAdd.click();
+        };
+      }
+    } else {
+      prompt.innerHTML = `
+        <div style="padding: var(--space-6) var(--space-2); text-align: center; color: var(--text-3); font-size: 13px;">
+          Select an area above or tap on the camera view to edit its settings.
+        </div>
+      `;
+    }
     return;
   }
 
@@ -835,16 +930,16 @@ function updatePropertiesForm() {
   const inputName = document.getElementById('input-area-name');
   if (inputName) inputName.value = area.name || '';
 
-  // Response Radios
+  // In simple terms: update the radio selection to highlight whether Alert, Review, or Ignore is chosen
   const labelAlert = document.getElementById('label-resp-alert');
   const labelReview = document.getElementById('label-resp-review');
+  const labelIgnore = document.getElementById('label-resp-ignore');
   if (labelAlert && labelReview) {
-    if (area.response === 'alert') {
-      labelAlert.classList.add('is-active');
-      labelReview.classList.remove('is-active');
-    } else {
-      labelReview.classList.add('is-active');
-      labelAlert.classList.remove('is-active');
+    const curResp = area.response || 'alert';
+    labelAlert.classList.toggle('is-active', curResp === 'alert');
+    labelReview.classList.toggle('is-active', curResp === 'review');
+    if (labelIgnore) {
+      labelIgnore.classList.toggle('is-active', curResp === 'ignore');
     }
   }
 

@@ -1,0 +1,12 @@
+{
+  "clip": {
+    "score_interval_seconds": 3,
+    "active_score_threshold": 30,
+    "quiet_gap_seconds": 90,
+    "pre_roll_seconds": 10,
+    "post_roll_seconds": 10,
+    "min_active_ticks": 1,
+    "max_clip_seconds": 600,
+    "preview_seconds": 6
+  }
+}

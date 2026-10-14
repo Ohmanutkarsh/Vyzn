@@ -2,6 +2,7 @@ import { initShell } from './components/shell.js';
 import { renderCameraTile } from './components/camera-tile.js';
 import { renderFlagRow } from './components/flag-row.js';
 import { openClipDrawer, initClipDrawer } from './components/clip-drawer.js';
+import { openWallView } from './components/wall-view.js';
 import { t, initI18n } from './i18n.js';
 import { escapeHtml } from './utils.js';
 
@@ -28,6 +29,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Tab visibility disconnect handler per Section 6.2 & Ground Rules
   document.addEventListener('visibilitychange', handleVisibilityChange);
 
+  // Keyboard shortcut F to toggle Wall View
+  window.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable)) return;
+    if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault();
+      openWallView(camerasList);
+    }
+  });
+
   // Periodic snapshot refresh for non-active camera tiles in strip
   setInterval(refreshStripSnapshots, 15000);
 });
@@ -35,6 +45,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 async function loadOverviewData() {
   const emptyState = document.getElementById('overview-empty-state');
   const activeContent = document.getElementById('overview-active-content');
+  const wallBtn = document.getElementById('btn-wall-view');
 
   try {
     const res = await fetch('/api/cameras', { credentials: 'include' });
@@ -44,11 +55,22 @@ async function loadOverviewData() {
     if (!camerasList || camerasList.length === 0) {
       if (emptyState) emptyState.style.display = 'flex';
       if (activeContent) activeContent.style.display = 'none';
+      if (wallBtn) {
+        wallBtn.disabled = true;
+        wallBtn.title = 'No cameras connected';
+      }
       return;
     }
 
     if (emptyState) emptyState.style.display = 'none';
     if (activeContent) activeContent.style.display = 'block';
+
+    // Enable Wall View button with active cameras
+    if (wallBtn) {
+      wallBtn.disabled = false;
+      wallBtn.title = 'Fullscreen all cameras (F)';
+      wallBtn.onclick = () => openWallView(camerasList);
+    }
 
     // Default to first online camera, or first camera
     const onlineCam = camerasList.find(c => c.status === 'online');
@@ -162,40 +184,40 @@ function startLiveStream(cid) {
   if (streamImg) {
     streamImg.src = `/api/cameras/${cid}/stream?t=${Date.now()}`;
 
+    // In simple terms: when video starts playing, show the green 'Live' indicator
     streamImg.onload = () => {
       if (connectingOverlay) connectingOverlay.style.display = 'none';
       if (offlineOverlay) offlineOverlay.style.display = 'none';
       if (statusBadge) statusBadge.textContent = 'Live';
       if (pulseDot) pulseDot.style.display = 'inline-block';
-      lastFrameTime = Date.now();
-      resetStalledWatchdog();
+      if (stalledTimer) {
+        clearTimeout(stalledTimer);
+        stalledTimer = null;
+      }
     };
 
+    // When the stream encounters a network hiccup or camera is off, show clear status and retry automatically
     streamImg.onerror = () => {
       if (connectingOverlay) connectingOverlay.style.display = 'none';
       if (offlineOverlay) {
         offlineOverlay.style.display = 'flex';
         const banner = document.getElementById('offline-banner-text');
-        if (banner) banner.textContent = cam.offline_since ? `Offline since ${cam.offline_since}` : 'Offline';
+        if (banner) banner.textContent = cam.offline_since ? `Offline since ${cam.offline_since}` : 'Camera Stream Offline';
       }
       if (statusBadge) statusBadge.textContent = 'Offline';
       if (pulseDot) pulseDot.style.display = 'none';
       if (cam.snapshot_url) {
         streamImg.src = `${cam.snapshot_url}?t=${Date.now()}`;
       }
+      // Retry reconnecting automatically after 4 seconds if page is visible
+      if (stalledTimer) clearTimeout(stalledTimer);
+      stalledTimer = setTimeout(() => {
+        if (activeCameraId === cid && document.visibilityState === 'visible') {
+          streamImg.src = `/api/cameras/${cid}/stream?t=${Date.now()}`;
+        }
+      }, 4000);
     };
   }
-}
-
-function resetStalledWatchdog() {
-  if (stalledTimer) clearTimeout(stalledTimer);
-  stalledTimer = setTimeout(() => {
-    // No new frame for 5 seconds -> Stalled / Reconnecting
-    const statusBadge = document.getElementById('player-status-badge');
-    const pulseDot = document.getElementById('live-pulse-dot');
-    if (statusBadge) statusBadge.textContent = 'Reconnecting…';
-    if (pulseDot) pulseDot.style.display = 'none';
-  }, 5000);
 }
 
 function handleVisibilityChange() {

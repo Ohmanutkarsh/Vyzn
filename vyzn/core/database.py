@@ -837,6 +837,48 @@ class EventDatabase:
         finally:
             conn.close()
 
+    def purge_all_clips(self) -> int:
+        """
+        Permanently purges all clips and video files from SQLite and local disk storage.
+        Used when the user requests a complete reset of past test/evidence recordings.
+        """
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT file_path, thumb_path FROM events")
+            rows = cursor.fetchall()
+            import shutil, os
+            for fp, tp in rows:
+                for p in (fp, tp):
+                    if p and os.path.exists(p):
+                        try:
+                            parent = Path(p).parent
+                            # If file is inside an event folder like ev_... or clip_..., remove folder
+                            if parent.name.startswith("ev_") or parent.name.startswith("clip_"):
+                                shutil.rmtree(parent, ignore_errors=True)
+                            else:
+                                os.unlink(p)
+                        except Exception as e:
+                            logger.warning(f"Failed to remove file during purge: {e}")
+
+            # Also clean up any lingering files in raw and clips directories
+            data_parent = self.db_path.parent if hasattr(self, 'db_path') else Path('./data/clips')
+            for sub_name in ("clips", "raw"):
+                sub_dir = data_parent / sub_name
+                if sub_dir.exists():
+                    shutil.rmtree(sub_dir, ignore_errors=True)
+                    sub_dir.mkdir(parents=True, exist_ok=True)
+
+            # Clear SQLite tables
+            self.writer.queue.put(("DELETE FROM events", (), None))
+            self.writer.queue.put(("DELETE FROM deletion_log", (), None))
+            self.writer.queue.put(("DELETE FROM clip_sequence", (), None))
+            self.log_audit("ALL_CLIPS_PURGED", details=f"Purged {len(rows)} clips by user request")
+            self.flush()
+            return len(rows)
+        finally:
+            conn.close()
+
     # -------------------------------------------------------------------------
     # v1.1 User, Authentication, and Telegram Link Methods
     # -------------------------------------------------------------------------
@@ -1401,10 +1443,19 @@ class EventDatabase:
                     "code": "person_detected",
                     "params": {"confidence": round(conf, 2), "area": area_name or "Camera view"}
                 })
-                if dur >= 10.0:
+                # In simple terms: only add 'stayed_in_area' if the analysis verified that loitering actually occurred (>=30s)
+                stats_obj = meta.get("analysis", {}).get("stats", {})
+                if stats_obj.get("is_loitering") and stats_obj.get("stationary_duration_sec", 0.0) >= 30.0:
+                    stat_s = int(round(stats_obj.get("stationary_duration_sec", 30.0)))
+                    stat_str = f"{stat_s} seconds" if stat_s < 60 else f"{stat_s//60}m {stat_s%60}s"
                     reasons.insert(0, {
                         "code": "stayed_in_area",
-                        "params": {"seconds": int(dur), "duration": f"{int(dur)} seconds", "area": area_name or "Camera view"}
+                        "params": {"seconds": stat_s, "duration": stat_str, "area": area_name or "Camera view"}
+                    })
+                else:
+                    reasons.append({
+                        "code": "movement",
+                        "params": {"area": area_name or "Camera view"}
                     })
             else:
                 reasons.append({
@@ -1472,12 +1523,19 @@ class EventDatabase:
             "reasons": reasons,
             "objects": meta.get("objects", [{"cls": row.get("object_type") or "person", "confidence": round(row.get("confidence") or 0.85, 2)}]),
             "thumbnailUrl": thumb_url,
-            "previewUrl": video_url,
+            "posterUrl": f"/api/clips/{ev_id}/poster.jpg",
+            "previewUrl": f"/api/clips/{ev_id}/preview.mp4",
             "videoUrl": video_url,
             "urls": {
                 "video": video_url,
-                "thumb": thumb_url
+                "thumb": thumb_url,
+                "poster": f"/api/clips/{ev_id}/poster.jpg",
+                "preview": f"/api/clips/{ev_id}/preview.mp4"
             },
+            "one_line_summary": row.get("one_line_summary") or analysis.get("one_line_summary") or f"{title}. {summary.split('.')[0]}.",
+            "oneLineSummary": row.get("one_line_summary") or analysis.get("one_line_summary") or f"{title}. {summary.split('.')[0]}.",
+            "timeline_intervals": analysis.get("timeline_intervals", []),
+            "timelineIntervals": analysis.get("timeline_intervals", []),
             "boxes": meta.get("boxes", []),
             "sha256": row.get("sha256") or meta.get("sha256", ""),
             "detector": meta.get("detector", {"name": "YOLOv8n-VYZN", "version": "8.0.196"}),
@@ -1617,8 +1675,9 @@ class EventDatabase:
             where_clauses.append("camera_id = ?")
             params.append(camera_id)
 
+        # In simple terms: filter by user email, while also allowing clips created before user assignment so footage is never lost
         if owner_email:
-            where_clauses.append("owner_email = ?")
+            where_clauses.append("(owner_email = ? OR owner_email IS NULL OR owner_email = '')")
             params.append(owner_email)
 
         if tier and tier.lower() != "all":
@@ -1785,11 +1844,17 @@ class EventDatabase:
         file_path = row.get("file_path")
         thumb_path = row.get("thumb_path")
 
-        # Delete physical files from disk
+        # Delete physical files and event folder from disk
+        import shutil
         for p in (file_path, thumb_path):
             if p and os.path.exists(p):
                 try:
-                    os.remove(p)
+                    p_obj = Path(p)
+                    # If file is inside an event folder like ev_... or clip_..., remove entire folder
+                    if p_obj.parent.name.startswith("ev_") or p_obj.parent.name.startswith("clip_"):
+                        shutil.rmtree(p_obj.parent, ignore_errors=True)
+                    else:
+                        os.remove(p)
                 except Exception as e:
                     logger.warning(f"Could not remove physical media file {p}: {e}")
 

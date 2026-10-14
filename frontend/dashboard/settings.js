@@ -12,6 +12,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   initPhoneControls();
   initSecurityPinControls();
   await initTelegramControls();
+  await initBusinessHoursControls();
+  await initStorageControls();
 });
 
 function showToast(message, isError = false) {
@@ -255,6 +257,61 @@ function initSecurityPinControls() {
 let tgPollInterval = null;
 let currentTgToken = null;
 
+// ==============================================================================
+// CONNECT TELEGRAM ACTION (FOR NON-PROGRAMMERS)
+// ------------------------------------------------------------------------------
+// When you click 'Connect VYZN Telegram':
+// 1. We ask the server to create a secure 10-minute linking code.
+// 2. We open the official Telegram Bot (@Vyzn_security_bot) in a new browser tab.
+// 3. When you tap 'Start' on Telegram, your account is instantly linked!
+// 4. All camera alerts and threat photos will automatically go to your Telegram.
+// ==============================================================================
+async function triggerConnectTelegram(btnElement) {
+  if (btnElement) {
+    btnElement.disabled = true;
+    btnElement.textContent = 'Opening Telegram…';
+  }
+  const feedback = document.getElementById('tg-feedback');
+  if (feedback) feedback.style.display = 'none';
+
+  try {
+    const res = await fetch('/api/telegram/link', {
+      method: 'POST',
+      credentials: 'include'
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Failed to generate connection link');
+
+    currentTgToken = data.token;
+    const drawer = document.getElementById('tg-connect-drawer');
+    const openLink = document.getElementById('tg-open-deep-link');
+    if (openLink) openLink.href = data.deepLink;
+    if (drawer) drawer.style.display = 'block';
+
+    // Scroll to drawer so user sees instructions
+    const tgCard = document.getElementById('card-telegram-title');
+    if (tgCard) tgCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    // Open Telegram Bot in new window/tab
+    window.open(data.deepLink, '_blank', 'noopener');
+    showToast('Telegram opening… Tap Start in the bot to connect.');
+
+    startTgPolling();
+  } catch (err) {
+    showToast(err.message, true);
+    if (feedback) {
+      feedback.textContent = err.message;
+      feedback.style.color = '#ef4444';
+      feedback.style.display = 'block';
+    }
+  } finally {
+    if (btnElement) {
+      btnElement.disabled = false;
+      btnElement.textContent = 'Connect VYZN Telegram';
+    }
+  }
+}
+
 async function initTelegramControls() {
   const btnConnect = document.getElementById('btn-connect-telegram');
   const btnDisconnect = document.getElementById('btn-disconnect-telegram');
@@ -263,7 +320,83 @@ async function initTelegramControls() {
   const btnSimulate = document.getElementById('tg-test-simulate-btn');
   const feedback = document.getElementById('tg-feedback');
 
+  const btnPhoneConnect = document.getElementById('btn-phone-card-connect-tg');
+  const btnSaveToken = document.getElementById('btn-save-tg-bot-token');
+  const inputToken = document.getElementById('input-tg-bot-token');
+  const tokenFeedback = document.getElementById('tg-token-feedback');
+
   await refreshTelegramStatus();
+
+  // Load existing Bot Token status if configured
+  try {
+    const cfgRes = await fetch('/api/telegram/config', { credentials: 'include' });
+    if (cfgRes.ok) {
+      const cfgData = await cfgRes.json();
+      if (cfgData.is_token_set && inputToken) {
+        inputToken.placeholder = `Token active (${cfgData.bot_token_masked})`;
+      }
+    }
+  } catch (e) {}
+
+  // Save BotFather token handler
+  if (btnSaveToken && inputToken) {
+    btnSaveToken.addEventListener('click', async () => {
+      const tokVal = inputToken.value.trim();
+      if (!tokVal) {
+        if (tokenFeedback) {
+          tokenFeedback.textContent = 'Please enter a valid bot token from @BotFather.';
+          tokenFeedback.style.color = '#ef4444';
+          tokenFeedback.style.display = 'block';
+        }
+        return;
+      }
+      btnSaveToken.disabled = true;
+      btnSaveToken.textContent = 'Saving…';
+      try {
+        const res = await fetch('/api/telegram/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ bot_token: tokVal, bot_username: 'Vyzn_security_bot' })
+        });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || 'Failed to save bot token');
+        if (tokenFeedback) {
+          tokenFeedback.textContent = 'Bot token saved and poller activated successfully!';
+          tokenFeedback.style.color = '#10b981';
+          tokenFeedback.style.display = 'block';
+        }
+        inputToken.value = '';
+        inputToken.placeholder = 'Token configured and active';
+        showToast('Telegram bot token saved and activated.');
+        await refreshTelegramStatus();
+      } catch (err) {
+        if (tokenFeedback) {
+          tokenFeedback.textContent = err.message;
+          tokenFeedback.style.color = '#ef4444';
+          tokenFeedback.style.display = 'block';
+        }
+        showToast(err.message, true);
+      } finally {
+        btnSaveToken.disabled = false;
+        btnSaveToken.textContent = 'Save Token';
+      }
+    });
+  }
+
+  // Connect from Phone card
+  if (btnPhoneConnect) {
+    btnPhoneConnect.addEventListener('click', () => {
+      triggerConnectTelegram(btnPhoneConnect);
+    });
+  }
+
+  // Connect from Telegram card
+  if (btnConnect) {
+    btnConnect.addEventListener('click', () => {
+      triggerConnectTelegram(btnConnect);
+    });
+  }
 
   if (btnSimulate) {
     btnSimulate.addEventListener('click', async () => {
@@ -288,44 +421,6 @@ async function initTelegramControls() {
         showToast('Simulation failed', true);
       } finally {
         btnSimulate.disabled = false;
-      }
-    });
-  }
-
-  if (btnConnect) {
-    btnConnect.addEventListener('click', async () => {
-      btnConnect.disabled = true;
-      btnConnect.textContent = 'Generating Link…';
-      if (feedback) feedback.style.display = 'none';
-
-      try {
-        const res = await fetch('/api/telegram/link', {
-          method: 'POST',
-          credentials: 'include'
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Failed to generate link');
-
-        currentTgToken = data.token;
-        const drawer = document.getElementById('tg-connect-drawer');
-        const openLink = document.getElementById('tg-open-deep-link');
-        if (openLink) openLink.href = data.deepLink;
-        if (drawer) drawer.style.display = 'block';
-
-        // Automatically open the deep link in a new tab for seamless UX
-        window.open(data.deepLink, '_blank', 'noopener');
-
-        startTgPolling();
-      } catch (err) {
-        showToast(err.message, true);
-        if (feedback) {
-          feedback.textContent = err.message;
-          feedback.style.color = '#ef4444';
-          feedback.style.display = 'block';
-        }
-      } finally {
-        btnConnect.disabled = false;
-        btnConnect.textContent = 'Connect VYZN Telegram';
       }
     });
   }
@@ -462,4 +557,303 @@ async function refreshTelegramStatus() {
     console.warn('Failed to refresh telegram status:', err);
   }
 }
+
+// ==============================================================================
+// BUSINESS HOURS CONFIGURATION CONTROLS
+// ------------------------------------------------------------------------------
+// In simple terms: lets users configure and save opening and closing hours.
+// ==============================================================================
+
+async function initBusinessHoursControls() {
+  const cbEnabled = document.getElementById('cb-bh-enabled');
+  const inputStart = document.getElementById('input-bh-start');
+  const inputEnd = document.getElementById('input-bh-end');
+  const btnSave = document.getElementById('btn-save-bh');
+  const badge = document.getElementById('bh-status-badge');
+  const feedback = document.getElementById('bh-feedback');
+
+  // Load current business hours from backend
+  try {
+    const res = await fetch('/api/settings/business-hours', { credentials: 'include' });
+    if (res.ok) {
+      const data = await res.json();
+      if (cbEnabled) cbEnabled.checked = data.enabled !== false;
+      if (inputStart && data.start_time) inputStart.value = data.start_time;
+      if (inputEnd && data.end_time) inputEnd.value = data.end_time;
+      if (badge) {
+        badge.textContent = data.enabled ? 'Active' : 'Disabled';
+        badge.className = data.enabled ? 'settings-badge success' : 'settings-badge info';
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to load business hours:', err);
+  }
+
+  // Handle saving new business hours
+  if (btnSave) {
+    btnSave.onclick = async () => {
+      btnSave.disabled = true;
+      btnSave.textContent = 'Saving…';
+      if (feedback) feedback.style.display = 'none';
+
+      const enabled = cbEnabled ? cbEnabled.checked : true;
+      const startTime = inputStart ? inputStart.value : '09:00';
+      const endTime = inputEnd ? inputEnd.value : '21:00';
+
+      try {
+        const res = await fetch('/api/settings/business-hours', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            enabled: enabled,
+            start_time: startTime,
+            end_time: endTime
+          })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to update business hours.');
+        }
+
+        if (badge) {
+          badge.textContent = enabled ? 'Active' : 'Disabled';
+          badge.className = enabled ? 'settings-badge success' : 'settings-badge info';
+        }
+
+        showToast('Business hours saved successfully!');
+        if (feedback) {
+          feedback.style.color = '#10b981';
+          feedback.textContent = `✓ Business hours updated (${startTime} – ${endTime})`;
+          feedback.style.display = 'block';
+        }
+      } catch (err) {
+        showToast(err.message, true);
+        if (feedback) {
+          feedback.style.color = '#ef4444';
+          feedback.textContent = err.message;
+          feedback.style.display = 'block';
+        }
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Save Business Hours';
+      }
+    };
+  }
+}
+
+// ==============================================================================
+// STORAGE SPACE FOLDER CONTROLS
+// ------------------------------------------------------------------------------
+// In simple terms: lets users configure their storage directory, view free space,
+// and make sure camera footage & clips are safeguarded from deletion on errors.
+// ==============================================================================
+
+async function initStorageControls() {
+  const inputFolder = document.getElementById('input-storage-folder');
+  const btnSave = document.getElementById('btn-save-storage');
+  const valPath = document.getElementById('val-storage-path');
+  const valFree = document.getElementById('val-disk-free');
+  const valClips = document.getElementById('val-clips-stored');
+  const badge = document.getElementById('storage-status-badge');
+  const feedback = document.getElementById('storage-feedback');
+
+  // Load storage details from server
+  async function refreshStorageInfo() {
+    try {
+      const res = await fetch('/api/settings/storage', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        if (inputFolder && !inputFolder.value) {
+          inputFolder.value = data.storage_dir || '';
+        }
+        if (valPath) {
+          valPath.textContent = data.storage_dir || 'Default: ./data/clips';
+        }
+        if (valFree) {
+          const used = data.disk_used_gb || 0;
+          const total = data.disk_total_gb || 0;
+          const freePct = data.disk_free_pct || 0;
+          valFree.textContent = `${freePct}% free (${(total - used).toFixed(1)} GB free of ${total.toFixed(1)} GB)`;
+        }
+        if (valClips) {
+          valClips.textContent = `${data.clips_count || 0} clips (Safe & Preserved)`;
+        }
+        if (badge) {
+          badge.textContent = data.is_writable ? 'Active & Writable' : 'Read-Only Warning';
+          badge.className = data.is_writable ? 'settings-badge success' : 'settings-badge info';
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to load storage info:', err);
+    }
+  }
+
+  await refreshStorageInfo();
+
+  if (btnSave) {
+    btnSave.onclick = async () => {
+      const dirVal = inputFolder ? inputFolder.value.trim() : '';
+      if (!dirVal) {
+        if (feedback) {
+          feedback.style.color = '#ef4444';
+          feedback.textContent = 'Please specify a valid folder path.';
+          feedback.style.display = 'block';
+        }
+        return;
+      }
+
+      btnSave.disabled = true;
+      btnSave.textContent = 'Verifying & Saving…';
+      if (feedback) feedback.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/settings/storage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ storage_dir: dirVal })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to update storage folder.');
+        }
+
+        showToast('Storage folder updated successfully!');
+        if (feedback) {
+          feedback.style.color = '#10b981';
+          feedback.textContent = '✓ Storage space folder saved and active. All footage will be kept safe here.';
+          feedback.style.display = 'block';
+        }
+        await refreshStorageInfo();
+      } catch (err) {
+        showToast(err.message, true);
+        if (feedback) {
+          feedback.style.color = '#ef4444';
+          feedback.textContent = err.message;
+          feedback.style.display = 'block';
+        }
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = 'Save Storage Folder';
+      }
+    };
+  }
+
+  // In simple terms: opens native Windows file explorer folder selection dialog
+  const btnBrowse = document.getElementById('btn-browse-folder');
+  const inputDirPicker = document.getElementById('input-folder-picker');
+
+  if (btnBrowse) {
+    btnBrowse.onclick = async () => {
+      btnBrowse.disabled = true;
+      btnBrowse.textContent = '📁 Opening Explorer…';
+
+      // Method A: Call server endpoint to launch Windows FolderBrowserDialog
+      let backendSuccess = false;
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+        const res = await fetch('/api/settings/browse-folder', {
+          method: 'POST',
+          credentials: 'include',
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        const data = await res.json();
+        if (data.ok && data.selected_path) {
+          if (inputFolder) inputFolder.value = data.selected_path;
+          showToast(`Selected folder: ${data.selected_path}`);
+          if (btnSave) btnSave.click();
+          backendSuccess = true;
+        } else if (data.cancelled) {
+          backendSuccess = true; // User intentionally cancelled
+        }
+      } catch (err) {
+        console.warn('Backend browse-folder error:', err);
+      }
+
+      // Method B: If backend couldn't launch GUI dialog, use modern browser File System Access API
+      if (!backendSuccess && typeof window.showDirectoryPicker === 'function') {
+        try {
+          const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          if (dirHandle && dirHandle.name) {
+            const currentDir = inputFolder.value.trim() || 'C:\\VyznStorage';
+            const baseParent = currentDir.includes('\\') ? currentDir.substring(0, currentDir.lastIndexOf('\\')) : 'C:\\';
+            const guessedPath = `${baseParent}\\${dirHandle.name}`;
+            inputFolder.value = guessedPath;
+            showToast(`Selected folder: ${dirHandle.name}`);
+            if (btnSave) btnSave.click();
+            backendSuccess = true;
+          }
+        } catch (pickErr) {
+          if (pickErr.name !== 'AbortError') {
+            console.warn('showDirectoryPicker error:', pickErr);
+          }
+        }
+      }
+
+      // Method C: Webkitdirectory input trigger
+      if (!backendSuccess && inputDirPicker) {
+        inputDirPicker.click();
+      }
+
+      btnBrowse.disabled = false;
+      btnBrowse.textContent = '📁 Choose Folder';
+    };
+  }
+
+  if (inputDirPicker) {
+    inputDirPicker.onchange = (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        const file = e.target.files[0];
+        const relPath = file.webkitRelativePath || '';
+        const folderName = relPath.split('/')[0] || relPath.split('\\')[0] || '';
+        if (folderName) {
+          const currentDir = inputFolder.value.trim() || 'C:\\';
+          const baseParent = currentDir.includes('\\') ? currentDir.substring(0, currentDir.lastIndexOf('\\')) : 'C:';
+          inputFolder.value = `${baseParent}\\${folderName}`;
+          showToast(`Selected folder: ${folderName}`);
+          if (btnSave) btnSave.click();
+        }
+      }
+    };
+  }
+
+  // In simple terms: purges all past clips and testing footages cleanly on demand
+  const btnPurgeAll = document.getElementById('btn-purge-all-clips');
+  if (btnPurgeAll) {
+    btnPurgeAll.onclick = async () => {
+      if (!confirm('Are you sure you want to delete ALL previous clips and footages? This cannot be undone.')) {
+        return;
+      }
+      btnPurgeAll.disabled = true;
+      btnPurgeAll.textContent = 'Purging clips…';
+      try {
+        const res = await fetch('/api/clips/purge-all', {
+          method: 'POST',
+          headers: { 'X-Security-Pin': '202600' },
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || 'All previous clips purged successfully.');
+          await refreshStorageInfo();
+        } else {
+          showToast(data.detail || 'Failed to purge clips.', true);
+        }
+      } catch (err) {
+        showToast('Error while purging clips.', true);
+      } finally {
+        btnPurgeAll.disabled = false;
+        btnPurgeAll.textContent = '🗑️ Delete All Previous Clips';
+      }
+    };
+  }
+}
+
+
 

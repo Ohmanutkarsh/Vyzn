@@ -1,6 +1,17 @@
-"""
-Storage Reaper Daemon with 72-hour tiered retention and 85% disk safety guardrail.
-"""
+# ==============================================================================
+# VYZN STORAGE REAPER DAEMON (THE AUTOMATIC HARD DRIVE CLEANER)
+#
+# WHY THIS EXISTS (FOR NON-PROGRAMMERS):
+# CCTV cameras record massive amounts of video data every single day. If we never
+# deleted old, useless footage (like trees blowing in the wind), your hard drive
+# would fill up in a week and crash the whole computer.
+#
+# The "Storage Reaper" runs quietly in the background like an automatic janitor:
+# 1. 72-Hour Rule: Any low-importance footage (Score < 30) is deleted after 72 hours.
+# 2. Safety Rule: Important clips (Alerts, Reviews, or Starred clips) are KEPT SAFE.
+# 3. Emergency Guardrail: If your hard drive hits 85% full, it cleans up older clips
+#    first so the cameras never stop recording.
+# ==============================================================================
 
 from __future__ import annotations
 import os
@@ -16,12 +27,12 @@ from vyzn.core.database import EventDatabase
 logger = logging.getLogger("vyzn.storage.reaper")
 
 
+# ==============================================================================
+# CLASS: StorageReaperDaemon
+# A "daemon thread" means this runs in the background 24/7 without slowing down
+# the live camera video or the website.
+# ==============================================================================
 class StorageReaperDaemon(threading.Thread):
-    """
-    Background storage manager daemon enforcing FIFO quota rotation and 72h retention.
-    Enforces maximum storage capacity (GB) and 85% disk safety threshold.
-    """
-
     def __init__(
         self,
         db: EventDatabase,
@@ -32,35 +43,43 @@ class StorageReaperDaemon(threading.Thread):
         max_quota_gb: float = 20.0
     ):
         super().__init__(name="Storage-Reaper", daemon=True)
-        self.db = db
-        self.data_root = data_root
-        self.sweep_interval_sec = sweep_interval_sec
-        self.raw_retention_hours = raw_retention_hours
-        self.disk_safety_threshold_pct = disk_safety_threshold_pct
-        self.max_quota_gb = max_quota_gb
+        self.db = db                                     # Connects to our SQLite event database
+        self.data_root = data_root                       # Folder where videos (.mp4) are saved
+        self.sweep_interval_sec = sweep_interval_sec     # Runs every 5 minutes (300 seconds)
+        self.raw_retention_hours = raw_retention_hours   # 72 hours default retention
+        self.disk_safety_threshold_pct = disk_safety_threshold_pct # 85% disk safety guardrail
+        self.max_quota_gb = max_quota_gb                 # Maximum space allowed for video clips (e.g., 20 GB)
         self.running = True
 
+    # --------------------------------------------------------------------------
+    # The Background Loop: Runs every few minutes while VYZN is active
+    # --------------------------------------------------------------------------
     def run(self):
         logger.info(f"Storage manager daemon started (Quota: {self.max_quota_gb:.1f} GB, Guardrail: {self.disk_safety_threshold_pct}%).")
         while self.running:
             try:
+                # Perform the cleanup check
                 self.perform_sweep()
             except Exception as e:
                 logger.error(f"Error during reaper sweep: {e}")
 
-            # Sleep in small slices to allow rapid shutdown
+            # Wait 5 minutes before checking again (can be stopped quickly if shutting down)
             for _ in range(self.sweep_interval_sec):
                 if not self.running:
                     break
                 time.sleep(1.0)
 
+    # --------------------------------------------------------------------------
+    # Helper: Check how full the hard drive is (e.g. 74% full)
+    # --------------------------------------------------------------------------
     def check_disk_usage_pct(self) -> float:
-        """Returns host disk usage percentage for the storage partition."""
         usage = shutil.disk_usage(self.data_root)
         return (usage.used / float(usage.total)) * 100.0
 
+    # --------------------------------------------------------------------------
+    # Helper: Add up the total size of all saved video files (.mp4) in bytes
+    # --------------------------------------------------------------------------
     def get_total_video_bytes(self) -> int:
-        """Calculates total size in bytes of all recorded MP4 and JPEG evidence on disk."""
         total = 0
         raw_dir = self.data_root / "raw"
         if raw_dir.exists():
@@ -73,14 +92,16 @@ class StorageReaperDaemon(threading.Thread):
                         pass
         return total
 
+    # ==========================================================================
+    # perform_sweep(): The Cleanup Brain
+    # This runs two distinct checks:
+    # 1. EMERGENCY ROTATION: If the hard drive is getting critically full (>= 85%),
+    #    delete the oldest clips first until we are back down to safe levels.
+    # 2. 72-HOUR RETENTION: Check for clips older than 72 hours. If a clip is
+    #    "low tier" (meaning no real threat occurred), delete it to save space.
+    #    If it is "Alert" or "Review" or starred by the user, KEEP IT PERMANENTLY!
+    # ==========================================================================
     def perform_sweep(self):
-        """
-        Dual-Criteria Garbage Collection:
-        1. FIFO Quota Rotation: If total recorded bytes exceed max_quota_gb,
-           purges oldest un-starred MP4s first until below target ceiling.
-        2. Emergency Guardrail: If host disk usage >= 85%, aggressively purges oldest un-starred events.
-        3. 72-Hour Tiered Retention: Compresses or deletes un-starred noise older than retention window.
-        """
         usage_pct = self.check_disk_usage_pct()
         total_bytes = self.get_total_video_bytes()
         max_quota_bytes = int(self.max_quota_gb * (1024 ** 3))
@@ -92,17 +113,17 @@ class StorageReaperDaemon(threading.Thread):
         emergency_disk = usage_pct >= self.disk_safety_threshold_pct
         quota_exceeded = total_bytes > max_quota_bytes
 
-        # --- A. FIFO Quota & Emergency Rotation ---
+        # --- STEP 1: Emergency Cleanup If Hard Drive Is Too Full ---
         if quota_exceeded or emergency_disk:
             trigger_reason = "DISK_GUARDRAIL_TRIGGERED" if emergency_disk else "MAX_QUOTA_EXCEEDED"
             logger.warning(
                 f"{trigger_reason}: Used {total_bytes / (1024**3):.2f} GB (max: {self.max_quota_gb:.1f} GB, disk: {usage_pct:.1f}%). Initiating FIFO purge of oldest clips."
             )
 
-            # Target ceiling: reclaim down to 85% of quota
+            # Target ceiling: free up space down to 85% of maximum allowed quota
             target_bytes = int(max_quota_bytes * 0.85)
 
-            # Fetch oldest events in strict FIFO order (ORDER BY start_time ASC)
+            # Look up the oldest events first (FIFO = First In, First Out)
             oldest_events = self.db.query_events(limit=500)
             oldest_events.sort(key=lambda e: e.start_time)
 
@@ -110,9 +131,10 @@ class StorageReaperDaemon(threading.Thread):
                 if total_bytes <= target_bytes and not emergency_disk:
                     break
                 if ev.starred:
-                    continue  # Starred evidence is permanently protected from FIFO reaper
+                    # User clicked "Star/Bookmark" — protect this clip forever!
+                    continue
 
-                # Delete physical video file and thumbnail
+                # Delete the physical video (.mp4) and preview image (.jpg)
                 freed = 0
                 if ev.file_path and os.path.exists(ev.file_path):
                     try:
@@ -129,12 +151,13 @@ class StorageReaperDaemon(threading.Thread):
                         pass
 
                 total_bytes = max(0, total_bytes - freed)
+                # Mark in database that the file has been purged
                 self.db.update_event_status(ev.event_group_id, "deleted")
                 self.db.log_audit("FIFO_QUOTA_PURGE", ev.event_group_id, f"Freed {freed // 1024} KB. Reason: {trigger_reason}")
 
-        # --- B. Standard 72h Tiered Retention ---
-        # Strictly purges ONLY 'low' tier clips that have expired (72h window) and are NOT pinned/starred.
-        # 'review' and 'alert' tier clips are KEPT SAVED and never purged by this job.
+        # --- STEP 2: Standard 72-Hour Hard Purge ---
+        # Notice the SQL WHERE clause below: it ONLY selects tier = 'low'.
+        # 'review' and 'alert' tier clips are NEVER deleted by this routine!
         now = datetime.now(timezone.utc)
         now_ms = int(now.timestamp() * 1000)
         retention_cutoff = (now - timedelta(hours=self.raw_retention_hours)).isoformat()
