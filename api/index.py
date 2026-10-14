@@ -9,6 +9,7 @@ import json
 import time
 import mimetypes
 import secrets
+import urllib.parse
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -25,6 +26,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def vercel_path_rewrite_middleware(request: Request, call_next):
+    """
+    Normalizes Vercel serverless request paths.
+    When Vercel rewrites /api/(.*) -> /api/index.py?__vercel_subpath__=$1,
+    this middleware extracts the real subpath and sets request.scope['path'] accordingly.
+    """
+    subpath = request.query_params.get("__vercel_subpath__")
+    matched_path = (
+        request.headers.get("x-matched-path")
+        or request.headers.get("x-vercel-matched-path")
+        or request.headers.get("x-forwarded-uri")
+        or request.headers.get("x-invoke-path")
+    )
+    current_path = request.scope.get("path", "")
+
+    if subpath is not None:
+        cleaned = subpath.lstrip("/")
+        request.scope["path"] = f"/api/{cleaned}" if cleaned else "/api/status"
+        if request.scope.get("query_string"):
+            params = [
+                (k, v) for k, v in urllib.parse.parse_qsl(request.scope["query_string"].decode("latin1"))
+                if k != "__vercel_subpath__"
+            ]
+            request.scope["query_string"] = urllib.parse.urlencode(params).encode("latin1")
+    elif matched_path and matched_path not in ("/api/index.py", "/api/index", "/api/index.py/"):
+        request.scope["path"] = matched_path.split("?")[0]
+    elif current_path in ("/api/index.py", "/api/index", "/api/index.py/", ""):
+        request.scope["path"] = "/api/status"
+    elif current_path and not current_path.startswith("/api"):
+        request.scope["path"] = f"/api{current_path}"
+
+    return await call_next(request)
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 
@@ -170,8 +205,8 @@ class LoginRequest(BaseModel):
 class SignupRequest(BaseModel):
     email: str
     password: str
-    full_name: str
-    business_name: str
+    full_name: Optional[str] = "Society Administrator"
+    business_name: Optional[str] = "Asara Dnyantirtha CHS"
     business_type: Optional[str] = "society"
     phone_e164: Optional[str] = None
 
@@ -181,6 +216,15 @@ class EmailStartRequest(BaseModel):
 class EmailVerifyRequest(BaseModel):
     email: str
     code: str
+
+class PhoneStartRequest(BaseModel):
+    phoneE164: Optional[str] = None
+    phone: Optional[str] = None
+
+class PhoneVerifyRequest(BaseModel):
+    phoneE164: Optional[str] = None
+    phone: Optional[str] = None
+    code: Optional[str] = None
 
 class PhoneSetupRequest(BaseModel):
     phoneE164: str
@@ -207,6 +251,7 @@ class WatchAreasUpdateRequest(BaseModel):
 # Auth Endpoints
 # ---------------------------------------------------------------------------
 @app.post("/api/auth/login")
+@app.post("/api/v1/auth/login")
 def api_auth_login(req: LoginRequest, response: Response):
     email = req.email.strip().lower()
     session_token = f"sess_{secrets.token_hex(16)}"
@@ -228,12 +273,16 @@ def api_auth_login(req: LoginRequest, response: Response):
     }
 
 @app.post("/api/auth/signup")
+@app.post("/api/v1/auth/register")
 def api_auth_signup(req: SignupRequest, response: Response):
     email = req.email.strip().lower()
     CURRENT_USER["email"] = email
-    CURRENT_USER["full_name"] = req.full_name.strip()
-    CURRENT_USER["business_name"] = req.business_name.strip()
-    CURRENT_USER["business_type"] = (req.business_type or "society").strip()
+    if req.full_name:
+        CURRENT_USER["full_name"] = req.full_name.strip()
+    if req.business_name:
+        CURRENT_USER["business_name"] = req.business_name.strip()
+    if req.business_type:
+        CURRENT_USER["business_type"] = (req.business_type or "society").strip()
     if req.phone_e164:
         CURRENT_USER["phone_e164"] = req.phone_e164.strip()
 
@@ -253,6 +302,25 @@ def api_auth_signup(req: SignupRequest, response: Response):
             "role": CURRENT_USER["role"]
         }
     }
+
+@app.post("/api/auth/phone/start")
+@app.post("/api/v1/auth/phone/send-otp")
+def api_auth_phone_start(payload: PhoneStartRequest):
+    phone = payload.phoneE164 or payload.phone or "+919876543210"
+    CURRENT_USER["phone_e164"] = phone.strip()
+    return {"ok": True, "phone_e164": CURRENT_USER["phone_e164"], "status": "sent"}
+
+@app.post("/api/auth/phone/verify")
+@app.post("/api/v1/auth/phone/verify-otp")
+def api_auth_phone_verify(payload: PhoneVerifyRequest):
+    phone = payload.phoneE164 or payload.phone or CURRENT_USER.get("phone_e164", "+919876543210")
+    CURRENT_USER["phone_e164"] = phone.strip()
+    CURRENT_USER["phone_verified"] = True
+    return {"ok": True, "next_step": "/setup/telegram", "user": CURRENT_USER, "status": "verified"}
+
+@app.post("/api/auth/phone/skip")
+def api_auth_phone_skip():
+    return {"ok": True, "next_step": "/setup/telegram"}
 
 @app.post("/api/auth/email/start")
 def api_email_start(req: EmailStartRequest):
@@ -274,6 +342,7 @@ def api_auth_signout(response: Response):
 # Current User & Profile
 # ---------------------------------------------------------------------------
 @app.get("/api/me")
+@app.get("/api/v1/auth/me")
 def api_get_me():
     return CURRENT_USER
 
@@ -304,14 +373,51 @@ def update_security_pin(payload: SecurityPinUpdateRequest):
     return {"ok": True}
 
 # ---------------------------------------------------------------------------
+# Settings & Storage
+# ---------------------------------------------------------------------------
+@app.get("/api/settings/storage")
+def get_storage_settings():
+    return {
+        "storage_dir": "c:/Vyzn Ai/data/clips",
+        "status": "ok",
+        "free_gb": 128.5,
+        "total_gb": 512.0
+    }
+
+@app.post("/api/settings/storage")
+def update_storage_settings(payload: Dict[str, Any]):
+    return {"ok": True, "storage_dir": payload.get("storage_dir", "c:/Vyzn Ai/data/clips")}
+
+@app.post("/api/settings/browse-folder")
+def browse_folder():
+    return {"ok": True, "path": "c:/Vyzn Ai/data/clips"}
+
+@app.get("/api/settings/business-hours")
+def get_business_hours():
+    return {
+        "enabled": True,
+        "start_time": "09:00",
+        "end_time": "22:00",
+        "days": ["mon", "tue", "wed", "thu", "fri", "sat"]
+    }
+
+@app.post("/api/settings/business-hours")
+def update_business_hours(payload: Dict[str, Any]):
+    return {"ok": True, "business_hours": payload}
+
+# ---------------------------------------------------------------------------
 # Telegram Integration
 # ---------------------------------------------------------------------------
 @app.get("/api/telegram/config")
 def api_telegram_config():
     bot = os.environ.get("TELEGRAM_BOT_USERNAME") or "Vyzn_security_bot"
-    return {"bot_username": bot, "bot_configured": True}
+    return {"bot_username": bot, "bot_configured": True, "is_token_set": True, "bot_token_masked": "••••••••"}
 
-@app.get("/api/telegram/link")
+@app.post("/api/telegram/config")
+def api_telegram_config_post(payload: Dict[str, Any]):
+    return {"ok": True, "is_token_set": True, "bot_username": payload.get("bot_username", "Vyzn_security_bot")}
+
+@app.api_route("/api/telegram/link", methods=["GET", "POST"])
 def api_telegram_link():
     token = f"tg_{secrets.token_urlsafe(16)}"
     bot = os.environ.get("TELEGRAM_BOT_USERNAME") or "Vyzn_security_bot"
@@ -319,14 +425,30 @@ def api_telegram_link():
         "user_id": CURRENT_USER["id"],
         "expires_at": time.time() + 900
     }
+    deep_link = f"https://t.me/{bot}?start={token}"
     return {
         "ok": True,
         "token": token,
         "bot_username": bot,
-        "link_url": f"https://t.me/{bot}?start={token}"
+        "link_url": deep_link,
+        "deepLink": deep_link
     }
 
+@app.post("/api/telegram/simulate-link")
+def api_telegram_simulate_link(payload: Dict[str, Any]):
+    CURRENT_USER["telegram_status"] = "connected"
+    CURRENT_USER["telegram_chat_id"] = 987654321
+    CURRENT_USER["telegram_username"] = payload.get("username", "demo_user")
+    CURRENT_USER["telegram_linked_at_ms"] = int(time.time() * 1000)
+    return {"ok": True, "status": "connected", "username": CURRENT_USER["telegram_username"]}
+
+@app.post("/api/telegram/test")
+@app.post("/api/v1/alerts/telegram/test-ping")
+def api_telegram_test():
+    return {"ok": True, "latencyMs": 420, "message": "Test ping sent to Telegram"}
+
 @app.get("/api/telegram/status")
+@app.get("/api/v1/alerts/telegram")
 def api_telegram_status():
     return {
         "connected": CURRENT_USER.get("telegram_status") == "connected",
@@ -344,9 +466,11 @@ def api_telegram_disconnect():
     return {"ok": True, "status": "not_linked"}
 
 @app.post("/api/telegram/toggle")
-def api_telegram_toggle(req: TelegramToggleAlertsRequest):
-    CURRENT_USER["telegram_alerts_enabled"] = req.enabled
-    return {"ok": True, "alerts_enabled": req.enabled}
+@app.post("/api/telegram/toggle-alerts")
+def api_telegram_toggle(req: Dict[str, Any]):
+    enabled = req.get("enabled", True)
+    CURRENT_USER["telegram_alerts_enabled"] = enabled
+    return {"ok": True, "alerts_enabled": enabled}
 
 # ---------------------------------------------------------------------------
 # Cameras & Watch Areas
@@ -375,6 +499,16 @@ def add_camera(payload: CameraCreateRequest):
     CAMERAS_STORE.append(cam)
     return {"ok": True, "camera": cam}
 
+@app.patch("/api/cameras/{camera_id}")
+def rename_camera(camera_id: str, payload: Dict[str, Any]):
+    new_name = payload.get("name")
+    for c in CAMERAS_STORE:
+        if c.get("id") == camera_id or c.get("camera_id") == camera_id:
+            if new_name:
+                c["name"] = new_name
+            return {"ok": True, "camera": c}
+    return {"ok": True}
+
 @app.delete("/api/cameras/{camera_id}")
 def delete_camera(camera_id: str):
     global CAMERAS_STORE
@@ -382,6 +516,7 @@ def delete_camera(camera_id: str):
     return {"ok": True}
 
 @app.get("/api/cameras/{camera_id}/areas")
+@app.get("/api/cameras/{camera_id}/zones")
 def get_camera_areas(camera_id: str):
     for c in CAMERAS_STORE:
         if c.get("id") == camera_id or c.get("camera_id") == camera_id:
@@ -389,6 +524,7 @@ def get_camera_areas(camera_id: str):
     return {"camera_id": camera_id, "areas": []}
 
 @app.post("/api/cameras/{camera_id}/areas")
+@app.post("/api/cameras/{camera_id}/zones")
 def save_camera_areas(camera_id: str, payload: WatchAreasUpdateRequest):
     for c in CAMERAS_STORE:
         if c.get("id") == camera_id or c.get("camera_id") == camera_id:
@@ -399,32 +535,44 @@ def save_camera_areas(camera_id: str, payload: WatchAreasUpdateRequest):
 
 @app.post("/api/cameras/{camera_id}/snapshot")
 def update_snapshot(camera_id: str):
-    return {"ok": True, "timestamp": time.time()}
+    return {"ok": True, "timestamp": time.time(), "snapshot_url": f"/api/cameras/{camera_id}/snapshot.jpg"}
 
 @app.get("/api/cameras/{camera_id}/snapshot.jpg")
 @app.get("/api/cameras/{camera_id}/mjpeg")
-def stream_camera_visual(camera_id: str):
+@app.get("/api/cameras/{camera_id}/stream")
+@app.get("/api/stream")
+@app.get("/api/wall/stream")
+def stream_camera_visual(camera_id: str = "cam_gate"):
     label = camera_id.replace("cam_", "").replace("_", " ").upper()
+    cur_time = time.strftime("%Y-%m-%d %H:%M:%S")
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
       <defs>
-        <radialGradient id="scanGrad" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stop-color="#0f172a" stop-opacity="0.8"/>
-          <stop offset="100%" stop-color="#020617" stop-opacity="1"/>
-        </radialGradient>
+        <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="100%">
+          <stop offset="0%" stop-color="#0b1120"/>
+          <stop offset="100%" stop-color="#020617"/>
+        </linearGradient>
       </defs>
-      <rect width="640" height="360" fill="url(#scanGrad)"/>
-      <circle cx="320" cy="180" r="130" stroke="#1e293b" stroke-width="1.5" fill="none"/>
-      <circle cx="320" cy="180" r="70" stroke="#0ea5e9" stroke-width="1" stroke-dasharray="4 4" fill="none"/>
-      <line x1="120" y1="180" x2="520" y2="180" stroke="#1e293b" stroke-width="1"/>
-      <line x1="320" y1="40" x2="320" y2="320" stroke="#1e293b" stroke-width="1"/>
-      <circle cx="320" cy="180" r="4" fill="#0ea5e9"/>
-      <text x="24" y="36" fill="#10b981" font-family="monospace" font-size="13" font-weight="bold">● LIVE: {label}</text>
-      <text x="24" y="58" fill="#64748b" font-family="monospace" font-size="11">YOLOv8 EDGE AI • ZERO CLOUD BANDWIDTH COST</text>
-      <rect x="220" y="110" width="160" height="175" stroke="#0ea5e9" stroke-width="2" stroke-dasharray="6 3" fill="rgba(14,165,233,0.06)"/>
-      <text x="225" y="102" fill="#38bdf8" font-family="monospace" font-size="11" font-weight="bold">PERSON: 95.4% [RESIDENT / VISITOR]</text>
-      <text x="440" y="340" fill="#475569" font-family="monospace" font-size="10">SEC-65B CERTIFIED</text>
+      <rect width="640" height="360" fill="url(#bgGrad)"/>
+      <rect x="20" y="20" width="600" height="320" fill="none" stroke="#1e293b" stroke-width="1" rx="4"/>
+      <circle cx="36" cy="38" r="4" fill="#10b981"/>
+      <text x="48" y="42" fill="#10b981" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, monospace" font-size="12" font-weight="600" letter-spacing="1">LIVE</text>
+      <text x="96" y="42" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, monospace" font-size="12" font-weight="600">{label}</text>
+      <text x="600" y="42" text-anchor="end" fill="#94a3b8" font-family="monospace" font-size="11">{cur_time}</text>
+      <text x="320" y="185" text-anchor="middle" fill="#475569" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13">Camera Feed Active</text>
     </svg>'''
     return Response(content=svg, media_type="image/svg+xml")
+
+@app.post("/api/cameras/test")
+@app.post("/api/v1/cameras/test-connection")
+def test_camera_connection(payload: Optional[Dict[str, Any]] = None):
+    return {
+        "status": "online",
+        "success": True,
+        "message": "Connection test successful! Camera stream verified.",
+        "width": 1920,
+        "height": 1080,
+        "fps": 15.0
+    }
 
 @app.get("/api/v1/cameras/discover")
 def discover_cameras():
@@ -436,24 +584,54 @@ def discover_cameras():
         ]
     }
 
-@app.post("/api/v1/cameras/test-connection")
-def test_camera_connection(payload: Dict[str, Any]):
-    return {
+@app.get("/api/v1/cameras/local-devices")
+def get_local_devices():
+    return [{"device_id": 0, "name": "Integrated Webcam"}]
+
+@app.post("/api/v1/cameras/adopt")
+def adopt_camera(payload: Dict[str, Any]):
+    new_id = f"cam_{int(time.time() * 1000) % 100000}"
+    name = payload.get("name") or "Adopted Camera"
+    cam = {
+        "id": new_id,
+        "camera_id": new_id,
+        "name": name,
         "status": "online",
-        "success": True,
-        "message": "Connection test successful! Camera stream verified.",
-        "width": 1920,
-        "height": 1080,
-        "fps": 15.0
+        "rtsp_url": payload.get("rtsp_url", "sim://camera"),
+        "target_fps": 4.0,
+        "is_night_ir": False,
+        "snapshot_url": f"/api/cameras/{new_id}/snapshot.jpg",
+        "stream_url": f"/api/cameras/{new_id}/mjpeg",
+        "area_count": 0,
+        "ignored_moments_count": 0,
+        "areas": []
     }
+    CAMERAS_STORE.append(cam)
+    return {"status": "success", "camera": cam}
 
 # ---------------------------------------------------------------------------
 # Events, Clips & System Metrics
 # ---------------------------------------------------------------------------
-@app.get("/api/events")
 @app.get("/api/clips")
 def list_clips():
+    return {
+        "clips": CLIPS_STORE,
+        "total": len(CLIPS_STORE)
+    }
+
+@app.get("/api/events")
+def list_events():
     return CLIPS_STORE
+
+@app.get("/api/clips/flags")
+def list_clips_flags(limit: int = 10):
+    return {"flags": CLIPS_STORE[:limit]}
+
+@app.post("/api/clips/purge-all")
+def purge_all_clips():
+    global CLIPS_STORE
+    CLIPS_STORE.clear()
+    return {"ok": True, "message": "All clips purged successfully"}
 
 @app.post("/api/clips/{clip_number}/feedback")
 def submit_clip_feedback(clip_number: int, payload: Dict[str, Any]):
@@ -466,6 +644,22 @@ def get_evidence_pack(clip_number: int):
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=evidence_clip_{clip_number}.zip"}
     )
+
+@app.get("/api/events/{event_id}/thumb")
+def get_event_thumb(event_id: str):
+    return stream_camera_visual("incident_thumb")
+
+@app.get("/api/events/{event_id}/clip")
+def get_event_clip(event_id: str):
+    return Response(content=b"", media_type="video/mp4")
+
+@app.post("/api/events/{event_id}/star")
+def star_event(event_id: str):
+    return {"ok": True, "event_id": event_id, "starred": True}
+
+@app.post("/api/events/{event_id}/triage")
+def triage_event(event_id: str, payload: Dict[str, Any]):
+    return {"ok": True, "event_id": event_id, "triage": payload.get("triage", "reviewed")}
 
 @app.get("/api/system/metrics")
 def get_system_metrics():
@@ -480,6 +674,17 @@ def get_system_metrics():
         "unsynced_events": 0
     }
 
+@app.get("/api/shell/status")
+def get_shell_status():
+    return {
+        "pill": {
+            "style": "ok",
+            "text": "System Online • AI Armed",
+            "short_text": "Armed"
+        },
+        "telegram_connected": CURRENT_USER.get("telegram_status") == "connected"
+    }
+
 @app.get("/api/status")
 def get_status():
     return {
@@ -490,16 +695,40 @@ def get_status():
         }
     }
 
+@app.get("/api/v1/locations")
+@app.post("/api/v1/locations")
+def handle_locations():
+    return [{"id": "loc_primary", "name": "Main Site", "camera_count": len(CAMERAS_STORE)}]
+
+@app.get("/api/v1/settings/bandwidth")
+@app.post("/api/v1/settings/bandwidth")
+def handle_bandwidth():
+    return {"mode": "low_data", "cloud_sync": False, "max_mbps": 5.0}
+
+@app.get("/api/v1/forensics/search")
+def forensics_search():
+    return {"matches": []}
+
+@app.get("/api/dpdp/notice")
+def dpdp_notice():
+    return {"ok": True, "policy_version": "2026.1", "retention_hours": 72}
+
 # Register route aliases so endpoints resolve whether called with or without /api
+existing_paths = {r.path for r in app.routes if hasattr(r, "path")}
 for route in list(app.routes):
     if hasattr(route, "path") and route.path.startswith("/api/"):
         alt_path = route.path[4:]  # e.g., '/status'
-        app.add_api_route(
-            alt_path,
-            route.endpoint,
-            methods=getattr(route, "methods", ["GET"]),
-            name=f"{route.name}_alias"
-        )
+        if not alt_path:
+            alt_path = "/"
+        if alt_path not in existing_paths:
+            methods = list(route.methods) if hasattr(route, "methods") and route.methods else ["GET"]
+            app.add_api_route(
+                alt_path,
+                route.endpoint,
+                methods=methods,
+                name=f"{getattr(route, 'name', 'route')}_alias"
+            )
+            existing_paths.add(alt_path)
 
 # ---------------------------------------------------------------------------
 # Fallback Static Page Routes
@@ -540,6 +769,7 @@ def serve_settings():
 
 @app.get("/login", response_class=HTMLResponse)
 @app.get("/login/{path:path}", response_class=HTMLResponse)
+@app.get("/setup", response_class=HTMLResponse)
 @app.get("/setup/{path:path}", response_class=HTMLResponse)
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
