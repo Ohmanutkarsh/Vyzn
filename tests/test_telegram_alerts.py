@@ -1,5 +1,9 @@
+import hashlib
+import json
 from datetime import datetime, timezone
 from pathlib import Path
+import cv2
+import numpy as np
 from starlette.testclient import TestClient
 
 from vyzn.core.database import EventDatabase
@@ -9,7 +13,11 @@ from vyzn.api.routes import app, init_api
 from vyzn.alerts.telegram import (
     TelegramAlertProvider,
     send_telegram_threat_alert,
-    process_telegram_update
+    process_telegram_update,
+    extract_thumbnail_from_clip,
+    get_alert_thumbnail_bytes,
+    get_factual_event_description,
+    resolve_authorized_chat_for_event
 )
 
 
@@ -53,7 +61,7 @@ def test_telegram_alert_simulation_dispatch():
         tier="alert"
     )
     # Convenience helper in offline/simulation mode
-    assert send_telegram_threat_alert(event) is True
+    assert send_telegram_threat_alert(event, bot_token="") is True
 
 
 def test_telegram_single_use_token_linking_and_rejection(tmp_path: Path):
@@ -144,7 +152,7 @@ def test_telegram_disconnect_and_alerts_muting(tmp_path: Path):
     token = db.create_telegram_link(user_id, ttl_sec=600)
     db.consume_telegram_link(token, "chat_charlie_777", "tg_charlie", "charlie_tg")
 
-    provider = TelegramAlertProvider(db=db)
+    provider = TelegramAlertProvider(db=db, bot_token="")
     event = EventRecord(
         event_group_id="ev_charlie_01",
         camera_id="cam_main",
@@ -240,7 +248,8 @@ def test_telegram_api_endpoints_workflow(tmp_path: Path):
         site_id="site_tg_api",
         data_dir=tmp_path,
         db_path=db_file,
-        telegram_bot_token=""
+        telegram_bot_token="",
+        telegram_webhook_secret=""
     )
     init_api(db, settings)
     client = TestClient(app)
@@ -310,5 +319,422 @@ def test_telegram_api_endpoints_workflow(tmp_path: Path):
     res = client.get("/api/telegram/status")
     assert res.json()["status"] != "connected"
     assert res.json()["connected"] is False
+
+
+def test_alert_eligibility_tier_filter(tmp_path: Path):
+    db_file = tmp_path / "tg_tier.db"
+    db = EventDatabase(db_file)
+    email = "tier_test@shop.com"
+    u = db.get_or_create_user(email)
+    token = db.create_telegram_link(u["id"], ttl_sec=600)
+    db.consume_telegram_link(token, "chat_tier_123", "tg_tier", "tier_owner")
+
+    provider = TelegramAlertProvider(db=db, bot_token="")
+
+    # Ineligible event: tier="review", score=40
+    low_event = EventRecord(
+        event_group_id="ev_low_01",
+        camera_id="cam_tier",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        object_type="person",
+        confidence=0.5,
+        score=40,
+        tier="review",
+        owner_email=email
+    )
+    assert provider.send_alert(low_event) is False
+    assert db.get_alert_delivery("ev_low_01", "telegram", "chat_tier_123") is None
+
+    # Ineligible event: tier="ignore", score=10
+    ignore_event = EventRecord(
+        event_group_id="ev_ignore_01",
+        camera_id="cam_tier",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        object_type="motion",
+        confidence=0.3,
+        score=10,
+        tier="ignore",
+        owner_email=email
+    )
+    assert provider.send_alert(ignore_event) is False
+    assert db.get_alert_delivery("ev_ignore_01", "telegram", "chat_tier_123") is None
+
+    # Eligible event: tier="alert", score=85
+    alert_event = EventRecord(
+        event_group_id="ev_alert_01",
+        camera_id="cam_tier",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        object_type="person",
+        confidence=0.92,
+        score=85,
+        tier="alert",
+        owner_email=email
+    )
+    assert provider.send_alert(alert_event) is True
+    deliv = db.get_alert_delivery("ev_alert_01", "telegram", "chat_tier_123")
+    assert deliv is not None
+    assert deliv["status"] == "delivered"
+
+
+def test_alert_ingress_eligibility_and_404_handling(tmp_path: Path):
+    db_file = tmp_path / "tg_ingress_err.db"
+    db = EventDatabase(db_file)
+    settings = EdgeSettings(
+        site_id="site_ingress_test",
+        data_dir=tmp_path,
+        db_path=db_file,
+        telegram_bot_token="",
+        internal_alert_token=""
+    )
+    init_api(db, settings)
+    client = TestClient(app)
+
+    # 1. Non-existent event returns 404
+    res = client.post("/api/v1/alerts/ingress", json={"event_id": "non_existent_event_999"})
+    assert res.status_code == 404
+    assert "not found" in res.json()["detail"].lower()
+
+    # 2. Insert non-alert tier event (score=45, tier="review")
+    review_event = EventRecord(
+        event_group_id="ev_review_99",
+        camera_id="cam_test",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        object_type="person",
+        confidence=0.6,
+        score=45,
+        tier="review",
+        owner_email="test@shop.com"
+    )
+    db.insert_event(review_event)
+
+    # Ineligible tier returns 422
+    res = client.post("/api/v1/alerts/ingress", json={"event_id": "ev_review_99", "tier": "review"})
+    assert res.status_code == 422
+    assert "ineligible" in res.json()["detail"].lower()
+
+
+def test_thumbnail_extraction_from_mp4_preserves_original_video(tmp_path: Path):
+    clip_file = tmp_path / "cctv_sample.mp4"
+
+    # Generate synthetic 1-second 4fps MP4 video
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    writer = cv2.VideoWriter(str(clip_file), fourcc, 4.0, (320, 240))
+    for i in range(4):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        # Add colored shape to guarantee variance / non-black frame
+        frame[40:180, 40:180] = (50 * (i + 1), 180, 220)
+        writer.write(frame)
+    writer.release()
+
+    assert clip_file.exists()
+    orig_size = clip_file.stat().st_size
+    orig_sha = hashlib.sha256(clip_file.read_bytes()).hexdigest()
+
+    # Extract thumbnail
+    thumb_bytes = extract_thumbnail_from_clip(str(clip_file), target_time_sec=0.5)
+    assert thumb_bytes is not None
+    assert isinstance(thumb_bytes, bytes)
+    assert len(thumb_bytes) > 200
+    # Must be valid JPEG
+    assert thumb_bytes.startswith(b"\xff\xd8\xff")
+
+    # STRICT ASSERTION: Original video must NOT be deleted, truncated, or modified
+    assert clip_file.exists()
+    assert clip_file.stat().st_size == orig_size
+    new_sha = hashlib.sha256(clip_file.read_bytes()).hexdigest()
+    assert new_sha == orig_sha
+
+    # Test error cases: non-existent file returns None
+    assert extract_thumbnail_from_clip(str(tmp_path / "non_existent.mp4")) is None
+
+    # Test error cases: 0-byte corrupted file returns None
+    corrupt_file = tmp_path / "empty.mp4"
+    corrupt_file.write_bytes(b"")
+    assert extract_thumbnail_from_clip(str(corrupt_file)) is None
+
+
+def test_negative_no_video_sent_and_text_fallback_on_missing_clip(tmp_path: Path, monkeypatch):
+    import requests
+
+    db_file = tmp_path / "tg_novideo.db"
+    db = EventDatabase(db_file)
+    email = "novideo@shop.com"
+    u = db.get_or_create_user(email)
+    token = db.create_telegram_link(u["id"], ttl_sec=600)
+    db.consume_telegram_link(token, "chat_novideo_111", "tg_novideo", "novideo_tg")
+
+    calls = []
+
+    def mock_post(url, *args, **kwargs):
+        calls.append({"url": url, "args": args, "kwargs": kwargs})
+        class MockResp:
+            status_code = 200
+            text = '{"ok": true, "result": {"message_id": 999}}'
+            def json(self):
+                return {"ok": True, "result": {"message_id": 999}}
+        return MockResp()
+
+    monkeypatch.setattr(requests, "post", mock_post)
+
+    provider = TelegramAlertProvider(bot_token="test_bot_token_123", chat_id="chat_novideo_111", db=db)
+
+    # Event with non-existent clip path and non-existent thumb path
+    missing_media_event = EventRecord(
+        event_group_id="ev_missing_media_01",
+        camera_id="cam_gate",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        object_type="person",
+        confidence=0.9,
+        score=88,
+        tier="alert",
+        owner_email=email,
+        file_path=str(tmp_path / "does_not_exist.mp4"),
+        thumb_path=str(tmp_path / "does_not_exist.jpg")
+    )
+
+    # Verify thumbnail bytes resolver returns None
+    assert get_alert_thumbnail_bytes(missing_media_event) is None
+
+    # Send alert
+    success = provider.send_alert(missing_media_event)
+    assert success is True
+
+    # Assert exactly 1 request made, to sendMessage (text-only fallback)
+    assert len(calls) == 1
+    call_url = calls[0]["url"]
+    assert call_url.endswith("/sendMessage")
+    assert not call_url.endswith("/sendVideo")
+    assert not call_url.endswith("/sendPhoto")
+
+    # Assert caption text explains thumbnail unavailable
+    sent_json = calls[0]["kwargs"].get("json", {})
+    assert "Thumbnail snapshot unavailable" in sent_json.get("text", "")
+
+    # STRICT CODEBASE ASSERTION: sendVideo is never an attribute or callable
+    assert not hasattr(provider, "send_video")
+    assert not hasattr(provider, "sendVideo")
+
+
+def test_factual_caption_and_mobile_char_limits():
+    provider = TelegramAlertProvider()
+
+    # Case 1: Long forensic summary -> only first sentence is extracted
+    event1 = EventRecord(
+        event_group_id="ev_cap_01",
+        camera_id="cam_front",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        object_type="person",
+        confidence=0.91,
+        score=85,
+        tier="alert",
+        summary="A person entered the restricted entrance area. The subject was wearing dark clothing. Secondary movement observed.",
+        title="Unauthorized entry detected"
+    )
+    desc1 = get_factual_event_description(event1, "Front Entrance")
+    assert desc1 == "A person entered the restricted entrance area."
+
+    payload1 = provider.build_alert_payload(event1, camera_name="Front Entrance")
+    caption1 = payload1["caption"]
+    assert len(caption1) <= 1024
+    assert "Front Entrance" in caption1
+    assert "A person entered the restricted entrance area." in caption1
+    # Check no raw bounding boxes or floating confidence leak
+    assert "0.91" not in caption1
+    assert "[" not in caption1 or "[x" not in caption1
+
+    # Case 2: Headline fallback
+    event2 = EventRecord(
+        event_group_id="ev_cap_02",
+        camera_id="cam_back",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        object_type="vehicle",
+        confidence=0.88,
+        score=75,
+        tier="alert"
+    )
+    desc2 = get_factual_event_description(event2, "Back Yard")
+    assert "vehicle" in desc2.lower() or "movement" in desc2.lower()
+
+    payload2 = provider.build_alert_payload(event2, camera_name="Back Yard")
+    assert len(payload2["caption"]) <= 1024
+
+
+def test_webhook_secret_token_header_validation(tmp_path: Path):
+    db_file = tmp_path / "tg_webhook_sec.db"
+    db = EventDatabase(db_file)
+    settings = EdgeSettings(
+        site_id="site_sec_test",
+        data_dir=tmp_path,
+        db_path=db_file,
+        telegram_webhook_secret="super_secret_webhook_token_999"
+    )
+    init_api(db, settings)
+    client = TestClient(app)
+
+    payload = {
+        "update_id": 9001,
+        "message": {
+            "message_id": 1,
+            "chat": {"id": 12345},
+            "from": {"id": 12345},
+            "text": "/help"
+        }
+    }
+
+    # 1. Missing secret token header -> 403 Forbidden
+    res_no_hdr = client.post("/api/telegram/webhook", json=payload)
+    assert res_no_hdr.status_code == 403
+
+    # 2. Invalid secret token header -> 403 Forbidden
+    res_bad_hdr = client.post(
+        "/api/telegram/webhook",
+        json=payload,
+        headers={"X-Telegram-Bot-Api-Secret-Token": "wrong_secret_123"}
+    )
+    assert res_bad_hdr.status_code == 403
+
+    # 3. Valid secret token header -> 200 OK
+    res_ok = client.post(
+        "/api/telegram/webhook",
+        json=payload,
+        headers={"X-Telegram-Bot-Api-Secret-Token": "super_secret_webhook_token_999"}
+    )
+    assert res_ok.status_code == 200
+    assert res_ok.json()["ok"] is True
+
+
+def test_server_to_server_ingress_authentication_and_idempotency(tmp_path: Path):
+    db_file = tmp_path / "tg_ingress_auth.db"
+    db = EventDatabase(db_file)
+    settings = EdgeSettings(
+        site_id="site_ingress_auth",
+        data_dir=tmp_path,
+        db_path=db_file,
+        internal_alert_token="internal_secret_key_888",
+        telegram_bot_token=""  # simulation mode
+    )
+    init_api(db, settings)
+    client = TestClient(app)
+
+    # Setup authorized customer and camera
+    email = "ingress_owner@shop.com"
+    user = db.get_or_create_user(email)
+    token = db.create_telegram_link(user["id"], ttl_sec=600)
+    db.consume_telegram_link(token, "chat_ingress_888", "tg_owner", "ingress_owner")
+
+    # Insert valid alert event
+    ev = EventRecord(
+        event_group_id="ev_ingress_s2s_01",
+        camera_id="cam_ingress",
+        start_time=datetime.now(timezone.utc).isoformat(),
+        object_type="person",
+        confidence=0.95,
+        score=90,
+        tier="alert",
+        owner_email=email
+    )
+    db.insert_event(ev)
+
+    # 1. Missing auth header -> 401 Unauthorized
+    res_no_auth = client.post(
+        "/api/v1/alerts/ingress",
+        json={"event_id": "ev_ingress_s2s_01"}
+    )
+    assert res_no_auth.status_code == 401
+
+    # 2. Invalid auth header -> 401 Unauthorized
+    res_bad_auth = client.post(
+        "/api/v1/alerts/ingress",
+        json={"event_id": "ev_ingress_s2s_01"},
+        headers={"Authorization": "Bearer bad_token_123"}
+    )
+    assert res_bad_auth.status_code == 401
+
+    # 3. Valid auth header -> 200 OK (delivered)
+    res_ok = client.post(
+        "/api/v1/alerts/ingress",
+        json={"event_id": "ev_ingress_s2s_01"},
+        headers={"Authorization": "Bearer internal_secret_key_888"}
+    )
+    assert res_ok.status_code == 200
+    data_ok = res_ok.json()
+    assert data_ok["ok"] is True
+    assert data_ok["status"] == "delivered"
+    assert data_ok["recipient_chat_id"] == "chat_ingress_888"
+
+    # 4. Repeated dispatch (idempotency check) -> status "already_delivered"
+    res_repeat = client.post(
+        "/api/v1/alerts/ingress",
+        json={"event_id": "ev_ingress_s2s_01"},
+        headers={"Authorization": "Bearer internal_secret_key_888"}
+    )
+    assert res_repeat.status_code == 200
+    data_repeat = res_repeat.json()
+    assert data_repeat["ok"] is True
+    assert data_repeat["status"] == "already_delivered"
+
+
+def test_telegram_bot_commands_extended(tmp_path: Path):
+    db_file = tmp_path / "tg_cmds.db"
+    db = EventDatabase(db_file)
+
+    email = "cmd_tester@shop.com"
+    user = db.get_or_create_user(email)
+    chat_id = "chat_cmd_777"
+    token = db.create_telegram_link(user["id"], ttl_sec=600)
+
+    # 1. /help command
+    update_help = {
+        "update_id": 7001,
+        "message": {
+            "message_id": 1,
+            "chat": {"id": chat_id},
+            "from": {"id": chat_id},
+            "text": "/help"
+        }
+    }
+    res_help = process_telegram_update(update_help, db=db)
+    assert res_help["type"] == "help"
+
+    # 2. /status command prior to linking
+    update_status_pre = {
+        "update_id": 7002,
+        "message": {
+            "message_id": 2,
+            "chat": {"id": chat_id},
+            "from": {"id": chat_id},
+            "text": "/status"
+        }
+    }
+    res_status_pre = process_telegram_update(update_status_pre, db=db)
+    assert res_status_pre["type"] == "status"
+    assert res_status_pre["connected"] is False
+
+    # Link account
+    db.consume_telegram_link(token, chat_id, "tg_usr_cmd", "tester")
+
+    # 3. /status command after linking
+    res_status_post = process_telegram_update(update_status_pre, db=db)
+    assert res_status_post["type"] == "status"
+    assert res_status_post["connected"] is True
+    assert res_status_post["alerts_enabled"] is True
+
+    # 4. /disconnect command
+    update_disc = {
+        "update_id": 7003,
+        "message": {
+            "message_id": 3,
+            "chat": {"id": chat_id},
+            "from": {"id": chat_id},
+            "text": "/disconnect"
+        }
+    }
+    res_disc = process_telegram_update(update_disc, db=db)
+    assert res_disc["type"] == "disconnected"
+
+    # Verify unlinked in DB
+    u_after = db.get_user_by_id(user["id"])
+    assert u_after["telegram_status"] == "not_linked"
+    assert u_after["telegram_chat_id"] is None
 
 

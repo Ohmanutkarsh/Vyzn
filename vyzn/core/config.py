@@ -130,7 +130,10 @@ class EdgeSettings(BaseSettings):
 
     # Alerts
     telegram_bot_token: Optional[str] = None
+    telegram_bot_username: Optional[str] = "Vyzn_security_bot"
     telegram_chat_id: Optional[str] = None
+    telegram_webhook_secret: Optional[str] = None
+    internal_alert_token: Optional[str] = None
 
     # Cameras
     cameras: List[CameraConfig] = Field(default_factory=list)

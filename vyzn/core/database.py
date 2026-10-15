@@ -229,6 +229,23 @@ class DatabaseWriterWorker(threading.Thread):
             ignored_moments_count INTEGER DEFAULT 0,
             updated_at_ms INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS alert_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL,
+            channel TEXT NOT NULL DEFAULT 'telegram',
+            recipient_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER DEFAULT 0,
+            last_attempt_at_ms INTEGER,
+            delivered_at_ms INTEGER,
+            error_message TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            UNIQUE(event_id, channel, recipient_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_alert_deliveries_event ON alert_deliveries(event_id);
+        CREATE INDEX IF NOT EXISTS idx_alert_deliveries_status ON alert_deliveries(status);
         """)
         try:
             conn.execute("ALTER TABLE events ADD COLUMN user_triage TEXT DEFAULT 'unreviewed';")
@@ -963,6 +980,19 @@ class EventDatabase:
             return user
         return None
 
+    def reset_user_password(self, email: str, new_password: str) -> bool:
+        """Resets user password to new hash."""
+        norm_email = email.strip().lower()
+        user = self.get_user_by_email(norm_email)
+        if not user:
+            return False
+        pwd_hash = hash_password(new_password)
+        now_ms = int(time.time() * 1000)
+        sql = "UPDATE users SET password_hash = ?, updated_at_ms = ? WHERE id = ?"
+        self.writer.queue.put((sql, (pwd_hash, now_ms, user["id"]), None))
+        self.flush()
+        return True
+
     def get_or_create_user(self, email: str) -> Dict[str, Any]:
         """Retrieves user by normalized email or creates a new user profile."""
         norm_email = email.strip().lower()
@@ -1060,6 +1090,151 @@ class EventDatabase:
             return dict(row) if row else None
         finally:
             conn.close()
+
+    def update_user_telegram_blocked(self, chat_id: str):
+        """Marks user telegram status as blocked when bot is blocked by recipient."""
+        now_ms = int(time.time() * 1000)
+        sql = "UPDATE users SET telegram_status = 'blocked', updated_at_ms = ? WHERE telegram_chat_id = ?"
+        self.writer.queue.put((sql, (now_ms, str(chat_id)), None))
+        self.flush()
+
+    def get_alert_delivery(self, event_id: str, channel: str = "telegram", recipient_id: str = "") -> Optional[Dict[str, Any]]:
+        """Retrieves existing alert delivery record for an event, channel, and recipient."""
+        conn = self._get_read_conn()
+        try:
+            cursor = conn.cursor()
+            if recipient_id:
+                cursor.execute(
+                    "SELECT * FROM alert_deliveries WHERE event_id = ? AND channel = ? AND recipient_id = ?",
+                    (str(event_id), str(channel), str(recipient_id))
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM alert_deliveries WHERE event_id = ? AND channel = ? ORDER BY id DESC LIMIT 1",
+                    (str(event_id), str(channel))
+                )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def record_alert_delivery_attempt(
+        self,
+        event_id: str,
+        channel: str = "telegram",
+        recipient_id: str = ""
+    ) -> Tuple[bool, Optional[Dict[str, Any]]]:
+        """
+        Idempotency guard: Records an alert delivery attempt or checks existing status.
+        Returns:
+            (can_proceed: bool, record: Optional[Dict[str, Any]])
+        If already 'delivered', returns (False, record) to prevent duplicate delivery.
+        If pending and attempted < 15s ago, returns (False, record) to prevent concurrent double-send.
+        Otherwise records/updates attempt and returns (True, record).
+        """
+        existing = self.get_alert_delivery(event_id, channel, recipient_id)
+        now_ms = int(time.time() * 1000)
+
+        if existing:
+            if existing.get("status") == "delivered":
+                return False, existing
+            # If an attempt was made within the last 15 seconds, avoid race condition duplicate
+            last_attempt = existing.get("last_attempt_at_ms") or 0
+            if existing.get("status") == "pending" and (now_ms - last_attempt) < 15000:
+                return False, existing
+
+            # Update existing record attempt count
+            attempts = (existing.get("attempts") or 0) + 1
+            sql = """
+            UPDATE alert_deliveries
+            SET attempts = ?, last_attempt_at_ms = ?, status = 'pending', updated_at_ms = ?
+            WHERE id = ?
+            """
+            self.writer.queue.put((sql, (attempts, now_ms, now_ms, existing["id"]), None))
+            self.flush()
+            existing["attempts"] = attempts
+            existing["last_attempt_at_ms"] = now_ms
+            existing["status"] = "pending"
+            return True, existing
+
+        # Create new delivery record
+        sql = """
+        INSERT OR IGNORE INTO alert_deliveries
+        (event_id, channel, recipient_id, status, attempts, last_attempt_at_ms, created_at_ms, updated_at_ms)
+        VALUES (?, ?, ?, 'pending', 1, ?, ?, ?)
+        """
+        self.writer.queue.put((sql, (str(event_id), str(channel), str(recipient_id), now_ms, now_ms, now_ms), None))
+        self.flush()
+        return True, self.get_alert_delivery(event_id, channel, recipient_id)
+
+    def mark_alert_delivery_success(self, event_id: str, channel: str = "telegram", recipient_id: str = ""):
+        """Marks alert notification as successfully delivered after 200 OK from provider."""
+        now_ms = int(time.time() * 1000)
+        if recipient_id:
+            sql = """
+            INSERT INTO alert_deliveries (
+                event_id, channel, recipient_id, status, attempts, last_attempt_at_ms, delivered_at_ms, error_message, created_at_ms, updated_at_ms
+            ) VALUES (?, ?, ?, 'delivered', 1, ?, ?, NULL, ?, ?)
+            ON CONFLICT(event_id, channel, recipient_id) DO UPDATE SET
+                status = 'delivered',
+                delivered_at_ms = excluded.delivered_at_ms,
+                error_message = NULL,
+                updated_at_ms = excluded.updated_at_ms
+            """
+            self.writer.queue.put((sql, (str(event_id), str(channel), str(recipient_id), now_ms, now_ms, now_ms, now_ms), None))
+        else:
+            sql = """
+            UPDATE alert_deliveries
+            SET status = 'delivered', delivered_at_ms = ?, error_message = NULL, updated_at_ms = ?
+            WHERE event_id = ? AND channel = ?
+            """
+            self.writer.queue.put((sql, (now_ms, now_ms, str(event_id), str(channel)), None))
+        self.flush()
+
+    def mark_alert_delivery_failure(
+        self,
+        event_id: str,
+        channel: str = "telegram",
+        recipient_id: str = "",
+        error_message: str = "",
+        permanent: bool = False
+    ):
+        """Records delivery error information for audit and bounded retry handling."""
+        now_ms = int(time.time() * 1000)
+        status_val = "failed"
+        if recipient_id:
+            sql = """
+            INSERT INTO alert_deliveries (
+                event_id, channel, recipient_id, status, attempts, last_attempt_at_ms, error_message, created_at_ms, updated_at_ms
+            ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+            ON CONFLICT(event_id, channel, recipient_id) DO UPDATE SET
+                status = excluded.status,
+                error_message = excluded.error_message,
+                updated_at_ms = excluded.updated_at_ms
+            """
+            self.writer.queue.put((sql, (str(event_id), str(channel), str(recipient_id), status_val, now_ms, str(error_message)[:500], now_ms, now_ms), None))
+        else:
+            sql = """
+            UPDATE alert_deliveries
+            SET status = ?, error_message = ?, updated_at_ms = ?
+            WHERE event_id = ? AND channel = ?
+            """
+            self.writer.queue.put((sql, (status_val, str(error_message)[:500], now_ms, str(event_id), str(channel)), None))
+        self.flush()
+
+    def get_camera(self, camera_id: str) -> Optional[Dict[str, Any]]:
+        """Resolves camera configuration by ID from cameras.json or known defaults."""
+        try:
+            cfg_file = Path("./config/cameras.json")
+            if cfg_file.exists():
+                with open(cfg_file, "r", encoding="utf-8") as f:
+                    cams = json.load(f)
+                    for c in cams:
+                        if c.get("camera_id") == camera_id or c.get("id") == camera_id:
+                            return c
+        except Exception:
+            pass
+        return None
 
     def store_auth_code(self, email: str, code: str, ttl_sec: int = 600):
         norm_email = email.strip().lower()

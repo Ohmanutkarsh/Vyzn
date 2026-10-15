@@ -54,5 +54,38 @@ CREATE POLICY "Allow public anon access to vyzn_login_history"
     USING (true)
     WITH CHECK (true);
 
+-- Ensure telegram_alerts_enabled, telegram_username, and linked timestamp exist
+ALTER TABLE public.vyzn_users ADD COLUMN IF NOT EXISTS telegram_username TEXT;
+ALTER TABLE public.vyzn_users ADD COLUMN IF NOT EXISTS telegram_alerts_enabled BOOLEAN DEFAULT TRUE;
+ALTER TABLE public.vyzn_users ADD COLUMN IF NOT EXISTS telegram_linked_at TIMESTAMPTZ;
+
+-- 4. Create table for VYZN Alert Deliveries & Idempotency Tracking
+CREATE TABLE IF NOT EXISTS public.vyzn_alert_deliveries (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_id TEXT NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'telegram',
+    recipient_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'delivered' | 'failed' | 'skipped'
+    attempts INTEGER DEFAULT 0,
+    last_attempt_at_ms BIGINT,
+    delivered_at_ms BIGINT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(event_id, channel, recipient_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vyzn_alert_deliveries_event ON public.vyzn_alert_deliveries (event_id);
+CREATE INDEX IF NOT EXISTS idx_vyzn_alert_deliveries_recipient ON public.vyzn_alert_deliveries (recipient_id);
+
+ALTER TABLE public.vyzn_alert_deliveries ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow anon and service_role access to vyzn_alert_deliveries"
+    ON public.vyzn_alert_deliveries
+    FOR ALL
+    TO anon, authenticated, service_role
+    USING (true)
+    WITH CHECK (true);
+
 -- Enable Realtime broadcasting if needed
 ALTER PUBLICATION supabase_realtime ADD TABLE public.vyzn_users;

@@ -115,28 +115,54 @@ class YOLOv8Detector(BaseDetector):
 
 class MockDetector(BaseDetector):
     """
-    Fast deterministic detector for unit tests and synthetic feeds.
-    Detects person if frame contains dark rectangular areas.
+    Geometry-grounded human silhouette detector for synthetic feeds and fast testing.
+    Rejects ceiling fans (aspect ratio ~1.0) and hair flutter (<2% area).
+    Only detects a person if upright vertical human proportions (aspect ratio 1.25 to 4.2) are present.
     """
 
-    def __init__(self, fixed_confidence: float = 0.85):
+    def __init__(self, fixed_confidence: Optional[float] = None):
         self.fixed_confidence = fixed_confidence
 
     def detect(self, frame: np.ndarray) -> List[Detection]:
-        # Fast color/brightness heuristic to mock person detection on synthetic frames
+        if frame is None or frame.size == 0:
+            return []
         h, w = frame.shape[:2]
-        gray = cv2_gray = np.mean(frame, axis=2).astype(np.uint8) if len(frame.shape) == 3 else frame
-        dark_pixels = np.count_nonzero(cv2_gray < 80)
-        ratio = dark_pixels / float(h * w)
+        if len(frame.shape) == 3:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if hasattr(cv2, "cvtColor") else np.mean(frame, axis=2).astype(np.uint8)
+        else:
+            gray = frame
 
-        if ratio > 0.008:
-            return [Detection(
-                box=[0.3, 0.2, 0.7, 0.8],
-                confidence=self.fixed_confidence,
-                class_id=0,
-                label="person"
-            )]
-        return []
+        # Threshold dark foreground objects
+        _, thresh = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        detections: List[Detection] = []
+        for cnt in contours:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            area_ratio = (cw * ch) / float(h * w)
+            aspect_ratio = ch / float(cw) if cw > 0 else 0.0
+            height_ratio = ch / float(h)
+
+            # Upright human silhouette check:
+            # - Vertical aspect ratio: 1.25 <= aspect_ratio <= 4.2
+            # - Substantial height: height_ratio >= 0.18
+            # - Substantial area: area_ratio >= 0.025
+            if 1.25 <= aspect_ratio <= 4.2 and height_ratio >= 0.18 and area_ratio >= 0.025:
+                norm_box = [
+                    max(0.0, x / float(w)),
+                    max(0.0, y / float(h)),
+                    min(1.0, (x + cw) / float(w)),
+                    min(1.0, (y + ch) / float(h))
+                ]
+                conf = self.fixed_confidence if self.fixed_confidence is not None else round(min(0.95, max(0.68, 0.72 + (aspect_ratio - 1.25) * 0.07)), 2)
+                detections.append(Detection(
+                    box=norm_box,
+                    confidence=conf,
+                    class_id=0,
+                    label="person",
+                    raw_label="person"
+                ))
+        return detections
 
 
 def get_detector(engine: str = "mock", model_path: Optional[str] = None, **kwargs) -> BaseDetector:

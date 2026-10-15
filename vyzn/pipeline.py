@@ -749,6 +749,16 @@ class EdgePipeline:
             f"Score: {score}, Obj: {segment.primary_object}, Title: {title}, Part: {segment.part_index}"
         )
 
+        # In simple terms: clean up provisional live alert clip so only finalized clips remain
+        try:
+            live_id = segment.event_group_id + "_live"
+            live_dir = self.clip_writer.get_event_dir(camera_id, live_id)
+            if live_dir.exists():
+                import shutil
+                shutil.rmtree(str(live_dir), ignore_errors=True)
+        except Exception:
+            pass
+
         # Telegram Alerting: Fire ONCE per event, not once per fragment!
         root_event_id = segment.parent_event_id or segment.event_group_id
         if tier == "alert" and root_event_id not in self.dispatched_alert_events:
@@ -798,12 +808,28 @@ class EdgePipeline:
                 )
             else:
                 clip_path, thumb_path = None, None
+
+            if not thumb_path and len(frames) > 0:
+                try:
+                    import cv2
+                    from pathlib import Path
+                    preview_dir = Path(".cache/previews")
+                    preview_dir.mkdir(parents=True, exist_ok=True)
+                    live_thumb = preview_dir / f"live_{event_id}.jpg"
+                    cv2.imwrite(str(live_thumb), frames[-1])
+                    thumb_path = str(live_thumb)
+                except Exception as e:
+                    logger.debug(f"Failed to generate instant live thumb: {e}")
+
             obj_type = candidate.object_type if candidate else "person"
             from vyzn.core.events import EventRecord
             from datetime import datetime, timezone
             import json
             start_time = self.active_event_start_times.get(camera_id,
                          datetime.now(timezone.utc).isoformat())
+            cam_cfg = self.configs.get(camera_id)
+            owner_email = getattr(cam_cfg, "owner_email", None) if cam_cfg else None
+
             provisional_record = EventRecord(
                 event_group_id=event_id,
                 camera_id=camera_id,
@@ -812,6 +838,7 @@ class EdgePipeline:
                 object_type=obj_type,
                 confidence=candidate.confidence if candidate else 0.85,
                 score=score,
+                tier="alert",
                 status="raw",
                 file_path=clip_path or "",
                 thumb_path=thumb_path or "",
@@ -820,7 +847,8 @@ class EdgePipeline:
                 location_id="loc_primary",
                 duration_sec=round(len(frames) / 4.0, 1),
                 motion_points_count=self.active_event_motion_counts.get(camera_id, 1),
-                metadata_json=json.dumps({"live_alert": True, "pre_roll_sec": 10.0})
+                metadata_json=json.dumps({"live_alert": True, "pre_roll_sec": 10.0}),
+                owner_email=owner_email
             )
             self.dispatcher.dispatch(provisional_record, clip_path, thumb_path)
             logger.info(

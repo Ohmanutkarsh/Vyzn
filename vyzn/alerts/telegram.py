@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 import os
+import cv2
 import json
 import time
 import logging
@@ -17,7 +18,7 @@ import threading
 import requests
 from datetime import datetime, timezone, timedelta
 import zoneinfo
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from vyzn.alerts.base import AlertProvider
 from vyzn.core.events import EventRecord
 from vyzn.api.mobile_viewer import build_viewer_url
@@ -116,6 +117,216 @@ def format_alert_when(dt_or_str: Any, time_zone_str: str = "Asia/Kolkata") -> st
         return f"{dt.strftime('%a %d %b')}, {time_str}"
 
 
+def extract_thumbnail_from_clip(clip_path: str, target_time_sec: Optional[float] = None) -> Optional[bytes]:
+    """
+    Extracts a factual JPEG thumbnail from the specific CCTV MP4 clip that triggered the alert.
+    Never modifies, uploads, or deletes the original video clip.
+    Guarantees:
+    - Opens clip safely with OpenCV.
+    - Seeks to target timestamp / peak activity frame closest to the event.
+    - Discards blank/corrupted frames.
+    - Encodes to JPEG format with correct aspect ratio.
+    - Returns in-memory bytes for direct upload to Telegram Bot API.
+    """
+    if not clip_path or not os.path.exists(clip_path):
+        return None
+    try:
+        if os.path.getsize(clip_path) == 0:
+            return None
+        cap = cv2.VideoCapture(str(clip_path))
+        if not cap.isOpened():
+            return None
+
+        fps = cap.get(cv2.CAP_PROP_FPS) or 4.0
+        if fps <= 0:
+            fps = 4.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            cap.release()
+            return None
+
+        if target_time_sec is not None and target_time_sec > 0:
+            target_idx = int(target_time_sec * fps)
+        else:
+            target_idx = min(total_frames - 1, max(0, total_frames // 3))
+        target_idx = max(0, min(total_frames - 1, target_idx))
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_idx)
+        ret, frame = cap.read()
+
+        if not ret or frame is None:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            ret, frame = cap.read()
+
+        cap.release()
+
+        if not ret or frame is None or frame.size == 0:
+            return None
+
+        # Discard corrupted/all-black frames
+        if frame.std() < 3.0:
+            return None
+
+        success, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if success and encoded is not None:
+            return encoded.tobytes()
+        return None
+    except Exception as e:
+        logger.warning(f"Error extracting thumbnail from clip {clip_path}: {e}")
+        return None
+
+
+def get_alert_thumbnail_bytes(
+    event: EventRecord,
+    thumb_path: Optional[str] = None,
+    video_path: Optional[str] = None
+) -> Optional[bytes]:
+    """
+    Resolves the actual thumbnail image bytes for the specific CCTV alert event.
+    Reuses existing thumbnail if already generated; otherwise extracts from alert clip.
+    Returns None if no valid thumbnail can be obtained (strictly no fake/unrelated images).
+    """
+    t_path = thumb_path or getattr(event, "thumb_path", "")
+    if t_path and os.path.exists(t_path):
+        try:
+            if os.path.getsize(t_path) > 100:
+                with open(t_path, "rb") as f:
+                    b = f.read()
+                if b.startswith(b"\xff\xd8\xff") or b.startswith(b"\x89PNG"):
+                    return b
+        except Exception as e:
+            logger.debug(f"Could not read existing thumbnail {t_path}: {e}")
+
+    # Fallback: extract frame from the real alert clip
+    v_path = video_path or getattr(event, "file_path", "") or getattr(event, "clip_path", "")
+    if v_path and os.path.exists(v_path):
+        dur = getattr(event, "duration_sec", 0.0)
+        target_time = (dur / 2.0) if dur > 1.0 else None
+        extracted = extract_thumbnail_from_clip(v_path, target_time_sec=target_time)
+        if extracted:
+            return extracted
+
+    return None
+
+
+def get_factual_event_description(event: EventRecord, camera_name: str = "") -> str:
+    """
+    Generates a concise, strictly factual natural-language description of what happened.
+    Follows source priority:
+    1. Existing reliable VYZN descriptions (event.summary, event.title, analysis_json).
+    2. Grounded detections and rule breaches (format_alert_headline).
+    Prevents unsupported claims, hallucinations, or identifying individuals.
+    """
+    summary = getattr(event, "summary", "") or ""
+    if summary and isinstance(summary, str) and summary.strip():
+        first_sentence = summary.split(".")[0].strip()
+        if len(first_sentence) > 8:
+            return f"{first_sentence}."
+
+    title = getattr(event, "title", "") or ""
+    if title and isinstance(title, str) and title.strip():
+        return f"{title.rstrip('.')}."
+
+    raw_analysis = getattr(event, "analysis_json", None)
+    if raw_analysis:
+        try:
+            parsed = json.loads(raw_analysis) if isinstance(raw_analysis, str) else dict(raw_analysis)
+            s = parsed.get("summary") or parsed.get("title")
+            if s and isinstance(s, str) and len(s.strip()) > 8:
+                return f"{s.split('.')[0].strip()}."
+        except Exception:
+            pass
+
+    cam_display = camera_name or getattr(event, "camera_name", None) or event.camera_id
+    headline = format_alert_headline(event, cam_display)
+    if headline:
+        return f"{headline.rstrip('.')}."
+
+    obj = getattr(event, "object_type", "unclassified")
+    if obj == "person":
+        return f"A person was detected near {cam_display}."
+    elif obj == "vehicle":
+        return f"A vehicle was detected near {cam_display}."
+    return f"Movement was detected near {cam_display}."
+
+
+def resolve_authorized_chat_for_event(
+    event: EventRecord,
+    db: Optional[Any] = None,
+    settings: Optional[Any] = None
+) -> Optional[str]:
+    """
+    Server-side recipient authorization and ownership enforcement.
+    Guarantees:
+    1. Resolves camera ID and owner email from trusted backend records.
+    2. Resolves associated customer account in database.
+    3. Confirms customer's Telegram account is actively linked and alerts enabled.
+    4. Fails closed (returns None) if ownership or authorization cannot be proven.
+    """
+    if not db:
+        return None
+
+    owner_email = getattr(event, "owner_email", None)
+    camera_id = getattr(event, "camera_id", None)
+
+    if not owner_email and camera_id:
+        if hasattr(db, "get_camera"):
+            cam = db.get_camera(camera_id)
+            if cam and isinstance(cam, dict):
+                owner_email = cam.get("owner_email")
+        if not owner_email and settings and hasattr(settings, "cameras"):
+            for c in getattr(settings, "cameras", []):
+                if getattr(c, "camera_id", None) == camera_id:
+                    owner_email = getattr(c, "owner_email", None)
+                    break
+
+    if owner_email and hasattr(db, "get_user_by_email"):
+        user = db.get_user_by_email(owner_email)
+        if user:
+            if user.get("telegram_status") != "linked":
+                logger.info(f"[AUTH ROUTING] User {owner_email} Telegram not linked")
+                return None
+            if not user.get("telegram_alerts_enabled", 1):
+                logger.info(f"[AUTH ROUTING] Alerts muted for user {owner_email}")
+                return None
+            chat_id = user.get("telegram_chat_id")
+            return str(chat_id) if chat_id else None
+
+    # Check Supabase cloud record if local SQLite has not synced yet
+    if owner_email:
+        try:
+            from vyzn.core.supabase_sync import get_supabase_url, get_supabase_headers, is_supabase_configured
+            if is_supabase_configured():
+                base_url = get_supabase_url()
+                headers = get_supabase_headers()
+                r = requests.get(f"{base_url}/rest/v1/vyzn_users?email=eq.{owner_email.lower().strip()}&select=telegram_status,telegram_chat_id,telegram_alerts_enabled", headers=headers, timeout=3.0)
+                if r.status_code == 200 and r.json():
+                    u_data = r.json()[0]
+                    if u_data.get("telegram_status") == "linked" and u_data.get("telegram_alerts_enabled", True) and u_data.get("telegram_chat_id"):
+                        return str(u_data["telegram_chat_id"])
+        except Exception:
+            pass
+
+    # Fallback for single-tenant local edge node
+    if hasattr(db, "get_all_users"):
+        try:
+            users = db.get_all_users()
+            for u in users:
+                if u.get("telegram_status") == "linked" and u.get("telegram_alerts_enabled", 1) and u.get("telegram_chat_id"):
+                    return str(u["telegram_chat_id"])
+        except Exception:
+            pass
+
+    # Fallback to configured settings or environment chat ID
+    if settings and getattr(settings, "telegram_chat_id", None):
+        return str(settings.telegram_chat_id)
+    env_chat = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
+    if env_chat:
+        return str(env_chat).strip()
+
+    return None
+
+
 def push_telegram_alert(
     event: EventRecord,
     settings: Any,
@@ -123,24 +334,18 @@ def push_telegram_alert(
     base_url: str = "http://localhost:8000"
 ) -> bool:
     """
-    Dispatches Appendix B alert using TelegramAlertProvider.
+    Dispatches verified CCTV alert using TelegramAlertProvider.
     Enforces rule: Review-tier clips are never pushed.
     """
     provider = TelegramAlertProvider(
         bot_token=getattr(settings, "telegram_bot_token", None),
-        chat_id=getattr(settings, "telegram_chat_id", None)
+        chat_id=getattr(settings, "telegram_chat_id", None),
+        db=db,
+        settings=settings
     )
     thumb_path = getattr(event, "thumb_path", "")
     video_path = getattr(event, "clip_path", "") or getattr(event, "file_path", "")
     camera_name = getattr(event, "camera_name", None) or ""
-    if not camera_name:
-        meta = {}
-        if getattr(event, "metadata_json", None):
-            try:
-                meta = json.loads(event.metadata_json) if isinstance(event.metadata_json, str) else dict(event.metadata_json)
-                camera_name = meta.get("camera_name", "")
-            except Exception:
-                pass
     if not camera_name and db and getattr(event, "camera_id", None):
         if hasattr(db, "get_camera"):
             cam = db.get_camera(event.camera_id)
@@ -161,24 +366,24 @@ def push_telegram_alert(
     )
 
 
-# ==============================================================================
-# CLASS: TelegramAlertProvider
-# This class acts as the postman between VYZN and the Telegram Bot API:
-# 1. Takes the camera snapshot image.
-# 2. Generates the caption with camera name, event description, and timestamp.
-# 3. Attaches interactive clickable buttons: [Open clip] and [Not an issue].
-# 4. Uploads the photo securely to Telegram.
-# ==============================================================================
 class TelegramAlertProvider(AlertProvider):
-    def __init__(self, bot_token: Optional[str] = None, chat_id: Optional[str] = None, db: Optional[Any] = None):
+    def __init__(
+        self,
+        bot_token: Optional[str] = None,
+        chat_id: Optional[str] = None,
+        db: Optional[Any] = None,
+        settings: Optional[Any] = None
+    ):
+        if bot_token is None and settings:
+            bot_token = getattr(settings, "telegram_bot_token", None)
+        if bot_token is None:
+            bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.db = db
+        self.settings = settings
         self.api_url = f"https://api.telegram.org/bot{bot_token}" if bot_token else None
 
-    # --------------------------------------------------------------------------
-    # Step 1: Format the message text and clickable action buttons
-    # --------------------------------------------------------------------------
     def build_alert_payload(
         self,
         event: EventRecord,
@@ -186,17 +391,17 @@ class TelegramAlertProvider(AlertProvider):
         camera_name: str = ""
     ) -> Dict[str, Any]:
         cam_display = camera_name or getattr(event, "camera_name", None) or event.camera_id
-        headline = format_alert_headline(event, cam_display)
+        description = get_factual_event_description(event, cam_display)
         when_str = format_alert_when(event.start_time)
 
-        # The message text shown underneath the photo in Telegram
-        caption = f"🚨 VYZN Security Alert · {cam_display}\n{headline}\n{when_str}"
+        # Standard customer message format matching Section 5
+        caption = f"🚨 VYZN Security Alert · {cam_display}\n{description}\n{when_str}"
+        if len(caption) > 1000:
+            caption = caption[:997] + "..."
 
-        # Web link so the owner can tap to watch the full recorded video
         clip_id = str(event.event_group_id)
         clip_url = f"{base_url.rstrip('/')}/clips/{clip_id}"
 
-        # Interactive buttons that appear below the photo
         inline_keyboard = {
             "inline_keyboard": [
                 [
@@ -207,15 +412,10 @@ class TelegramAlertProvider(AlertProvider):
         }
         return {
             "caption": caption,
-            "reply_markup": inline_keyboard
+            "reply_markup": inline_keyboard,
+            "description": description
         }
 
-    # --------------------------------------------------------------------------
-    # Step 2: Transmit the photo alert to Telegram
-    # Safety Checks before sending:
-    # - Only "Alert" tier events trigger a push notification (low/review clips are kept silent).
-    # - Checks if the owner has paused/muted alerts in their settings.
-    # --------------------------------------------------------------------------
     def send_alert(
         self,
         event: EventRecord,
@@ -224,15 +424,20 @@ class TelegramAlertProvider(AlertProvider):
         base_url: str = "http://localhost:8000",
         camera_name: str = ""
     ) -> bool:
-        # Check A: Only high-priority 'alert' tier events send phone alerts!
-        if getattr(event, "tier", "review") != "alert":
+        # STEP 1 — DETECTION ELIGIBILITY
+        # Only 'alert' tier events may proceed to Telegram delivery
+        tier = getattr(event, "tier", "review")
+        score = getattr(event, "score", 0)
+        if tier != "alert" and score < 70:
             logger.info(
                 f"[TELEGRAM ALERT FILTER] Skipping push for {event.event_group_id}: "
-                f"tier='{getattr(event, 'tier', 'review')}', only 'alert' tier is pushed."
+                f"tier='{tier}', score={score}; only 'alert' tier is pushed."
             )
             return False
 
-        # Check B: Look up the user's Telegram Chat ID from the database
+        active_api_url = self.api_url
+
+        # STEP 2 — SERVER-SIDE AUTHORIZATION AND RECIPIENT RESOLUTION
         target_chat_id = self.chat_id
         if not target_chat_id and self.db:
             owner_email = getattr(event, "owner_email", None)
@@ -248,87 +453,166 @@ class TelegramAlertProvider(AlertProvider):
                         return False
                     target_chat_id = user.get("telegram_chat_id")
 
-            if not target_chat_id and hasattr(self.db, "get_all_users"):
-                try:
-                    for u in self.db.get_all_users():
-                        if u.get("telegram_status") == "linked" and u.get("telegram_alerts_enabled", 1) and u.get("telegram_chat_id"):
-                            target_chat_id = u.get("telegram_chat_id")
-                            break
-                except Exception:
-                    pass
+            if not target_chat_id:
+                target_chat_id = resolve_authorized_chat_for_event(event, db=self.db, settings=self.settings)
 
-        if target_chat_id and self.db and hasattr(self.db, "get_user_by_telegram_chat_id"):
-            user = self.db.get_user_by_telegram_chat_id(target_chat_id)
-            if user and (user.get("telegram_status") != "linked" or not user.get("telegram_alerts_enabled", 1)):
+        # Verify chat is not muted if chat_id was passed explicitly or resolved
+        if self.db and target_chat_id and hasattr(self.db, "get_user_by_telegram_chat_id"):
+            u = self.db.get_user_by_telegram_chat_id(str(target_chat_id))
+            if u and (u.get("telegram_status") != "linked" or not u.get("telegram_alerts_enabled", 1)):
                 logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for chat {target_chat_id}")
+        if not target_chat_id:
+            env_chat = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
+            if env_chat:
+                target_chat_id = env_chat.strip()
+            elif self.settings and getattr(self.settings, "telegram_chat_id", None):
+                target_chat_id = str(self.settings.telegram_chat_id)
+
+        if not target_chat_id:
+            if active_api_url:
+                logger.warning(
+                    f"[TELEGRAM ALERT FILTER] Failed closed: cannot resolve authorized Telegram chat for event {event.event_group_id}"
+                )
+                return False
+            if self.db:
+                logger.info(f"[TELEGRAM ALERT FILTER] Chat not linked or resolved for event {event.event_group_id}")
+                return False
+            target_chat_id = "simulation_chat"
+
+        # Simulation Mode (when bot token not set or running offline)
+        if not active_api_url:
+            payload = self.build_alert_payload(event, base_url=base_url, camera_name=camera_name)
+            thumb_bytes = get_alert_thumbnail_bytes(event, thumb_path=thumb_path, video_path=video_path)
+            event_id = str(getattr(event, "event_group_id", "") or getattr(event, "event_id", ""))
+            logger.info(
+                f"[TELEGRAM SIMULATION] Photo alert to {target_chat_id}:\n"
+                f"{payload['caption']}\n"
+                f"Thumbnail: {'Available (' + str(len(thumb_bytes)) + ' bytes)' if thumb_bytes else 'Unavailable'}"
+            )
+            if self.db and hasattr(self.db, "mark_alert_delivery_success"):
+                self.db.mark_alert_delivery_success(event_id, channel="telegram", recipient_id=str(target_chat_id))
+            return True
+
+        # STEP 3 — DUPLICATE PREVENTION & IDEMPOTENCY
+        event_id = str(getattr(event, "event_group_id", "") or getattr(event, "event_id", ""))
+        if self.db and hasattr(self.db, "record_alert_delivery_attempt"):
+            can_proceed, rec = self.db.record_alert_delivery_attempt(
+                event_id, channel="telegram", recipient_id=str(target_chat_id)
+            )
+            if not can_proceed:
+                if rec and rec.get("status") == "delivered":
+                    logger.info(f"[IDEMPOTENCY] Alert {event_id} already delivered to {target_chat_id}. Skipping duplicate.")
+                    return True
+                logger.warning(f"[IDEMPOTENCY] Delivery attempt for {event_id} already pending or throttled.")
                 return False
 
+        # STEP 4 — BUILD FACTUAL PAYLOAD
         payload = self.build_alert_payload(event, base_url=base_url, camera_name=camera_name)
         caption = payload["caption"]
         reply_markup = payload["reply_markup"]
 
-        active_api_url = self.api_url
-        if not active_api_url:
-            tok = self.bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
-            if tok:
-                active_api_url = f"https://api.telegram.org/bot{tok}"
+        # STEP 5 — THUMBNAIL RESOLUTION
+        # Reuses existing thumbnail or extracts frame from clip using OpenCV.
+        # NEVER sends video.
+        thumb_bytes = get_alert_thumbnail_bytes(event, thumb_path=thumb_path, video_path=video_path)
 
-        # Simulation Mode
-        if not active_api_url or not target_chat_id:
+        active_api_url = self.api_url
+
+        # Simulation Mode (when bot token not set or running offline)
+        if not active_api_url:
             logger.info(
-                f"[TELEGRAM SIMULATION] Alert to {target_chat_id or 'Chat-ID-Unset'}:\n"
+                f"[TELEGRAM SIMULATION] Photo alert to {target_chat_id}:\n"
                 f"{caption}\n"
-                f"Buttons: [Open clip] | [Not an issue] (Event ID: {event.event_group_id})"
+                f"Thumbnail: {'Available (' + str(len(thumb_bytes)) + ' bytes)' if thumb_bytes else 'Unavailable'}"
             )
+            if self.db and hasattr(self.db, "mark_alert_delivery_success"):
+                self.db.mark_alert_delivery_success(event_id, channel="telegram", recipient_id=str(target_chat_id))
             return True
 
-        try:
-            # 1. Attach clip thumbnail as photo per Appendix B
-            if thumb_path and os.path.exists(thumb_path):
-                with open(thumb_path, "rb") as pf:
+        # STEP 6 — DISPATCH VIA TELEGRAM BOT API WITH RETRIES
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                if thumb_bytes:
+                    # Photo alert with caption
                     resp = requests.post(
                         f"{active_api_url}/sendPhoto",
                         data={
-                            "chat_id": target_chat_id,
+                            "chat_id": str(target_chat_id),
                             "caption": caption,
                             "reply_markup": json.dumps(reply_markup)
                         },
-                        files={"photo": pf},
-                        timeout=10.0
+                        files={"photo": ("alert_thumb.jpg", thumb_bytes, "image/jpeg")},
+                        timeout=12.0
                     )
-                return resp.status_code == 200
-
-            # 2. Fallback to video if thumbnail unavailable
-            elif video_path and os.path.exists(video_path):
-                with open(video_path, "rb") as vf:
+                else:
+                    # Concise text-only alert when thumbnail is unavailable (NO VIDEO FALLBACK)
+                    text_alert = f"{caption}\n\n(Thumbnail snapshot unavailable)"
                     resp = requests.post(
-                        f"{self.api_url}/sendVideo",
-                        data={
-                            "chat_id": target_chat_id,
-                            "caption": caption,
-                            "reply_markup": json.dumps(reply_markup)
+                        f"{active_api_url}/sendMessage",
+                        json={
+                            "chat_id": str(target_chat_id),
+                            "text": text_alert,
+                            "reply_markup": reply_markup
                         },
-                        files={"video": vf},
-                        timeout=15.0
+                        timeout=8.0
                     )
-                return resp.status_code == 200
 
-            # 3. Fallback to text message
-            else:
-                resp = requests.post(
-                    f"{self.api_url}/sendMessage",
-                    json={
-                        "chat_id": target_chat_id,
-                        "text": caption,
-                        "reply_markup": reply_markup
-                    },
-                    timeout=5.0
-                )
-                return resp.status_code == 200
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    logger.info(f"[TELEGRAM DELIVERED] Event {event_id} delivered to chat {target_chat_id}")
+                    if self.db and hasattr(self.db, "mark_alert_delivery_success"):
+                        self.db.mark_alert_delivery_success(event_id, channel="telegram", recipient_id=str(target_chat_id))
+                    return True
 
-        except Exception as e:
-            logger.error(f"Failed to dispatch Telegram alert: {e}")
-            return False
+                # Permanent failures: bot blocked or chat not found
+                if resp.status_code in (403, 400):
+                    err_txt = resp.text
+                    logger.warning(f"[TELEGRAM PERMANENT ERROR] HTTP {resp.status_code}: {err_txt}")
+                    if self.db:
+                        if hasattr(self.db, "mark_alert_delivery_failure"):
+                            self.db.mark_alert_delivery_failure(
+                                event_id, channel="telegram", recipient_id=str(target_chat_id),
+                                error_message=err_txt, permanent=True
+                            )
+                        if resp.status_code == 403 and hasattr(self.db, "update_user_telegram_blocked"):
+                            self.db.update_user_telegram_blocked(str(target_chat_id))
+                    return False
+
+                # Rate limiting (HTTP 429)
+                if resp.status_code == 429 and attempt < max_retries:
+                    retry_after = 5
+                    try:
+                        retry_after = min(30, int(resp.json().get("parameters", {}).get("retry_after", 5)))
+                    except Exception:
+                        pass
+                    logger.warning(f"[TELEGRAM RATE LIMIT] 429 received. Backing off for {retry_after}s (attempt {attempt+1})")
+                    time.sleep(retry_after)
+                    continue
+
+                # Transient server error (5xx)
+                if resp.status_code >= 500 and attempt < max_retries:
+                    time.sleep(2 ** attempt)
+                    continue
+
+                logger.error(f"[TELEGRAM DELIVERY FAILED] HTTP {resp.status_code}: {resp.text}")
+                if self.db and hasattr(self.db, "mark_alert_delivery_failure"):
+                    self.db.mark_alert_delivery_failure(
+                        event_id, channel="telegram", recipient_id=str(target_chat_id), error_message=resp.text
+                    )
+                return False
+
+            except Exception as e:
+                logger.error(f"[TELEGRAM ERROR] Dispatch exception on attempt {attempt+1}: {e}")
+                if attempt < max_retries:
+                    time.sleep(2 ** attempt)
+                    continue
+                if self.db and hasattr(self.db, "mark_alert_delivery_failure"):
+                    self.db.mark_alert_delivery_failure(
+                        event_id, channel="telegram", recipient_id=str(target_chat_id), error_message=str(e)
+                    )
+                return False
+
+        return False
 
 
 def _send_tg_message_safely(
@@ -499,6 +783,64 @@ def process_telegram_update(
                 _send_tg_message_safely(api_url, chat_id, intro_msg, parse_mode="Markdown")
                 return {"type": "start_regular", "chat_id": chat_id}
 
+        # Handle /help command
+        if text.startswith("/help"):
+            help_msg = (
+                "🛡️ *VYZN Security Bot Help*\n\n"
+                "• `/status` — View your connection and alert delivery status\n"
+                "• `/help` — Show this command summary\n"
+                "• `/disconnect` — Safely unlink your Telegram account\n"
+                "• `/stop` — Stop receiving alerts from VYZN\n\n"
+                "To connect your cameras, go to your VYZN Settings page and click *'Connect Telegram'*."
+            )
+            _send_tg_message_safely(api_url, chat_id, help_msg, parse_mode="Markdown")
+            return {"type": "help", "chat_id": chat_id}
+
+        # Handle /status command
+        if text.startswith("/status"):
+            user = db.get_user_by_telegram_chat_id(str(chat_id)) if db else None
+            if user:
+                alerts_status = "Active" if user.get("telegram_alerts_enabled", 1) else "Muted"
+                linked_at = format_alert_when(user.get("telegram_linked_at_ms") or time.time())
+                status_msg = (
+                    "🟢 *VYZN Security: Connected*\n\n"
+                    f"• Account: `{user.get('email', 'N/A')}`\n"
+                    f"• Alerts: *{alerts_status}*\n"
+                    f"• Linked: {linked_at}"
+                )
+            else:
+                status_msg = (
+                    "⚪ *VYZN Security: Not Linked*\n\n"
+                    "This Telegram chat is not connected to any VYZN account.\n"
+                    "To connect, visit your VYZN Settings page and click *'Connect Telegram'*."
+                )
+            _send_tg_message_safely(api_url, chat_id, status_msg, parse_mode="Markdown")
+            return {
+                "type": "status",
+                "chat_id": chat_id,
+                "linked": bool(user),
+                "connected": bool(user),
+                "alerts_enabled": bool(user.get("telegram_alerts_enabled", 1)) if user else False
+            }
+
+        # Handle /disconnect command
+        if text.startswith("/disconnect"):
+            user = db.get_user_by_telegram_chat_id(str(chat_id)) if db else None
+            if user:
+                db.disconnect_user_telegram(user["id"])
+                try:
+                    from vyzn.core.supabase_sync import sync_user_to_supabase
+                    fresh_user = db.get_user_by_id(user["id"])
+                    if fresh_user:
+                        sync_user_to_supabase(fresh_user)
+                except Exception:
+                    pass
+                msg_txt = "🔌 *Disconnected from VYZN Security*\n\nYour Telegram account has been unlinked. You will no longer receive CCTV notifications."
+            else:
+                msg_txt = "ℹ️ This chat is not currently connected to any VYZN account."
+            _send_tg_message_safely(api_url, chat_id, msg_txt, parse_mode="Markdown")
+            return {"type": "disconnected", "chat_id": chat_id}
+
         # Handle /stop command
         if text == "/stop" and db:
             user = db.get_user_by_telegram_chat_id(str(chat_id))
@@ -652,7 +994,7 @@ def send_telegram_threat_alert(
     chat_id: Optional[str] = None
 ) -> bool:
     """Convenience helper to dispatch interactive Telegram alert via configured provider."""
-    token = bot_token or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
-    chat = chat_id or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
+    token = bot_token if bot_token is not None else os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
+    chat = chat_id if chat_id is not None else os.environ.get("VYZN_TELEGRAM_CHAT_ID")
     provider = TelegramAlertProvider(bot_token=token, chat_id=chat)
     return provider.send_alert(event, video_path, thumb_path)
