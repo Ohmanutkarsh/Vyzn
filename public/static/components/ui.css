@@ -475,22 +475,43 @@
 }
 
 .sidebar-brand {
-  padding: var(--space-4) var(--space-5);
+  padding: 18px 20px;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  min-height: 64px;
 }
 
 .brand-link {
   text-decoration: none;
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: 10px;
 }
 
 .brand-name {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text-1);
+  font-size: 28px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: uppercase;
+  background: linear-gradient(135deg, #ffffff 10%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+}
+
+.brand-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  box-shadow: 0 0 12px #38bdf8;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 .sidebar-nav {

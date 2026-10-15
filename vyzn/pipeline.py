@@ -309,6 +309,20 @@ class EdgePipeline:
                 continue
 
             camera_id, frame_time, frame, is_night_ir = item
+            try:
+                self._process_inference_frame(camera_id, frame_time, frame, is_night_ir)
+            except Exception as e:
+                logger.error(f"Inference error on {camera_id}: {e}", exc_info=True)
+            finally:
+                self.frame_queue.task_done()
+
+    def _process_inference_frame(
+        self,
+        camera_id: str,
+        frame_time: float,
+        frame: np.ndarray,
+        is_night_ir: bool
+    ):
 
             # ==========================================================================
             # STEP A: INDIAN DPDP ACT 2023 PRIVACY MASKING
@@ -535,8 +549,6 @@ class EdgePipeline:
             # 4. Finalize segment if completed
             if finalized_segment and not finalized_segment.is_discarded:
                 self._handle_finalized_segment(finalized_segment, cam_config)
-
-            self.frame_queue.task_done()
 
     # ==============================================================================
     # STEP 6: FINALIZING & SAVING THE RECORDED INCIDENT CLIP

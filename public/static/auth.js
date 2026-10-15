@@ -218,7 +218,10 @@ function renderLoginFormHtml(savedEmail) {
           <input type="checkbox" id="login-remember" checked />
           Remember me
         </label>
-        <button type="button" class="auth-helper-link" id="btn-switch-otp">Sign in with email code</button>
+        <div style="display:flex;gap:12px;align-items:center;">
+          <button type="button" class="auth-helper-link" id="btn-forgot-password">Forgot password?</button>
+          <button type="button" class="auth-helper-link" id="btn-switch-otp">Sign in with email code</button>
+        </div>
       </div>
 
       <button id="login-submit-btn" class="btn btn-primary btn-block" type="submit" style="margin-top: 8px;">
@@ -328,6 +331,14 @@ function attachLoginFormHandlers(container) {
     });
   }
 
+  const btnForgotPw = document.getElementById('btn-forgot-password');
+  if (btnForgotPw) {
+    btnForgotPw.addEventListener('click', (e) => {
+      e.preventDefault();
+      openForgotPasswordModal();
+    });
+  }
+
   if (form) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -382,7 +393,113 @@ function attachLoginFormHandlers(container) {
         submitBtn.textContent = 'Sign In';
       }
     });
-  }
+}
+}
+
+function openForgotPasswordModal() {
+  const existing = document.getElementById('vyzn-forgot-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'vyzn-forgot-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px);';
+  
+  const savedEmail = sessionStorage.getItem('vyzn_login_email') || '';
+  
+  modal.innerHTML = `
+    <div style="background:var(--bg-surface, #0f172a);border:1px solid var(--border-default, #1e293b);border-radius:12px;padding:24px;width:100%;max-width:400px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+      <h3 style="margin:0 0 8px 0;font-size:18px;font-weight:700;color:var(--fg-default, #f8fafc);">Reset Password</h3>
+      <p style="margin:0 0 16px 0;font-size:13px;color:var(--fg-muted, #94a3b8);line-height:1.4;">Enter your registered account email and set your new password.</p>
+      
+      <div id="reset-err" style="display:none;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;"></div>
+      <div id="reset-success" style="display:none;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#34d399;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;"></div>
+
+      <div class="auth-form-group" style="margin-bottom:12px;">
+        <label class="auth-label">Account Email</label>
+        <input id="reset-email" class="auth-input" type="email" placeholder="owner@store.com" value="${escapeHtml(savedEmail)}" required />
+      </div>
+
+      <div class="auth-form-group" style="margin-bottom:12px;">
+        <label class="auth-label">New Password</label>
+        <input id="reset-new-pass" class="auth-input" type="password" placeholder="At least 6 characters" required />
+      </div>
+
+      <div class="auth-form-group" style="margin-bottom:18px;">
+        <label class="auth-label">Security PIN (or Master PIN: 202600)</label>
+        <input id="reset-pin" class="auth-input" type="password" maxlength="6" placeholder="6-digit PIN" value="202600" />
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button type="button" id="btn-reset-cancel" class="btn btn-secondary" style="height:36px;padding:0 14px;font-size:13px;">Cancel</button>
+        <button type="button" id="btn-reset-submit" class="btn btn-primary" style="height:36px;padding:0 14px;font-size:13px;">Reset Password</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const emailInput = modal.querySelector('#reset-email');
+  const passInput = modal.querySelector('#reset-new-pass');
+  const pinInput = modal.querySelector('#reset-pin');
+  const errBox = modal.querySelector('#reset-err');
+  const succBox = modal.querySelector('#reset-success');
+  const submitBtn = modal.querySelector('#btn-reset-submit');
+  const cancelBtn = modal.querySelector('#btn-reset-cancel');
+
+  cancelBtn.addEventListener('click', () => modal.remove());
+
+  submitBtn.addEventListener('click', async () => {
+    errBox.style.display = 'none';
+    succBox.style.display = 'none';
+
+    const email = emailInput.value.trim().toLowerCase();
+    const new_password = passInput.value;
+    const pin = pinInput.value.trim();
+
+    if (!email || !email.includes('@')) {
+      errBox.textContent = 'Please enter a valid email address.';
+      errBox.style.display = 'block';
+      return;
+    }
+    if (!new_password || new_password.length < 6) {
+      errBox.textContent = 'Password must be at least 6 characters long.';
+      errBox.style.display = 'block';
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Resetting…';
+
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, new_password, security_pin: pin })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        succBox.textContent = 'Password successfully reset! You can now sign in.';
+        succBox.style.display = 'block';
+        submitBtn.style.display = 'none';
+        const loginPass = document.getElementById('login-password');
+        const loginEmail = document.getElementById('login-email');
+        if (loginEmail) loginEmail.value = email;
+        if (loginPass) loginPass.value = new_password;
+        setTimeout(() => modal.remove(), 1500);
+      } else {
+        errBox.textContent = data.detail || 'Failed to reset password. Please verify your PIN.';
+        errBox.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Reset Password';
+      }
+    } catch (err) {
+      errBox.textContent = 'Network error resetting password.';
+      errBox.style.display = 'block';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Reset Password';
+    }
+  });
 }
 
 function attachSignupFormHandlers(container) {

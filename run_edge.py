@@ -203,7 +203,19 @@ def main():
         logger.info(f"Cloud Observability linked: {args.cloud_url} (Site ID: {settings.site_id})")
 
     # 5.3 Select AI Detector Model (Real YOLOv8 neural network vs Fast Mock test detector)
-    detector = YOLOv8Detector() if args.use_yolo else MockDetector(fixed_confidence=0.88)
+    if args.use_yolo:
+        detector = YOLOv8Detector()
+    else:
+        has_real_cams = any(not str(c.rtsp_url).startswith("sim://") and not str(c.rtsp_url).startswith("test://") for c in settings.cameras)
+        if has_real_cams:
+            try:
+                detector = YOLOv8Detector()
+                logger.info("Real camera detected: using neural network YOLOv8Detector.")
+            except Exception as e:
+                logger.warning(f"Could not load YOLOv8, falling back to dynamic MockDetector: {e}")
+                detector = MockDetector(fixed_confidence=None)
+        else:
+            detector = MockDetector(fixed_confidence=None)
     pipeline = EdgePipeline(settings=settings, detector=detector, use_synthetic=True)
 
     # 5.4 Launch Web Dashboard (FastAPI + Uvicorn)

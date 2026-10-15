@@ -7,6 +7,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional
+import cv2
 import numpy as np
 import logging
 
@@ -132,9 +133,16 @@ class MockDetector(BaseDetector):
         else:
             gray = frame
 
-        # Threshold dark foreground objects
+        # 1. Dark foreground objects (synthetic test cards and high-contrast targets)
         _, thresh = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY_INV)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        # 2. If no dark contours found on live camera feed, check contrast against mean background
+        if not contours:
+            mean_val = float(np.mean(gray))
+            diff = cv2.absdiff(gray, np.full_like(gray, int(mean_val)))
+            _, thresh2 = cv2.threshold(diff, 28, 255, cv2.THRESH_BINARY)
+            contours, _ = cv2.findContours(thresh2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         detections: List[Detection] = []
         for cnt in contours:
@@ -144,17 +152,17 @@ class MockDetector(BaseDetector):
             height_ratio = ch / float(h)
 
             # Upright human silhouette check:
-            # - Vertical aspect ratio: 1.25 <= aspect_ratio <= 4.2
-            # - Substantial height: height_ratio >= 0.18
-            # - Substantial area: area_ratio >= 0.025
-            if 1.25 <= aspect_ratio <= 4.2 and height_ratio >= 0.18 and area_ratio >= 0.025:
+            # - Vertical aspect ratio: 1.2 <= aspect_ratio <= 4.2
+            # - Substantial height: height_ratio >= 0.15
+            # - Substantial area: area_ratio >= 0.015
+            if 1.2 <= aspect_ratio <= 4.2 and height_ratio >= 0.15 and area_ratio >= 0.015:
                 norm_box = [
                     max(0.0, x / float(w)),
                     max(0.0, y / float(h)),
                     min(1.0, (x + cw) / float(w)),
                     min(1.0, (y + ch) / float(h))
                 ]
-                conf = self.fixed_confidence if self.fixed_confidence is not None else round(min(0.95, max(0.68, 0.72 + (aspect_ratio - 1.25) * 0.07)), 2)
+                conf = self.fixed_confidence if self.fixed_confidence is not None else round(min(0.95, max(0.68, 0.72 + (aspect_ratio - 1.2) * 0.07)), 2)
                 detections.append(Detection(
                     box=norm_box,
                     confidence=conf,

@@ -1,7 +1,88 @@
 [
   {
-    "camera_id": "cam_camera_1_1791987627",
-    "name": "Camera 1",
+    "camera_id": "cam_phone_cam_1792084106",
+    "name": "phone cam",
+    "rtsp_url": "http://192.168.31.216:8080/video",
+    "enabled": true,
+    "location_id": "loc_primary",
+    "target_fps": 25.0,
+    "capture_fps": 15.0,
+    "ai_inference_fps": 15.0,
+    "downscale_width": 854,
+    "downscale_height": 480,
+    "is_night_ir": false,
+    "owner_email": "dirtbike000000@gmail.com",
+    "business_hours": {
+      "enabled": true,
+      "start_hour": 9,
+      "start_minute": 0,
+      "end_hour": 21,
+      "end_minute": 0
+    },
+    "restricted_zones": [
+      {
+        "name": "Area 1",
+        "points": [
+          [
+            0.2407,
+            0.2347
+          ],
+          [
+            0.7039,
+            0.2263
+          ],
+          [
+            0.7405,
+            0.8585
+          ],
+          [
+            0.1618,
+            0.7147
+          ]
+        ]
+      }
+    ],
+    "privacy_zones": [],
+    "watch_areas": [
+      {
+        "id": "area_cam_phone_cam_1792084106_1",
+        "camera_id": "cam_phone_cam_1792084106",
+        "name": "Area 1",
+        "polygon": [
+          [
+            0.2407,
+            0.2347
+          ],
+          [
+            0.7039,
+            0.2263
+          ],
+          [
+            0.7405,
+            0.8585
+          ],
+          [
+            0.1618,
+            0.7147
+          ]
+        ],
+        "response": "review",
+        "min_stay_seconds": 0,
+        "schedule": "always",
+        "version": 1
+      }
+    ],
+    "osd_exclude_polygon": null,
+    "start_motion_threshold": null,
+    "continue_motion_threshold": null,
+    "pre_roll_sec": null,
+    "post_roll_sec": null,
+    "merge_gap_sec": null,
+    "max_clip_duration_sec": null
+  },
+  {
+    "camera_id": "cam_webcam_1792084160",
+    "name": "webcam",
     "rtsp_url": "0",
     "enabled": true,
     "location_id": "loc_primary",
@@ -11,7 +92,7 @@
     "downscale_width": 854,
     "downscale_height": 480,
     "is_night_ir": false,
-    "owner_email": "tapise.utkarsh@gmail.com",
+    "owner_email": "dirtbike000000@gmail.com",
     "business_hours": {
       "enabled": true,
       "start_hour": 9,
@@ -19,9 +100,59 @@
       "end_hour": 21,
       "end_minute": 0
     },
-    "restricted_zones": [],
+    "restricted_zones": [
+      {
+        "name": "Area 1",
+        "points": [
+          [
+            0.5843,
+            0.2944
+          ],
+          [
+            0.7343,
+            0.2944
+          ],
+          [
+            0.7343,
+            0.4244
+          ],
+          [
+            0.5843,
+            0.4244
+          ]
+        ]
+      }
+    ],
     "privacy_zones": [],
-    "watch_areas": [],
+    "watch_areas": [
+      {
+        "id": "area_cam_webcam_1792084160_1",
+        "camera_id": "cam_webcam_1792084160",
+        "name": "Area 1",
+        "polygon": [
+          [
+            0.5843,
+            0.2944
+          ],
+          [
+            0.7343,
+            0.2944
+          ],
+          [
+            0.7343,
+            0.4244
+          ],
+          [
+            0.5843,
+            0.4244
+          ]
+        ],
+        "response": "review",
+        "min_stay_seconds": 0,
+        "schedule": "always",
+        "version": 1
+      }
+    ],
     "osd_exclude_polygon": null,
     "start_motion_threshold": null,
     "continue_motion_threshold": null,

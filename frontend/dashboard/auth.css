@@ -26,14 +26,17 @@
 }
 
 .auth-wordmark {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
   color: var(--fg-default);
   text-decoration: none;
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  background: linear-gradient(135deg, #ffffff 0%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .theme-switch-btn {

@@ -1031,7 +1031,15 @@ def update_snapshot(camera_id: str):
 @app.get("/api/stream")
 @app.get("/api/wall/stream")
 def stream_camera_visual(camera_id: str = "cam_gate"):
-    label = camera_id.replace("cam_", "").replace("_", " ").upper()
+    cam_name = None
+    for cams in CAMERAS_BY_USER.values():
+        for c in cams:
+            if c.get("id") == camera_id or c.get("camera_id") == camera_id:
+                cam_name = c.get("name")
+                break
+        if cam_name:
+            break
+    label = (cam_name or camera_id.replace("cam_", "").replace("_", " ")).upper()
     cur_time = time.strftime("%Y-%m-%d %H:%M:%S")
     svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
       <defs>

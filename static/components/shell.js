@@ -39,7 +39,7 @@ function renderSidebar(activePage) {
     <aside class="shell-sidebar">
       <div class="sidebar-brand">
         <a href="/overview" class="brand-link">
-          <span class="brand-name">VYZN</span>
+          <span class="brand-name"><span class="brand-dot"></span>VYZN</span>
         </a>
       </div>
       <nav class="sidebar-nav" aria-label="Main Navigation">
@@ -68,7 +68,7 @@ function renderHeader(activePage) {
       <div class="header-left">
         <div class="mobile-brand">
           <a href="/overview" class="brand-link">
-            <span class="brand-name">VYZN</span>
+            <span class="brand-name"><span class="brand-dot"></span>VYZN</span>
           </a>
         </div>
         <h1 class="header-page-title" id="page-title-text"></h1>

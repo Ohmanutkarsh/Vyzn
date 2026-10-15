@@ -126,7 +126,12 @@ def save_locations(locs: List[Dict[str, Any]]) -> None:
 
 def save_cameras_config(settings: EdgeSettings) -> None:
     try:
-        cfg_file = Path("./config/cameras.json")
+        if getattr(settings, "cameras_config_file", None):
+            cfg_file = Path(settings.cameras_config_file)
+        elif settings.data_dir and ("test" in str(settings.data_dir).lower() or "temp" in str(settings.data_dir).lower() or "pytest" in str(settings.data_dir).lower()):
+            cfg_file = Path(settings.data_dir) / "cameras.json"
+        else:
+            cfg_file = Path("./config/cameras.json")
         cfg_file.parent.mkdir(parents=True, exist_ok=True)
         with open(cfg_file, "w", encoding="utf-8") as f:
             json.dump([c.dict() for c in settings.cameras], f, indent=2)
@@ -1227,29 +1232,48 @@ class ZoneCreateRequest(BaseModel):
 
 @app.get("/api/cameras/{camera_id}/snapshot.jpg")
 def get_camera_snapshot(camera_id: str):
-    """Returns an uncompressed JPEG still frame for visual zone polygon drawing."""
+    """Returns a live JPEG frame for camera tiles and watch area editor."""
+    from fastapi.responses import Response
+
+    if _pipeline_instance and hasattr(_pipeline_instance, "get_camera_live_jpeg"):
+        jpeg_bytes = _pipeline_instance.get_camera_live_jpeg(camera_id, quality=85)
+        if jpeg_bytes:
+            return Response(content=jpeg_bytes, media_type="image/jpeg")
+
     frame = None
     if _pipeline_instance and camera_id in _pipeline_instance.ring_buffers:
         buf = _pipeline_instance.ring_buffers[camera_id]
-        if buf:
+        if buf and len(buf) > 0:
             frame = buf[-1]
 
-    if frame is None:
-        frame = np.full((360, 640, 3), (30, 30, 35), dtype=np.uint8)
-        cam_display = "Camera 1" if "1" in camera_id or "cam_0" in camera_id or "webcam" in camera_id else camera_id
-        cv2.putText(
-            frame,
-            f"Live Feed: {cam_display}",
-            (190, 180),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (200, 210, 220),
-            2
-        )
+    if frame is not None:
+        ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        if ret:
+            return Response(content=jpeg.tobytes(), media_type="image/jpeg")
 
-    ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-    from fastapi.responses import Response
-    return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+    # If stream is offline or connecting, render card with accurate camera name and real connection status
+    settings = get_settings()
+    cam = next((c for c in settings.cameras if c.camera_id == camera_id), None)
+    cam_name = cam.name if cam else camera_id
+    status_str = "CONNECTING"
+    err_str = ""
+
+    if _pipeline_instance and hasattr(_pipeline_instance, "capture_threads"):
+        for t in _pipeline_instance.capture_threads:
+            if getattr(t, "config", None) and t.config.camera_id == camera_id:
+                status_str = getattr(t, "status", "offline").upper()
+                err_str = getattr(t, "last_error", "")
+                break
+
+    card = np.full((360, 640, 3), (20, 24, 33), dtype=np.uint8)
+    color = (52, 211, 153) if status_str == "ONLINE" else ((245, 158, 11) if status_str == "CONNECTING" else (239, 68, 68))
+    cv2.putText(card, cam_name, (40, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 2)
+    cv2.putText(card, f"• {status_str}", (40, 195), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
+    if err_str:
+        cv2.putText(card, err_str[:60], (40, 235), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (148, 163, 184), 1)
+
+    ret, jpeg = cv2.imencode(".jpg", card, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return Response(content=jpeg.tobytes() if ret else b"", media_type="image/jpeg")
 
 
 @app.get("/api/cameras/{camera_id}/stream")
@@ -1998,7 +2022,7 @@ def list_cameras(
         # Strict user isolation: show only cameras owned by this specific user
         cams = [c for c in cams if getattr(c, "owner_email", None) == user_email]
     elif not user:
-        cams = []
+        cams = [c for c in cams if not getattr(c, "owner_email", None)]
 
     # Auto-start capture stream for any configured camera not yet running
     if _pipeline_instance and hasattr(_pipeline_instance, "capture_threads"):

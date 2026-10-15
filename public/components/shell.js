@@ -108,7 +108,7 @@ function renderHeader(activePage, user = {}) {
       <div class="header-left">
         <div class="mobile-brand">
           <a href="/overview" class="brand-link">
-            <span class="brand-name">VYZN</span>
+            <span class="brand-name"><span class="brand-dot"></span>VYZN</span>
           </a>
         </div>
         <h1 class="header-page-title" id="page-title-text"></h1>
