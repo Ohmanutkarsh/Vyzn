@@ -67,7 +67,7 @@ class YOLOv8Detector(BaseDetector):
         28: ("suitcase", "carried_item"),
     }
 
-    def __init__(self, model_name: str = "yolov8n.pt", conf_thresh: float = 0.20):
+    def __init__(self, model_name: str = "yolov8n.pt", conf_thresh: float = 0.35):
         from ultralytics import YOLO
         logger.info(f"Loading YOLO model: {model_name}")
         self.model = YOLO(model_name)
@@ -75,8 +75,8 @@ class YOLOv8Detector(BaseDetector):
 
     def detect(self, frame: np.ndarray, is_night_ir: bool = False) -> List[Detection]:
         h, w = frame.shape[:2]
-        # Run raw model with minimum continue threshold (0.20) to capture candidates
-        min_thresh = 0.25 if is_night_ir else 0.20
+        # Run raw model with minimum confidence threshold (0.35) to eliminate fleeting noise
+        min_thresh = max(self.conf_thresh, 0.35 if not is_night_ir else 0.30)
         results = self.model(frame, conf=min_thresh, verbose=False)
         detections: List[Detection] = []
 
@@ -155,7 +155,9 @@ class MockDetector(BaseDetector):
             # - Vertical aspect ratio: 1.2 <= aspect_ratio <= 4.2
             # - Substantial height: height_ratio >= 0.15
             # - Substantial area: area_ratio >= 0.015
-            if 1.2 <= aspect_ratio <= 4.2 and height_ratio >= 0.15 and area_ratio >= 0.015:
+            # - Reject ceiling fixtures (ceiling fans at y/h < 0.25 and (y+ch)/h < 0.48)
+            is_ceiling_fixture = (y / float(h) < 0.25 and (y + ch) / float(h) < 0.48)
+            if 1.2 <= aspect_ratio <= 4.2 and height_ratio >= 0.15 and area_ratio >= 0.015 and not is_ceiling_fixture:
                 norm_box = [
                     max(0.0, x / float(w)),
                     max(0.0, y / float(h)),

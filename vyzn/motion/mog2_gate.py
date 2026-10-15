@@ -258,18 +258,21 @@ class MOG2MotionGate:
         else:
             self._motion_centroid_history[camera_id].clear()
 
-        # Check if centroid has zero spatial translation across 15+ frames
+        # Check if centroid has zero spatial translation across 12+ frames
         hist = self._motion_centroid_history[camera_id]
-        if len(hist) >= 15:
+        if len(hist) >= 12:
             std_x = float(np.std([p[0] for p in hist]))
             std_y = float(np.std([p[1] for p in hist]))
+            mean_y = float(np.mean([p[1] for p in hist]))
             spatial_spread = math.hypot(std_x, std_y)
             has_tracked_person = bool(tracked_boxes and len(tracked_boxes) > 0)
-            # If motion is stationary periodic oscillation and no confirmed tracked person is present
-            if spatial_spread < 0.018 and not has_tracked_person:
+            # If motion is stationary periodic oscillation (ceiling fan or flutter) and no confirmed tracked person is present
+            is_ceiling_fan = (spatial_spread < 0.040 and mean_y < 0.40)
+            is_localized_periodic = (spatial_spread < 0.025)
+            if (is_ceiling_fan or is_localized_periodic) and not has_tracked_person:
                 self._periodic_motion_detected[camera_id] = True
                 # Attenuate the motion ratio so a spinning fan doesn't keep the pipeline recording
-                instant_ratio = instant_ratio * 0.15
+                instant_ratio = instant_ratio * 0.10
             else:
                 self._periodic_motion_detected[camera_id] = False
         else:

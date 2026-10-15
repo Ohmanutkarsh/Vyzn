@@ -283,7 +283,7 @@ def resolve_authorized_chat_for_event(
     if owner_email and hasattr(db, "get_user_by_email"):
         user = db.get_user_by_email(owner_email)
         if user:
-            if user.get("telegram_status") != "linked":
+            if user.get("telegram_status") not in ("linked", "connected"):
                 logger.info(f"[AUTH ROUTING] User {owner_email} Telegram not linked")
                 return None
             if not user.get("telegram_alerts_enabled", 1):
@@ -302,7 +302,7 @@ def resolve_authorized_chat_for_event(
                 r = requests.get(f"{base_url}/rest/v1/vyzn_users?email=eq.{owner_email.lower().strip()}&select=telegram_status,telegram_chat_id,telegram_alerts_enabled", headers=headers, timeout=3.0)
                 if r.status_code == 200 and r.json():
                     u_data = r.json()[0]
-                    if u_data.get("telegram_status") == "linked" and u_data.get("telegram_alerts_enabled", True) and u_data.get("telegram_chat_id"):
+                    if u_data.get("telegram_status") in ("linked", "connected") and u_data.get("telegram_alerts_enabled", True) and u_data.get("telegram_chat_id"):
                         return str(u_data["telegram_chat_id"])
         except Exception:
             pass
@@ -312,7 +312,7 @@ def resolve_authorized_chat_for_event(
         try:
             users = db.get_all_users()
             for u in users:
-                if u.get("telegram_status") == "linked" and u.get("telegram_alerts_enabled", 1) and u.get("telegram_chat_id"):
+                if u.get("telegram_status") in ("linked", "connected") and u.get("telegram_alerts_enabled", 1) and u.get("telegram_chat_id"):
                     return str(u["telegram_chat_id"])
         except Exception:
             pass
@@ -448,7 +448,7 @@ class TelegramAlertProvider(AlertProvider):
             if owner_email and hasattr(self.db, "get_user_by_email"):
                 user = self.db.get_user_by_email(owner_email)
                 if user:
-                    if user.get("telegram_status") != "linked" or not user.get("telegram_alerts_enabled", 1):
+                    if user.get("telegram_status") not in ("linked", "connected") or not user.get("telegram_alerts_enabled", 1):
                         logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for user {owner_email}")
                         return False
                     target_chat_id = user.get("telegram_chat_id")
@@ -459,7 +459,7 @@ class TelegramAlertProvider(AlertProvider):
         # Verify chat is not muted if chat_id was passed explicitly or resolved
         if self.db and target_chat_id and hasattr(self.db, "get_user_by_telegram_chat_id"):
             u = self.db.get_user_by_telegram_chat_id(str(target_chat_id))
-            if u and (u.get("telegram_status") != "linked" or not u.get("telegram_alerts_enabled", 1)):
+            if u and (u.get("telegram_status") not in ("linked", "connected") or not u.get("telegram_alerts_enabled", 1)):
                 logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for chat {target_chat_id}")
         if not target_chat_id:
             env_chat = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")

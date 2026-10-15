@@ -95,7 +95,8 @@ class EdgePipeline:
         alert_provider = TelegramAlertProvider(
             bot_token=bot_token,
             chat_id=self.settings.telegram_chat_id,
-            db=self.db
+            db=self.db,
+            settings=self.settings
         )
         self.dispatcher = AlertDispatcher(provider=alert_provider, cooldown_sec=45.0)
 
@@ -528,10 +529,9 @@ class EdgePipeline:
             # If the score hits 70+ (ALERT), do NOT wait for the clip to finish recording!
             # Send an instant screenshot alert to the user's Telegram bot immediately.
             # ==========================================================================
-            if sm.current_event_id and sm.state in (ClipState.RECORDING, ClipState.HANGOVER):
+            if sm.current_event_id and sm.is_recording:
                 root_id = sm.parent_event_id or sm.current_event_id
                 if should_alert_live and root_id not in self.dispatched_alert_events:
-                    self.dispatched_alert_events.add(root_id)
                     self._dispatch_immediate_alert(
                         camera_id=camera_id,
                         event_id=sm.current_event_id,
@@ -812,12 +812,14 @@ class EdgePipeline:
         try:
             # Write a provisional clip from what we have so far
             if len(frames) >= 4:
-                clip_path, thumb_path = self.clip_writer.write_clip_from_frames(
+                write_result = self.clip_writer.write_clip_from_frames(
                     camera_id=camera_id,
                     event_group_id=event_id + "_live",
                     frames=frames[-min(len(frames), 80):],  # Use last 20s max
                     fps=4.0
                 )
+                clip_path = write_result.clip_path
+                thumb_path = write_result.poster_path or write_result.thumb_path
             else:
                 clip_path, thumb_path = None, None
 
@@ -839,7 +841,7 @@ class EdgePipeline:
             import json
             start_time = self.active_event_start_times.get(camera_id,
                          datetime.now(timezone.utc).isoformat())
-            cam_cfg = self.configs.get(camera_id)
+            cam_cfg = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
             owner_email = getattr(cam_cfg, "owner_email", None) if cam_cfg else None
 
             provisional_record = EventRecord(
@@ -862,10 +864,12 @@ class EdgePipeline:
                 metadata_json=json.dumps({"live_alert": True, "pre_roll_sec": 10.0}),
                 owner_email=owner_email
             )
-            self.dispatcher.dispatch(provisional_record, clip_path, thumb_path)
+            dispatched = self.dispatcher.dispatch(provisional_record, clip_path, thumb_path)
+            if dispatched:
+                self.dispatched_alert_events.add(event_id)
             logger.info(
                 f"[IMMEDIATE ALERT] Dispatched live alert for {camera_id} "
-                f"event {event_id} with score {score} ({len(frames)} frames)"
+                f"event {event_id} with score {score} ({len(frames)} frames, ok={dispatched})"
             )
         except Exception as e:
             logger.error(f"Immediate alert dispatch failed for {camera_id}: {e}")

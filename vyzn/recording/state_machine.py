@@ -362,6 +362,11 @@ class ClipStateMachine:
         if self.current_part_index > 0 and active_dur < self.score_interval_seconds:
             is_discarded = True
 
+        # Trim ticks past clip_end_pts so no clip ends with dead ticks
+        trimmed_ticks = [t for t in self.active_ticks if t.tick_start_pts <= clip_end_pts]
+        if not trimmed_ticks and self.active_ticks:
+            trimmed_ticks = list(self.active_ticks)
+
         segment = FinalizedClipSegment(
             event_group_id=self.current_event_id or f"ev_{self.camera_id}_{int(self.clip_start_pts)}",
             camera_id=self.camera_id,
@@ -384,7 +389,7 @@ class ClipStateMachine:
             tier=tier,
             severity_label=sev,
             score_breakdown=self.peak_breakdown,
-            ticks=list(self.active_ticks),
+            ticks=trimmed_ticks,
             peak_frame_idx=peak_idx,
             # Explicitly check for None instead of bool coercion to safely handle numpy image arrays
             peak_frame=self.peak_frame if self.peak_frame is not None else (trimmed_frames[peak_idx] if trimmed_frames else None)
@@ -520,16 +525,44 @@ class ClipStateMachine:
 
         # Rule: A stationary person or tracked object must never be ignored (score floor >= 35),
         # but fleeting unconfirmed noise (like hair flutter or ceiling fan glitches) must NOT trigger the floor.
-        has_confirmed_person = any(
-            getattr(t, "label", "").lower() == "person" and getattr(t, "hits", 1) >= 2 and getattr(t, "confidence", 0.0) >= 0.40
-            for t in all_tracks
-        ) or any(
-            getattr(d, "label", "").lower() == "person" and getattr(d, "confidence", 0.0) >= 0.50
-            for d in all_dets
-        )
+        def _is_valid_person_box(box):
+            if not box or len(box) < 4:
+                return True
+            # Reject ceiling fixtures (ceiling fans at y < 0.25 and y+ch < 0.48)
+            return not (box[1] < 0.25 and box[3] < 0.48)
+
+        person_tracks = [
+            t for t in all_tracks
+            if getattr(t, "label", "").lower() == "person"
+            and getattr(t, "hits", 1) >= 2
+            and getattr(t, "confidence", 0.0) >= 0.40
+            and _is_valid_person_box(getattr(t, "box", None))
+        ]
+        person_dets = [
+            d for d in all_dets
+            if getattr(d, "label", "").lower() == "person"
+            and getattr(d, "confidence", 0.0) >= 0.45
+            and _is_valid_person_box(getattr(d, "box", None))
+        ]
+        has_confirmed_person = bool(person_tracks) or len(person_dets) >= 2 or (len(person_dets) >= 1 and any(getattr(d, "confidence", 0.0) >= 0.65 for d in person_dets))
+
+        # Confirmed vehicles / animals
+        vehicle_tracks = [
+            t for t in all_tracks
+            if getattr(t, "label", "").lower() in ("vehicle", "car", "motorcycle", "bus", "truck", "dog", "cat", "animal")
+            and getattr(t, "hits", 1) >= 2
+            and getattr(t, "confidence", 0.0) >= 0.40
+        ]
+        vehicle_dets = [
+            d for d in all_dets
+            if getattr(d, "label", "").lower() in ("vehicle", "car", "motorcycle", "bus", "truck", "dog", "cat", "animal")
+            and getattr(d, "confidence", 0.0) >= 0.45
+        ]
+        has_confirmed_target = has_confirmed_person or bool(vehicle_tracks) or bool(vehicle_dets)
+
         if has_confirmed_person:
             peak_score = max(peak_score, 35.0)
-        elif not target_in_tick:
+        elif not has_confirmed_target:
             # In simple terms: if the camera only sees background motion (like a spinning fan or hair moving)
             # with NO confirmed person or vehicle, cap the score at 20 (strictly below the active threshold of 30).
             # This ensures fan motion never starts a recording, and allows existing clips to close peacefully.

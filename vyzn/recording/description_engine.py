@@ -104,6 +104,9 @@ class ClipDescriptionEngine:
         class_detections: Dict[str, List[float]] = {}
         unique_tracks_by_class: Dict[str, set] = {}
         max_simultaneous_by_class: Dict[str, int] = {}
+        raw_max_simultaneous: Dict[str, int] = {}
+        multi_frame_counts: Dict[str, int] = {}
+        simultaneous_track_frames: int = 0
         first_seen_by_class: Dict[str, float] = {}
         last_seen_by_class: Dict[str, float] = {}
 
@@ -131,10 +134,12 @@ class ClipDescriptionEngine:
             # Current frame counts per class
             cur_class_counts: Dict[str, int] = {}
 
-            # Detections
+            # Detections (fleeting noise below 0.40 is excluded from forensic class timelines)
             for d in getattr(meta, "detections", []):
                 lbl = getattr(d, "label", "unclassified")
                 conf = getattr(d, "confidence", 0.0)
+                if conf < 0.40:
+                    continue
                 class_detections.setdefault(lbl, []).append(conf)
                 cur_class_counts[lbl] = cur_class_counts.get(lbl, 0) + 1
                 if lbl not in first_seen_by_class:
@@ -142,11 +147,16 @@ class ClipDescriptionEngine:
                 last_seen_by_class[lbl] = t_offset
 
             for lbl, count in cur_class_counts.items():
-                if count > max_simultaneous_by_class.get(lbl, 0):
-                    max_simultaneous_by_class[lbl] = count
+                if count >= 2:
+                    multi_frame_counts[lbl] = multi_frame_counts.get(lbl, 0) + 1
+                if count > raw_max_simultaneous.get(lbl, 0):
+                    raw_max_simultaneous[lbl] = count
 
             # Process Tracks
             tracks_in_frame = getattr(meta, "active_tracks", [])
+            p_tracks_in_frame = [t for t in tracks_in_frame if getattr(t, "label", "") == "person" and getattr(t, "hits", 1) >= 2]
+            if len(p_tracks_in_frame) >= 2:
+                simultaneous_track_frames += 1
             for trk in tracks_in_frame:
                 tid = getattr(trk, "track_id", -1)
                 lbl = getattr(trk, "label", "unclassified")
@@ -239,6 +249,17 @@ class ClipDescriptionEngine:
                         "confidence": 0.85
                     })
             prev_counts = dict(cur_class_counts)
+
+        # Multi-person presence requires sustained simultaneous presence across >= 3 frames
+        # or >= 2 active confirmed tracks, NEVER a single-frame detection artifact
+        for lbl, count in raw_max_simultaneous.items():
+            if count >= 2:
+                if multi_frame_counts.get(lbl, 0) >= 3 or (lbl == "person" and simultaneous_track_frames >= 2):
+                    max_simultaneous_by_class[lbl] = count
+                else:
+                    max_simultaneous_by_class[lbl] = 1
+            else:
+                max_simultaneous_by_class[lbl] = count
 
         # 2. Add Motion Start and Motion Peak to timeline
         trigger_offset = round(max(0.0, trigger_pts - start_pts), 1)
@@ -609,14 +630,14 @@ class ClipDescriptionEngine:
             for m in frame_metas:
                 t_off = round(max(0.0, getattr(m, "pts", start_pts) - start_pts), 1)
 
-                p_tracks = [t for t in getattr(m, "active_tracks", []) if getattr(t, "label", "") == "person"]
-                p_dets = [d for d in getattr(m, "detections", []) if getattr(d, "label", "") == "person"]
+                p_tracks = [t for t in getattr(m, "active_tracks", []) if getattr(t, "label", "") == "person" and getattr(t, "hits", 1) >= 2 and getattr(t, "confidence", 0.0) >= 0.40]
+                p_dets = [d for d in getattr(m, "detections", []) if getattr(d, "label", "") == "person" and getattr(d, "confidence", 0.0) >= 0.45]
 
                 if p_tracks or p_dets:
                     is_stat = any(getattr(t, "is_stationary", False) for t in p_tracks)
                     trk = p_tracks[0] if p_tracks else None
                     cx, cy = trk.centroid if trk and hasattr(trk, "centroid") else (0.5, 0.5)
-                    box = trk.box if trk else (p_dets[0].box if p_dets else [0.3, 0.2, 0.7, 0.8])
+                    box = getattr(trk, "box", None) if trk else (getattr(p_dets[0], "box", [0.3, 0.2, 0.7, 0.8]) if p_dets else [0.3, 0.2, 0.7, 0.8])
                     loc = cls._resolve_location(cx, cy, box, watch_areas, camera_name)
                     st = "person_stationary" if is_stat else "person_moving"
                     frame_states.append((t_off, st, loc, False))

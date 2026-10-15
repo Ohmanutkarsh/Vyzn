@@ -434,6 +434,8 @@ def test_continuous_fan_motion_allows_active_clip_to_close():
     pts = 0.0
     class MockTrack:
         label = "person"
+        confidence = 0.85
+        hits = 5
         box = [0.1, 0.1, 0.3, 0.7]
 
     for frame_i in range(24):  # 6 seconds @ 4fps
@@ -473,7 +475,13 @@ def test_continuous_fan_motion_allows_active_clip_to_close():
     clip = clips[0]
     assert clip.highest_score >= 60
 
-    # 2. State returned to IDLE (did not keep recording forever)
+    # 2. Dead footage was trimmed back: clip duration must reflect ONLY active period + 10s pre/post roll (<= 40s), NOT 240s!
+    clip_dur = clip.end_pts - clip.start_pts
+    assert clip_dur <= 40.0, f"Clip duration {clip_dur}s exceeds active window + pre/post-roll!"
+    assert len(clip.frames) <= 160, f"Clip frames {len(clip.frames)} contains dead footage!"
+    assert len(clip.ticks) <= 12, f"Clip ticks {len(clip.ticks)} contains dead quiet ticks!"
+
+    # 3. State returned to IDLE (did not keep recording forever)
     assert fsm.state == ClipState.IDLE
 
 
@@ -511,3 +519,106 @@ def test_hair_motion_suppressed():
     # State machine must remain IDLE and generate zero false clips
     assert fsm.state == ClipState.IDLE
     assert len(clips) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test (l): Transient 1-frame detection jitter does not hallucinate multiple people
+# ---------------------------------------------------------------------------
+def test_transient_jitter_does_not_hallucinate_multiple_people():
+    from datetime import datetime, timezone
+    from vyzn.recording.description_engine import ClipDescriptionEngine
+    from vyzn.recording.state_machine import FrameMetadata
+
+    class MockDet:
+        def __init__(self, lbl, conf):
+            self.label = lbl
+            self.confidence = conf
+
+    # Build 20 frames: single person in all frames, except frame 5 has a 1-frame false detection artifact
+    metas = []
+    for i in range(20):
+        t = i * 0.25
+        if i == 5:
+            dets = [MockDet("person", 0.85), MockDet("person", 0.42)]  # 1-frame transient jitter
+        else:
+            dets = [MockDet("person", 0.85)]
+        metas.append(FrameMetadata(
+            pts=t,
+            motion_score=0.10,
+            detections=dets,
+            active_tracks=[],
+            has_motion=True,
+            has_detection=True,
+            has_track=False,
+            is_activity=True
+        ))
+
+    analysis = ClipDescriptionEngine.generate_analysis(
+        camera_id="cam_phone",
+        camera_name="phone cam",
+        start_pts=0.0,
+        end_pts=5.0,
+        trigger_pts=0.0,
+        start_wall_dt=datetime(2026, 10, 15, 12, 0, 0, tzinfo=timezone.utc),
+        frame_metas=metas
+    )
+
+    # Must NOT be classified as "multiple_people"
+    assert analysis["event_type"] == "person_activity", f"Expected person_activity, got {analysis['event_type']}"
+    assert "Two or more individuals" not in analysis["summary"]
+    assert "Multiple people" not in analysis["title"]
+    assert analysis["objects"]["person"]["max_simultaneous"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Test (m): Fan motion in second half of clip does not hallucinate person moving intervals
+# ---------------------------------------------------------------------------
+def test_fan_motion_does_not_hallucinate_person_moving_intervals():
+    from datetime import datetime, timezone
+    from vyzn.recording.description_engine import ClipDescriptionEngine
+    from vyzn.recording.state_machine import FrameMetadata
+
+    class MockDet:
+        def __init__(self, lbl, conf):
+            self.label = lbl
+            self.confidence = conf
+
+    # 40 frames total (10 seconds):
+    # Frames 0..19 (0..5s): real person
+    # Frames 20..39 (5..10s): only spinning fan (motion_score=0.8, no person detections)
+    metas = []
+    for i in range(40):
+        t = i * 0.25
+        if i < 20:
+            dets = [MockDet("person", 0.85)]
+            m_score = 0.15
+        else:
+            dets = []  # No person, only fan spinning
+            m_score = 0.80
+        metas.append(FrameMetadata(
+            pts=t,
+            motion_score=m_score,
+            detections=dets,
+            active_tracks=[],
+            has_motion=True,
+            has_detection=(i < 20),
+            has_track=False,
+            is_activity=True
+        ))
+
+    analysis = ClipDescriptionEngine.generate_analysis(
+        camera_id="cam_phone",
+        camera_name="phone cam",
+        start_pts=0.0,
+        end_pts=10.0,
+        trigger_pts=0.0,
+        start_wall_dt=datetime(2026, 10, 15, 12, 0, 0, tzinfo=timezone.utc),
+        frame_metas=metas
+    )
+
+    intervals = analysis["timeline_intervals"]
+    # Check the intervals covering 05s..10s: MUST NOT claim person active and moving
+    for inv in intervals:
+        if inv["start_sec"] >= 5.0:
+            assert inv["event"] != "person_moving", f"Interval {inv['time_str']} falsely claimed person_moving!"
+            assert "Subject (person) active" not in inv["description"]
