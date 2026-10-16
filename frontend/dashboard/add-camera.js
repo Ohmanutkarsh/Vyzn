@@ -214,14 +214,46 @@ function attachStep2Events() {
     });
   }
 
-  // Webcam button
-  const btnWebcam = document.getElementById('btn-use-webcam');
-  if (btnWebcam) {
-    btnWebcam.addEventListener('click', () => {
-      testedStreamUrl = '0';
-      runConnectionTest({ source_type: 'webcam', rtsp_url: '0' });
-    });
+  // Tab toggle between Webcam and Phone camera in Path C
+  let phoneSubChoice = 'webcam';
+  const tabWebcam = document.getElementById('tab-opt-webcam');
+  const tabPhone = document.getElementById('tab-opt-phone');
+  const subWebcam = document.getElementById('subpath-webcam');
+  const subPhone = document.getElementById('subpath-phone');
+
+  function setPhoneSubTab(mode) {
+    phoneSubChoice = mode;
+    if (mode === 'webcam') {
+      if (tabWebcam) {
+        tabWebcam.style.background = '#3b82f6';
+        tabWebcam.style.color = '#ffffff';
+        tabWebcam.classList.add('is-active');
+      }
+      if (tabPhone) {
+        tabPhone.style.background = 'transparent';
+        tabPhone.style.color = '#a1a1aa';
+        tabPhone.classList.remove('is-active');
+      }
+      if (subWebcam) subWebcam.style.display = 'block';
+      if (subPhone) subPhone.style.display = 'none';
+    } else {
+      if (tabPhone) {
+        tabPhone.style.background = '#3b82f6';
+        tabPhone.style.color = '#ffffff';
+        tabPhone.classList.add('is-active');
+      }
+      if (tabWebcam) {
+        tabWebcam.style.background = 'transparent';
+        tabWebcam.style.color = '#a1a1aa';
+        tabWebcam.classList.remove('is-active');
+      }
+      if (subPhone) subPhone.style.display = 'block';
+      if (subWebcam) subWebcam.style.display = 'none';
+    }
   }
+
+  if (tabWebcam) tabWebcam.addEventListener('click', () => setPhoneSubTab('webcam'));
+  if (tabPhone) tabPhone.addEventListener('click', () => setPhoneSubTab('phone'));
 
   // Test Connection Button
   const btnTest = document.getElementById('btn-test-connection');
@@ -243,11 +275,26 @@ function attachStep2Events() {
             source_type: 'ip'
           };
         }
+        runConnectionTest(payload);
       } else if (currentChoice === 'phone') {
-        const phoneUrl = document.getElementById('phone-stream-url')?.value.trim();
-        payload = { rtsp_url: phoneUrl || 'http://192.168.1.15:8080/video', source_type: 'phone' };
+        if (phoneSubChoice === 'webcam') {
+          testedStreamUrl = '0';
+          runConnectionTest({ source_type: 'webcam', rtsp_url: '0' });
+        } else {
+          const phoneUrl = document.getElementById('phone-stream-url')?.value.trim();
+          if (!phoneUrl) {
+            displayTestError(
+              'Please enter your phone stream address.',
+              'Open IP Webcam on your phone, tap "Start server", and enter the address shown (e.g. http://192.168.1.50:8080/video).'
+            );
+            return;
+          }
+          payload = { rtsp_url: phoneUrl, source_type: 'phone' };
+          runConnectionTest(payload);
+        }
+      } else {
+        runConnectionTest({ source_type: 'ip', rtsp_url: '0' });
       }
-      runConnectionTest(payload);
     });
   }
 
@@ -317,6 +364,7 @@ function displayTestSuccess(params) {
   const thumbImg = document.getElementById('test-preview-img');
   const previewVideo = document.getElementById('test-preview-video');
   const continueWrap = document.getElementById('test-continue-wrap');
+  const resultContainer = document.getElementById('test-result-container');
 
   resultBox.className = 'test-result-box success';
   msgEl.textContent = params.message || 'We can see the picture.';
@@ -328,7 +376,10 @@ function displayTestSuccess(params) {
   if (params.stream) {
     if (previewVideo) {
       previewVideo.srcObject = params.stream;
+      previewVideo.muted = true;
+      previewVideo.playsInline = true;
       previewVideo.style.display = 'block';
+      previewVideo.play().catch(e => console.warn('Preview video play warning:', e));
       if (thumbImg) thumbImg.style.display = 'none';
       thumbWrap.style.display = 'block';
     }
@@ -336,7 +387,13 @@ function displayTestSuccess(params) {
     if (thumbImg) {
       thumbImg.src = params.preview_base64;
       thumbImg.style.display = 'block';
-      if (previewVideo) previewVideo.style.display = 'none';
+      if (previewVideo) {
+        previewVideo.style.display = 'none';
+        if (previewVideo.srcObject) {
+          previewVideo.srcObject.getTracks().forEach(t => t.stop());
+          previewVideo.srcObject = null;
+        }
+      }
       thumbWrap.style.display = 'block';
     }
   } else {
@@ -347,6 +404,7 @@ function displayTestSuccess(params) {
     testedStreamUrl = params.rtsp_url;
   }
   continueWrap.style.display = 'block';
+  if (resultContainer) resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function displayTestError(msg, detail) {
@@ -357,6 +415,7 @@ function displayTestError(msg, detail) {
   const previewVideo = document.getElementById('test-preview-video');
   const thumbImg = document.getElementById('test-preview-img');
   const continueWrap = document.getElementById('test-continue-wrap');
+  const resultContainer = document.getElementById('test-result-container');
 
   resultBox.className = 'test-result-box error';
   msgEl.textContent = msg || 'Connection test failed.';
@@ -371,11 +430,13 @@ function displayTestError(msg, detail) {
   if (thumbImg) thumbImg.style.display = 'none';
   thumbWrap.style.display = 'none';
   continueWrap.style.display = 'none';
+  if (resultContainer) resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 async function testWebcamConnection() {
   const btnTest = document.getElementById('btn-test-connection');
   const resultContainer = document.getElementById('test-result-container');
+  const previewVideo = document.getElementById('test-preview-video');
   resultContainer.style.display = 'block';
   btnTest.disabled = true;
   btnTest.textContent = 'Accessing webcam…';
@@ -393,22 +454,28 @@ async function testWebcamConnection() {
       });
       activeWebcamStream = stream;
 
-      const video = document.createElement('video');
-      video.srcObject = stream;
-      video.setAttribute('playsinline', '');
-      video.muted = true;
-      await video.play();
+      if (previewVideo) {
+        previewVideo.srcObject = stream;
+        previewVideo.muted = true;
+        previewVideo.playsInline = true;
+        await previewVideo.play().catch(e => console.warn('Preview play warning:', e));
+      }
 
       await new Promise(r => setTimeout(r, 400));
 
-      const w = video.videoWidth || 1280;
-      const h = video.videoHeight || 720;
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, w, h);
-      const b64 = canvas.toDataURL('image/jpeg', 0.85);
+      const w = (previewVideo && previewVideo.videoWidth) ? previewVideo.videoWidth : 1280;
+      const h = (previewVideo && previewVideo.videoHeight) ? previewVideo.videoHeight : 720;
+      let b64 = null;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        if (previewVideo) ctx.drawImage(previewVideo, 0, 0, w, h);
+        b64 = canvas.toDataURL('image/jpeg', 0.85);
+      } catch (err) {
+        console.warn('Canvas snapshot warning:', err);
+      }
 
       displayTestSuccess({
         width: w,
@@ -436,7 +503,7 @@ async function testWebcamConnection() {
     });
     if (edgeRes.ok) {
       const edgeData = await edgeRes.json();
-      if (edgeData.ok && edgeData.status === 'success') {
+      if (edgeData.ok && (edgeData.status === 'success' || edgeData.code === 'success')) {
         displayTestSuccess({
           width: edgeData.width || 1280,
           height: edgeData.height || 720,
@@ -457,7 +524,7 @@ async function testWebcamConnection() {
   // 3. Fallback error
   displayTestError(
     'Could not access webcam.',
-    'Please allow camera permission in your browser address bar (click the camera/lock icon in URL bar) or connect a webcam.'
+    'Please click the camera/lock icon in your browser address bar and choose "Allow" for Camera, or check that a webcam is connected.'
   );
   btnTest.disabled = false;
   btnTest.textContent = 'Test connection';
