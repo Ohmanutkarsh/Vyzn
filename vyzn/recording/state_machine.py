@@ -525,24 +525,16 @@ class ClipStateMachine:
 
         # Rule: A stationary person or tracked object must never be ignored (score floor >= 35),
         # but fleeting unconfirmed noise (like hair flutter or ceiling fan glitches) must NOT trigger the floor.
-        def _is_valid_person_box(box):
-            if not box or len(box) < 4:
-                return True
-            # Reject ceiling fixtures (ceiling fans at y < 0.25 and y+ch < 0.48)
-            return not (box[1] < 0.25 and box[3] < 0.48)
-
         person_tracks = [
             t for t in all_tracks
             if getattr(t, "label", "").lower() == "person"
             and getattr(t, "hits", 1) >= 2
             and getattr(t, "confidence", 0.0) >= 0.40
-            and _is_valid_person_box(getattr(t, "box", None))
         ]
         person_dets = [
             d for d in all_dets
             if getattr(d, "label", "").lower() == "person"
             and getattr(d, "confidence", 0.0) >= 0.45
-            and _is_valid_person_box(getattr(d, "box", None))
         ]
         has_confirmed_person = bool(person_tracks) or len(person_dets) >= 2 or (len(person_dets) >= 1 and any(getattr(d, "confidence", 0.0) >= 0.65 for d in person_dets))
 
@@ -560,7 +552,7 @@ class ClipStateMachine:
         ]
         has_confirmed_target = has_confirmed_person or bool(vehicle_tracks) or bool(vehicle_dets)
 
-        if has_confirmed_person:
+        if has_confirmed_target:
             peak_score = max(peak_score, 35.0)
         elif not has_confirmed_target:
             # In simple terms: if the camera only sees background motion (like a spinning fan or hair moving)

@@ -582,7 +582,7 @@ class EdgePipeline:
                     )
 
             # Keep active_event_ids mirror updated for legacy callers
-            if sm.current_event_id and sm.state in (ClipState.RECORDING, ClipState.HANGOVER):
+            if sm.current_event_id and sm.is_recording:
                 self.active_event_ids[camera_id] = sm.current_event_id
             else:
                 self.active_event_ids.pop(camera_id, None)
@@ -824,8 +824,8 @@ class EdgePipeline:
     def _finalize_event(self, camera_id: str):
         """Forces immediate finalization of active event on camera_id (backward-compatibility)."""
         sm = self.state_machines.get(camera_id)
-        if sm and sm.state in (ClipState.RECORDING, ClipState.HANGOVER):
-            seg = sm._finalize_current_clip(sm.last_frame_pts or time.monotonic(), close_reason="manual_finalize")
+        if sm and sm.is_recording:
+            seg = sm._close_active_clip(close_reason="manual_finalize")
             if seg and not seg.is_discarded:
                 cam_cfg = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
                 self._handle_finalized_segment(seg, cam_cfg)

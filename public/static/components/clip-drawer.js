@@ -52,7 +52,7 @@ export function initClipDrawer({ onClipUpdated } = {}) {
         <div class="drawer-content" id="drawer-main-content">
           <!-- 16:9 Video Box -->
           <div class="drawer-player-box" id="drawer-player-box">
-            <video class="drawer-video-el" id="drawer-video-player" playsinline preload="metadata"></video>
+            <video class="drawer-video-el" id="drawer-video-player" playsinline preload="auto" style="background: #000;"></video>
             <canvas class="drawer-overlay-canvas" id="drawer-overlay-canvas" style="display: none;"></canvas>
           </div>
 
