@@ -1965,8 +1965,7 @@ def delete_camera(
 
     if user and user.get("role") not in ("admin", "fleet_admin"):
         user_email = user.get("email")
-        # PIN verified via verify_security_action allows authorized premises administrator to remove camera
-        if cam.owner_email and cam.owner_email != user_email and not request.headers.get("X-Security-Pin"):
+        if cam.owner_email and cam.owner_email != user_email:
             raise HTTPException(status_code=403, detail="You do not have permission to delete this camera.")
 
     settings.cameras = [c for c in settings.cameras if c.camera_id != camera_id]
@@ -2012,17 +2011,16 @@ def list_cameras(
 
     if user and user.get("role") not in ("admin", "fleet_admin"):
         user_email = user.get("email")
-        user_cams = [c for c in cams if getattr(c, "owner_email", None) == user_email]
-        if user_cams:
-            cams = user_cams
-        else:
-            # If cameras exist on node, associate to current operator and display
-            for c in cams:
-                if not getattr(c, "owner_email", None):
-                    c.owner_email = user_email
+        # On fresh node initial setup: if no cameras have any owner at all, assign to first user
+        has_any_owner = any(bool(getattr(c, "owner_email", None)) for c in settings.cameras)
+        if not has_any_owner:
+            for c in settings.cameras:
+                c.owner_email = user_email
             save_cameras_config(settings)
+        # Strict user isolation: show only cameras owned by this specific user
+        cams = [c for c in cams if getattr(c, "owner_email", None) == user_email]
     elif not user:
-        cams = list(settings.cameras)
+        cams = [c for c in cams if not getattr(c, "owner_email", None)]
 
     # Auto-start capture stream for any configured camera not yet running
     if _pipeline_instance and hasattr(_pipeline_instance, "capture_threads"):

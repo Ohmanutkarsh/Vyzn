@@ -214,46 +214,14 @@ function attachStep2Events() {
     });
   }
 
-  // Tab toggle between Webcam and Phone camera in Path C
-  let phoneSubChoice = 'webcam';
-  const tabWebcam = document.getElementById('tab-opt-webcam');
-  const tabPhone = document.getElementById('tab-opt-phone');
-  const subWebcam = document.getElementById('subpath-webcam');
-  const subPhone = document.getElementById('subpath-phone');
-
-  function setPhoneSubTab(mode) {
-    phoneSubChoice = mode;
-    if (mode === 'webcam') {
-      if (tabWebcam) {
-        tabWebcam.style.background = '#3b82f6';
-        tabWebcam.style.color = '#ffffff';
-        tabWebcam.classList.add('is-active');
-      }
-      if (tabPhone) {
-        tabPhone.style.background = 'transparent';
-        tabPhone.style.color = '#a1a1aa';
-        tabPhone.classList.remove('is-active');
-      }
-      if (subWebcam) subWebcam.style.display = 'block';
-      if (subPhone) subPhone.style.display = 'none';
-    } else {
-      if (tabPhone) {
-        tabPhone.style.background = '#3b82f6';
-        tabPhone.style.color = '#ffffff';
-        tabPhone.classList.add('is-active');
-      }
-      if (tabWebcam) {
-        tabWebcam.style.background = 'transparent';
-        tabWebcam.style.color = '#a1a1aa';
-        tabWebcam.classList.remove('is-active');
-      }
-      if (subPhone) subPhone.style.display = 'block';
-      if (subWebcam) subWebcam.style.display = 'none';
-    }
+  // Webcam button
+  const btnWebcam = document.getElementById('btn-use-webcam');
+  if (btnWebcam) {
+    btnWebcam.addEventListener('click', () => {
+      testedStreamUrl = '0';
+      runConnectionTest({ source_type: 'webcam', rtsp_url: '0' });
+    });
   }
-
-  if (tabWebcam) tabWebcam.addEventListener('click', () => setPhoneSubTab('webcam'));
-  if (tabPhone) tabPhone.addEventListener('click', () => setPhoneSubTab('phone'));
 
   // Test Connection Button
   const btnTest = document.getElementById('btn-test-connection');
@@ -275,26 +243,11 @@ function attachStep2Events() {
             source_type: 'ip'
           };
         }
-        runConnectionTest(payload);
       } else if (currentChoice === 'phone') {
-        if (phoneSubChoice === 'webcam') {
-          testedStreamUrl = '0';
-          runConnectionTest({ source_type: 'webcam', rtsp_url: '0' });
-        } else {
-          const phoneUrl = document.getElementById('phone-stream-url')?.value.trim();
-          if (!phoneUrl) {
-            displayTestError(
-              'Please enter your phone stream address.',
-              'Open IP Webcam on your phone, tap "Start server", and enter the address shown (e.g. http://192.168.1.50:8080/video).'
-            );
-            return;
-          }
-          payload = { rtsp_url: phoneUrl, source_type: 'phone' };
-          runConnectionTest(payload);
-        }
-      } else {
-        runConnectionTest({ source_type: 'ip', rtsp_url: '0' });
+        const phoneUrl = document.getElementById('phone-stream-url')?.value.trim();
+        payload = { rtsp_url: phoneUrl || 'http://192.168.1.15:8080/video', source_type: 'phone' };
       }
+      runConnectionTest(payload);
     });
   }
 
@@ -354,302 +307,20 @@ async function startNetworkScan() {
   }
 }
 
-let activeWebcamStream = null;
-
-function displayTestSuccess(params) {
-  const resultBox = document.getElementById('test-result-box');
-  const msgEl = document.getElementById('test-result-message');
-  const factsEl = document.getElementById('test-result-facts');
-  const thumbWrap = document.getElementById('test-preview-thumb');
-  const thumbImg = document.getElementById('test-preview-img');
-  const previewVideo = document.getElementById('test-preview-video');
-  const continueWrap = document.getElementById('test-continue-wrap');
-  const resultContainer = document.getElementById('test-result-container');
-
-  resultBox.className = 'test-result-box success';
-  msgEl.textContent = params.message || 'We can see the picture.';
-  testedWidth = params.width || 1280;
-  testedHeight = params.height || 720;
-  testedFps = params.fps || 15.0;
-  factsEl.textContent = `${testedWidth}×${testedHeight} · ${testedFps} fps`;
-
-  if (params.stream) {
-    if (previewVideo) {
-      previewVideo.srcObject = params.stream;
-      previewVideo.muted = true;
-      previewVideo.playsInline = true;
-      previewVideo.style.display = 'block';
-      previewVideo.play().catch(e => console.warn('Preview video play warning:', e));
-      if (thumbImg) thumbImg.style.display = 'none';
-      thumbWrap.style.display = 'block';
-    }
-  } else if (params.preview_base64) {
-    if (thumbImg) {
-      thumbImg.src = params.preview_base64;
-      thumbImg.style.display = 'block';
-      if (previewVideo) {
-        previewVideo.style.display = 'none';
-        if (previewVideo.srcObject) {
-          previewVideo.srcObject.getTracks().forEach(t => t.stop());
-          previewVideo.srcObject = null;
-        }
-      }
-      thumbWrap.style.display = 'block';
-    }
-  } else {
-    thumbWrap.style.display = 'none';
-  }
-
-  if (params.rtsp_url !== undefined) {
-    testedStreamUrl = params.rtsp_url;
-  }
-  continueWrap.style.display = 'block';
-  if (resultContainer) resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-function displayTestError(msg, detail) {
-  const resultBox = document.getElementById('test-result-box');
-  const msgEl = document.getElementById('test-result-message');
-  const factsEl = document.getElementById('test-result-facts');
-  const thumbWrap = document.getElementById('test-preview-thumb');
-  const previewVideo = document.getElementById('test-preview-video');
-  const thumbImg = document.getElementById('test-preview-img');
-  const continueWrap = document.getElementById('test-continue-wrap');
-  const resultContainer = document.getElementById('test-result-container');
-
-  resultBox.className = 'test-result-box error';
-  msgEl.textContent = msg || 'Connection test failed.';
-  factsEl.textContent = detail || '';
-  if (previewVideo) {
-    previewVideo.style.display = 'none';
-    if (previewVideo.srcObject) {
-      previewVideo.srcObject.getTracks().forEach(t => t.stop());
-      previewVideo.srcObject = null;
-    }
-  }
-  if (thumbImg) thumbImg.style.display = 'none';
-  thumbWrap.style.display = 'none';
-  continueWrap.style.display = 'none';
-  if (resultContainer) resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-
-async function testWebcamConnection() {
-  const btnTest = document.getElementById('btn-test-connection');
-  const resultContainer = document.getElementById('test-result-container');
-  const previewVideo = document.getElementById('test-preview-video');
-  resultContainer.style.display = 'block';
-  btnTest.disabled = true;
-  btnTest.textContent = 'Accessing webcam…';
-
-  // 1. Try Browser Hardware Camera via WebRTC
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    try {
-      if (activeWebcamStream) {
-        activeWebcamStream.getTracks().forEach(t => t.stop());
-        activeWebcamStream = null;
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false
-      });
-      activeWebcamStream = stream;
-
-      if (previewVideo) {
-        previewVideo.srcObject = stream;
-        previewVideo.muted = true;
-        previewVideo.playsInline = true;
-        await previewVideo.play().catch(e => console.warn('Preview play warning:', e));
-      }
-
-      await new Promise(r => setTimeout(r, 400));
-
-      const w = (previewVideo && previewVideo.videoWidth) ? previewVideo.videoWidth : 1280;
-      const h = (previewVideo && previewVideo.videoHeight) ? previewVideo.videoHeight : 720;
-      let b64 = null;
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        if (previewVideo) ctx.drawImage(previewVideo, 0, 0, w, h);
-        b64 = canvas.toDataURL('image/jpeg', 0.85);
-      } catch (err) {
-        console.warn('Canvas snapshot warning:', err);
-      }
-
-      displayTestSuccess({
-        width: w,
-        height: h,
-        fps: 30.0,
-        stream: stream,
-        preview_base64: b64,
-        message: 'We can see the picture.',
-        rtsp_url: '0'
-      });
-      btnTest.disabled = false;
-      btnTest.textContent = 'Test connection';
-      return;
-    } catch (err) {
-      console.warn('Browser webcam getUserMedia error:', err);
-    }
-  }
-
-  // 2. Try Local Edge Node on port 8000 (OpenCV device 0)
-  try {
-    const edgeRes = await fetch('http://127.0.0.1:8000/api/cameras/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source_type: 'webcam', rtsp_url: '0' })
-    });
-    if (edgeRes.ok) {
-      const edgeData = await edgeRes.json();
-      if (edgeData.ok && (edgeData.status === 'success' || edgeData.code === 'success')) {
-        displayTestSuccess({
-          width: edgeData.width || 1280,
-          height: edgeData.height || 720,
-          fps: edgeData.fps || 15.0,
-          preview_base64: edgeData.preview_base64,
-          message: 'We can see the picture.',
-          rtsp_url: '0'
-        });
-        btnTest.disabled = false;
-        btnTest.textContent = 'Test connection';
-        return;
-      }
-    }
-  } catch (e) {
-    console.warn('Local edge webcam probe error:', e);
-  }
-
-  // 3. Fallback error
-  displayTestError(
-    'Could not access webcam.',
-    'Please click the camera/lock icon in your browser address bar and choose "Allow" for Camera, or check that a webcam is connected.'
-  );
-  btnTest.disabled = false;
-  btnTest.textContent = 'Test connection';
-}
-
 async function runConnectionTest(payload) {
-  if (payload.source_type === 'webcam' || payload.rtsp_url === '0') {
-    return testWebcamConnection();
-  }
-
   const btnTest = document.getElementById('btn-test-connection');
   const resultContainer = document.getElementById('test-result-container');
+  const resultBox = document.getElementById('test-result-box');
+  const msgEl = document.getElementById('test-result-message');
+  const factsEl = document.getElementById('test-result-facts');
+  const thumbWrap = document.getElementById('test-preview-thumb');
+  const thumbImg = document.getElementById('test-preview-img');
+  const continueWrap = document.getElementById('test-continue-wrap');
+
   btnTest.disabled = true;
   btnTest.textContent = 'Testing connection…';
-  resultContainer.style.display = 'block';
+  resultContainer.style.display = 'none';
 
-  let rawUrl = payload.rtsp_url || '';
-  if (!rawUrl && payload.ip) {
-    const ip = payload.ip || '192.168.1.64';
-    const port = payload.port || 554;
-    const user = payload.username || 'admin';
-    const pw = payload.password || '';
-    const ch = payload.channel || 1;
-    const brand = (payload.brand || '').toLowerCase();
-    let path = brand.includes('hikvision') ? `/Streaming/Channels/${ch}01` : `/cam/realmonitor?channel=${ch}&subtype=0`;
-    rawUrl = `rtsp://${user}:${pw}@${ip}:${port}${path}`;
-  }
-
-  // Strategy 1: Test against Local Edge Node (port 8000) for real hardware & LAN OpenCV RTSP/HTTP decoding
-  try {
-    const edgeRes = await fetch('http://127.0.0.1:8000/api/cameras/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (edgeRes.ok) {
-      const edgeData = await edgeRes.json();
-      if (edgeData.ok && edgeData.status === 'success') {
-        displayTestSuccess({
-          width: edgeData.width || 1920,
-          height: edgeData.height || 1080,
-          fps: edgeData.fps || 15.0,
-          preview_base64: edgeData.preview_base64,
-          message: 'We can see the picture.',
-          rtsp_url: rawUrl
-        });
-        btnTest.disabled = false;
-        btnTest.textContent = 'Test connection';
-        return;
-      } else if (!edgeData.ok || edgeData.status === 'error') {
-        displayTestError(
-          edgeData.message || 'Connection test failed.',
-          `Camera at ${rawUrl} could not be reached. Check that device is powered on, IP is correct, and on premises Wi-Fi.`
-        );
-        btnTest.disabled = false;
-        btnTest.textContent = 'Test connection';
-        return;
-      }
-    }
-  } catch (e) {
-    // Local edge node not responding on port 8000
-  }
-
-  // Strategy 2: If phone camera HTTP URL (IP Webcam / DroidCam), probe directly over local LAN from browser
-  if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
-    let shotUrl = rawUrl;
-    if (rawUrl.includes(':8080') && rawUrl.endsWith('/video')) {
-      shotUrl = rawUrl.replace(/\/video$/, '/shot.jpg');
-    } else if (rawUrl.includes(':8080') && !rawUrl.includes('/shot.jpg')) {
-      shotUrl = rawUrl.replace(/\/+$/, '') + '/shot.jpg';
-    }
-
-    try {
-      const img = await new Promise((resolve, reject) => {
-        const testImg = new Image();
-        const timeout = setTimeout(() => {
-          testImg.src = '';
-          reject(new Error('timeout'));
-        }, 5000);
-        testImg.onload = () => {
-          clearTimeout(timeout);
-          resolve(testImg);
-        };
-        testImg.onerror = () => {
-          clearTimeout(timeout);
-          reject(new Error('unreachable'));
-        };
-        testImg.src = `${shotUrl}${shotUrl.includes('?') ? '&' : '?'}t=${Date.now()}`;
-      });
-
-      const w = img.naturalWidth || 1280;
-      const h = img.naturalHeight || 720;
-      let b64 = img.src;
-      try {
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        b64 = canvas.toDataURL('image/jpeg', 0.85);
-      } catch (err) {}
-
-      displayTestSuccess({
-        width: w,
-        height: h,
-        fps: 15.0,
-        preview_base64: b64,
-        message: 'We can see the picture.',
-        rtsp_url: rawUrl
-      });
-      btnTest.disabled = false;
-      btnTest.textContent = 'Test connection';
-      return;
-    } catch (err) {
-      displayTestError(
-        `Could not reach phone camera at ${rawUrl}`,
-        'Make sure: 1. Phone is on same Wi-Fi network. 2. You tapped "Start server" in IP Webcam app. 3. Address exactly matches what is shown on phone screen.'
-      );
-      btnTest.disabled = false;
-      btnTest.textContent = 'Test connection';
-      return;
-    }
-  }
-
-  // Strategy 3: Cloud backend proxy check
   try {
     const res = await fetch('/api/cameras/test', {
       method: 'POST',
@@ -657,26 +328,51 @@ async function runConnectionTest(payload) {
       body: JSON.stringify(payload)
     });
     const data = await res.json();
-    if (data.ok && data.status === 'online') {
-      displayTestSuccess({
-        width: data.width || 1920,
-        height: data.height || 1080,
-        fps: data.fps || 15.0,
-        preview_base64: data.preview_base64,
-        message: data.message || 'We can see the picture.',
-        rtsp_url: rawUrl
-      });
+    resultContainer.style.display = 'block';
+
+    if (data.ok) {
+      resultBox.className = 'test-result-box success';
+      msgEl.textContent = 'We can see the picture.';
+      testedWidth = data.width || 1920;
+      testedHeight = data.height || 1080;
+      testedFps = data.fps || 15.0;
+      factsEl.textContent = `${testedWidth}×${testedHeight} · ${testedFps} fps`;
+
+      if (data.preview_base64) {
+        thumbImg.src = data.preview_base64;
+        thumbWrap.style.display = 'block';
+      } else {
+        thumbWrap.style.display = 'none';
+      }
+      continueWrap.style.display = 'block';
+
+      // Record tested URL
+      if (payload.rtsp_url) {
+        testedStreamUrl = payload.rtsp_url;
+      } else {
+        const ip = payload.ip || '192.168.1.64';
+        const port = payload.port || 554;
+        const user = payload.username || 'admin';
+        const pw = payload.password || '';
+        const ch = payload.channel || 1;
+        const brand = (payload.brand || '').toLowerCase();
+        let path = brand.includes('hikvision') ? `/Streaming/Channels/${ch}01` : `/cam/realmonitor?channel=${ch}&subtype=0`;
+        testedStreamUrl = `rtsp://${user}:${pw}@${ip}:${port}${path}`;
+      }
     } else {
-      displayTestError(
-        data.message || 'Connection test failed.',
-        'Check camera IP, port, credentials, and ensure the local VYZN Edge server (python run_edge.py) is running on your premises computer.'
-      );
+      resultBox.className = 'test-result-box error';
+      msgEl.textContent = data.message || 'Connection test failed.';
+      factsEl.textContent = '';
+      thumbWrap.style.display = 'none';
+      continueWrap.style.display = 'none';
     }
   } catch (err) {
-    displayTestError(
-      'Connection test failed.',
-      'Check camera address and network. If using a local CCTV camera (192.168.x.x), start the VYZN Edge server on your PC.'
-    );
+    resultContainer.style.display = 'block';
+    resultBox.className = 'test-result-box error';
+    msgEl.textContent = 'Connection test failed. Check camera address and network.';
+    factsEl.textContent = '';
+    thumbWrap.style.display = 'none';
+    continueWrap.style.display = 'none';
   } finally {
     btnTest.disabled = false;
     btnTest.textContent = 'Test connection';
@@ -690,13 +386,6 @@ function attachStep3Events() {
       if (nameInput) nameInput.value = btn.getAttribute('data-suggest');
     });
   });
-
-  const btnStep3Back = document.getElementById('btn-step3-back');
-  if (btnStep3Back) {
-    btnStep3Back.addEventListener('click', () => {
-      setWizardStep('step-2', 'Step 2 of 3');
-    });
-  }
 
   const btnSave = document.getElementById('btn-save-camera');
   if (btnSave) {
@@ -715,13 +404,6 @@ function attachStep3Events() {
       btnSave.textContent = 'Saving…';
 
       try {
-        const payloadData = {
-          name: camName,
-          rtsp_url: testedStreamUrl || '0',
-          target_fps: testedFps
-        };
-
-        // 1. Save to cloud server
         const res = await fetch('/api/cameras', {
           method: 'POST',
           credentials: 'include',
@@ -729,7 +411,11 @@ function attachStep3Events() {
             'Content-Type': 'application/json',
             'X-Security-Pin': pin
           },
-          body: JSON.stringify(payloadData)
+          body: JSON.stringify({
+            name: camName,
+            rtsp_url: testedStreamUrl || '0',
+            target_fps: testedFps
+          })
         });
 
         if (!res.ok) {
@@ -738,20 +424,6 @@ function attachStep3Events() {
         }
         const data = await res.json();
         createdCameraId = data.id || data.camera_id;
-
-        // 2. Also register to local edge server if running
-        try {
-          await fetch('http://127.0.0.1:8000/api/cameras', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'X-Security-Pin': pin
-            },
-            body: JSON.stringify(payloadData)
-          });
-        } catch (e) {
-          // Local edge not running or already synced
-        }
 
         // Show Success screen
         setWizardStep('step-success', '');

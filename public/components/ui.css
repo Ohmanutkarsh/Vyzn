@@ -490,13 +490,13 @@
 }
 
 .brand-name {
-  font-size: 34px;
+  font-size: 28px;
   font-weight: 900;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   color: #ffffff;
   display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   text-transform: uppercase;
   background: linear-gradient(135deg, #ffffff 10%, #38bdf8 100%);
   -webkit-background-clip: text;
@@ -505,11 +505,11 @@
 }
 
 .brand-dot {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: #0ea5e9;
-  box-shadow: 0 0 16px #38bdf8;
+  box-shadow: 0 0 12px #38bdf8;
   display: inline-block;
   flex-shrink: 0;
 }

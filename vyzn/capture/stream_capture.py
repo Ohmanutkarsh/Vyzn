@@ -19,6 +19,7 @@ from vyzn.core.config import CameraConfig
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;5000000"
 
 logger = logging.getLogger("vyzn.capture.stream")
+_DSHOW_LOCK = threading.Lock()
 
 
 @dataclass
@@ -145,7 +146,10 @@ def probe_stream_connection(url_str: str, timeout_sec: float = 3.5) -> ProbeResu
 
     # Socket reached; probe video decode with OpenCV
     try:
-        if norm_url.startswith("rtsp://"):
+        if norm_url.isdigit():
+            with _DSHOW_LOCK:
+                cap = cv2.VideoCapture(int(norm_url), cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+        elif norm_url.startswith("rtsp://"):
             os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|stimeout;3000000"
             cap = cv2.VideoCapture(norm_url, cv2.CAP_FFMPEG)
         else:
@@ -158,7 +162,12 @@ def probe_stream_connection(url_str: str, timeout_sec: float = 3.5) -> ProbeResu
 
         ret, frame = cap.read()
         if not ret or frame is None:
-            cap.release()
+            if cap:
+                try:
+                    with _DSHOW_LOCK:
+                        cap.release()
+                except Exception:
+                    pass
             return ProbeResult(False, "unsupported_codec", "The camera's video format isn't supported. In the camera settings, switch the stream to H.264.")
 
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or frame.shape[1])
@@ -172,7 +181,12 @@ def probe_stream_connection(url_str: str, timeout_sec: float = 3.5) -> ProbeResu
             h, w = disp_frame.shape[:2]
             disp_frame = cv2.resize(disp_frame, (640, int(640 * h / w)))
         ret, jpeg = cv2.imencode(".jpg", disp_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-        cap.release()
+        if cap:
+            try:
+                with _DSHOW_LOCK:
+                    cap.release()
+            except Exception:
+                pass
         b64 = "data:image/jpeg;base64," + base64.b64encode(jpeg.tobytes()).decode("ascii") if ret else None
         return ProbeResult(True, "success", "We can see the picture.", width=width, height=height, fps=round(fps, 1), preview_base64=b64)
     except Exception as e:
@@ -275,21 +289,28 @@ class RTSPCaptureThread(threading.Thread):
             else:
                 os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
 
-            if url_str.isdigit():
-                cap = cv2.VideoCapture(int(url_str), cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
-            elif url_str.startswith("webcam://"):
-                try:
-                    dev_idx = int(url_str.split("://")[1])
-                except Exception:
-                    dev_idx = 0
-                cap = cv2.VideoCapture(dev_idx, cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
-            elif url_str.startswith("http://") or url_str.startswith("https://"):
-                # Phone camera / IP Webcam / MJPEG stream
-                cap = cv2.VideoCapture(url_str)
-            elif url_str.endswith(".mp4") or os.path.exists(url_str):
-                cap = cv2.VideoCapture(url_str)
-            else:
-                cap = cv2.VideoCapture(url_str, cv2.CAP_FFMPEG)
+            cap = None
+            try:
+                if url_str.isdigit():
+                    with _DSHOW_LOCK:
+                        cap = cv2.VideoCapture(int(url_str), cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+                elif url_str.startswith("webcam://"):
+                    try:
+                        dev_idx = int(url_str.split("://")[1])
+                    except Exception:
+                        dev_idx = 0
+                    with _DSHOW_LOCK:
+                        cap = cv2.VideoCapture(dev_idx, cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+                elif url_str.startswith("http://") or url_str.startswith("https://"):
+                    # Phone camera / IP Webcam / MJPEG stream
+                    cap = cv2.VideoCapture(url_str)
+                elif url_str.endswith(".mp4") or os.path.exists(url_str):
+                    cap = cv2.VideoCapture(url_str)
+                else:
+                    cap = cv2.VideoCapture(url_str, cv2.CAP_FFMPEG)
+            except Exception as e:
+                logger.warning(f"[{self.config.camera_id}] Error opening VideoCapture: {e}")
+                cap = None
 
             if not cap or not cap.isOpened():
                 self.status = "error"
@@ -382,7 +403,12 @@ class RTSPCaptureThread(threading.Thread):
                 except queue.Full:
                     pass
 
-            cap.release()
+            if cap:
+                try:
+                    with _DSHOW_LOCK:
+                        cap.release()
+                except Exception:
+                    pass
             self.is_connected = False
             if self.running:
                 logger.info(f"[{self.config.camera_id}] Reconnecting after stream closure...")

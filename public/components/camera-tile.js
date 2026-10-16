@@ -36,7 +36,7 @@ export function renderCameraTile({ camera, isSelected = false, showActions = fal
   return `
     <div class="camera-tile ${isSelected ? 'is-selected' : ''}" data-camera-id="${escapeHtml(camId)}" role="button" tabindex="0">
       <div class="camera-thumb-frame">
-        <img class="camera-thumb-img" src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(camera.name)}" loading="lazy" onerror="this.onerror=null;this.src='/static/img/placeholder.jpg'" />
+        <img class="camera-thumb-img" src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(camera.name)}" loading="lazy" onerror="this.onerror=null;this.src='/img/placeholder.jpg'" />
         ${!isOnline ? `
           <div class="camera-offline-overlay">
             <span class="offline-pill">${escapeHtml(statusText)}</span>

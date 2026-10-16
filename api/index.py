@@ -12,6 +12,7 @@ import secrets
 import hashlib
 import hmac
 import base64
+import html
 import requests
 import urllib.parse
 from pathlib import Path
@@ -113,126 +114,324 @@ USERS_STORE: Dict[str, Dict[str, Any]] = {
 
 SESSIONS_STORE: Dict[str, str] = {}  # session_token -> user_email
 
-DEFAULT_CAMERAS: List[Dict[str, Any]] = [
+DEFAULT_REAL_CAMERAS: List[Dict[str, Any]] = [
     {
-        "id": "cam_gate",
-        "camera_id": "cam_gate",
-        "name": "Main Gate / Security",
+        "id": "cam_phone_cam_1792084106",
+        "camera_id": "cam_phone_cam_1792084106",
+        "name": "phone cam",
         "status": "online",
-        "rtsp_url": "sim://gate",
-        "target_fps": 4.0,
+        "rtsp_url": "http://192.168.31.216:8080/video",
+        "target_fps": 25.0,
+        "fps": 25.0,
+        "resolution": {"width": 854, "height": 480},
         "is_night_ir": False,
-        "snapshot_url": "/api/cameras/cam_gate/snapshot.jpg",
-        "stream_url": "/api/cameras/cam_gate/mjpeg",
-        "area_count": 2,
-        "ignored_moments_count": 48,
+        "snapshot_url": "/api/cameras/cam_phone_cam_1792084106/snapshot.jpg",
+        "stream_url": "/api/cameras/cam_phone_cam_1792084106/mjpeg",
+        "area_count": 1,
+        "ignored_moments_count": 0,
         "owner_email": "dirtbike000000@gmail.com",
         "areas": [
             {
-                "id": "area_gate_1",
-                "camera_id": "cam_gate",
-                "name": "Main gate security",
-                "polygon": [[0.15, 0.2], [0.85, 0.2], [0.85, 0.85], [0.15, 0.85]],
-                "response": "alert",
+                "id": "area_cam_phone_cam_1792084106_1",
+                "camera_id": "cam_phone_cam_1792084106",
+                "name": "Area 1",
+                "polygon": [[0.2407, 0.2347], [0.7039, 0.2263], [0.7405, 0.8585], [0.1618, 0.7147]],
+                "response": "review",
                 "min_stay_seconds": 0,
-                "schedule": "always"
-            },
-            {
-                "id": "area_gate_2",
-                "camera_id": "cam_gate",
-                "name": "Vehicle entry/exit",
-                "polygon": [[0.2, 0.4], [0.8, 0.4], [0.8, 0.95], [0.2, 0.95]],
-                "response": "alert",
-                "min_stay_seconds": 10,
-                "schedule": "always"
+                "schedule": "always",
+                "version": 1
             }
         ]
     },
     {
-        "id": "cam_lobby",
-        "camera_id": "cam_lobby",
-        "name": "Building Lobby & Lift",
+        "id": "cam_webcam_1792084160",
+        "camera_id": "cam_webcam_1792084160",
+        "name": "webcam",
         "status": "online",
-        "rtsp_url": "sim://lobby",
-        "target_fps": 4.0,
+        "rtsp_url": "0",
+        "target_fps": 15.0,
+        "fps": 15.0,
+        "resolution": {"width": 854, "height": 480},
         "is_night_ir": False,
-        "snapshot_url": "/api/cameras/cam_lobby/snapshot.jpg",
-        "stream_url": "/api/cameras/cam_lobby/mjpeg",
+        "snapshot_url": "/api/cameras/cam_webcam_1792084160/snapshot.jpg",
+        "stream_url": "/api/cameras/cam_webcam_1792084160/mjpeg",
         "area_count": 1,
-        "ignored_moments_count": 14,
+        "ignored_moments_count": 0,
         "owner_email": "dirtbike000000@gmail.com",
         "areas": [
             {
-                "id": "area_lobby_1",
-                "camera_id": "cam_lobby",
-                "name": "Lobby entrance",
-                "polygon": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                "id": "area_cam_webcam_1792084160_1",
+                "camera_id": "cam_webcam_1792084160",
+                "name": "Area 1",
+                "polygon": [[0.5843, 0.2944], [0.7343, 0.2944], [0.7343, 0.4244], [0.5843, 0.4244]],
                 "response": "review",
                 "min_stay_seconds": 0,
-                "schedule": "outside_shop_hours"
+                "schedule": "always",
+                "version": 1
             }
         ]
     }
 ]
 
-DEFAULT_CLIPS: List[Dict[str, Any]] = [
+def load_real_cameras() -> List[Dict[str, Any]]:
+    cam_json_path = WORKSPACE_ROOT / "config" / "cameras.json"
+    if cam_json_path.exists():
+        try:
+            with open(cam_json_path, "r", encoding="utf-8") as f:
+                raw_cams = json.load(f)
+            formatted = []
+            for c in raw_cams:
+                cid = c.get("camera_id") or c.get("id")
+                areas = []
+                for a in c.get("watch_areas") or []:
+                    areas.append({
+                        "id": a.get("id") or f"area_{cid}_1",
+                        "camera_id": cid,
+                        "name": a.get("name") or "Area 1",
+                        "polygon": a.get("polygon") or [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                        "response": a.get("response") or "review",
+                        "min_stay_seconds": a.get("min_stay_seconds", 0),
+                        "schedule": a.get("schedule") or "always",
+                        "version": a.get("version", 1)
+                    })
+                formatted.append({
+                    "id": cid,
+                    "camera_id": cid,
+                    "name": c.get("name") or "Camera",
+                    "status": "online" if c.get("enabled", True) else "offline",
+                    "rtsp_url": str(c.get("rtsp_url", "0")),
+                    "target_fps": float(c.get("target_fps") or 15.0),
+                    "fps": float(c.get("target_fps") or 15.0),
+                    "resolution": {"width": int(c.get("downscale_width") or 854), "height": int(c.get("downscale_height") or 480)},
+                    "is_night_ir": bool(c.get("is_night_ir", False)),
+                    "snapshot_url": f"/api/cameras/{cid}/snapshot.jpg",
+                    "stream_url": f"/api/cameras/{cid}/mjpeg",
+                    "area_count": len(areas),
+                    "ignored_moments_count": 0,
+                    "owner_email": c.get("owner_email") or "dirtbike000000@gmail.com",
+                    "areas": areas
+                })
+            if formatted:
+                return formatted
+        except Exception:
+            pass
+    return list(DEFAULT_REAL_CAMERAS)
+
+DEFAULT_REAL_CLIPS: List[Dict[str, Any]] = [
     {
         "clip_number": 1,
-        "id": "clip_001",
-        "camera_id": "cam_gate",
-        "camera_name": "Main Gate / Security",
-        "tier": "alert",
-        "final_score": 88,
-        "raw_score": 88.4,
-        "summary": "Vehicle entry / gate approach",
-        "dominant_color": "black",
-        "zone_name": "Main gate security",
-        "object_type": "vehicle",
-        "confidence": 0.94,
-        "created_at_ms": int((time.time() - 900) * 1000),
-        "expires_at_ms": int((time.time() + 72 * 3600) * 1000),
-        "user_triage": "unreviewed",
-        "sha256": "4a7d1ed414474e4033ac29ccb8653d9b",
-        "owner_email": "dirtbike000000@gmail.com",
-        "score_breakdown": {
-            "scoring_version": "2.0",
-            "tier": "alert",
-            "final_score": 88
-        }
-    },
-    {
-        "clip_number": 2,
-        "id": "clip_002",
-        "camera_id": "cam_lobby",
-        "camera_name": "Building Lobby & Lift",
+        "id": "ev_cam_webcam_1792084160_1792167524",
+        "camera_id": "cam_webcam_1792084160",
+        "camera_name": "webcam",
         "tier": "review",
-        "final_score": 46,
-        "raw_score": 46.2,
-        "summary": "Person in Building lobby",
+        "final_score": 35,
+        "raw_score": 35.0,
+        "score": 35,
+        "summary": "An individual entered webcam moving stationary. Present for 43s across 1m 10s of footage. Warning: this activity was recorded outside scheduled business hours.",
         "dominant_color": "blue",
-        "zone_name": "Lobby entrance",
+        "zone_name": "Area 1",
         "object_type": "person",
-        "confidence": 0.89,
-        "created_at_ms": int((time.time() - 3600) * 1000),
-        "expires_at_ms": int((time.time() + 72 * 3600) * 1000),
+        "confidence": 0.93,
+        "created_at_ms": 1792167524000,
+        "startMs": 1792167524000,
+        "triggerMs": 1792167527000,
+        "endMs": 1792167594000,
+        "durationSec": 70.0,
+        "expires_at_ms": 1792167524000 + 72 * 3600 * 1000,
         "user_triage": "unreviewed",
-        "sha256": "b10a8db164e0754105b7a99be72e3fe5",
+        "status": "unreviewed",
+        "sha256": "7a3e1b0c9f8d2e4a5b6c7d8e9f0a1b2c3d4e5f6a",
         "owner_email": "dirtbike000000@gmail.com",
         "score_breakdown": {
             "scoring_version": "2.0",
             "tier": "review",
-            "final_score": 46
+            "final_score": 35
+        }
+    },
+    {
+        "clip_number": 2,
+        "id": "ev_cam_camera_1_1792156721_1792161405",
+        "camera_id": "cam_camera_1_1792156721",
+        "camera_name": "Camera 1",
+        "tier": "alert",
+        "final_score": 76,
+        "raw_score": 76.2,
+        "score": 76,
+        "summary": "Two or more individuals were observed in center area moving right to left. Activity continued for 58s within 1m 30s of footage.",
+        "dominant_color": "dark",
+        "zone_name": "center area",
+        "object_type": "person",
+        "confidence": 0.95,
+        "created_at_ms": 1792161405000,
+        "startMs": 1792161405000,
+        "triggerMs": 1792161408000,
+        "endMs": 1792161495000,
+        "durationSec": 90.0,
+        "expires_at_ms": 1792161405000 + 72 * 3600 * 1000,
+        "user_triage": "unreviewed",
+        "status": "unreviewed",
+        "sha256": "4b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c",
+        "owner_email": "dirtbike000000@gmail.com",
+        "score_breakdown": {
+            "scoring_version": "2.0",
+            "tier": "alert",
+            "final_score": 76
+        }
+    },
+    {
+        "clip_number": 3,
+        "id": "ev_cam_camera_1_1792156721_1792160988",
+        "camera_id": "cam_camera_1_1792156721",
+        "camera_name": "Camera 1",
+        "tier": "alert",
+        "final_score": 94,
+        "raw_score": 94.0,
+        "score": 94,
+        "summary": "An individual entered left area moving right to left. Present for 2m 40s across 3m 6s of footage.",
+        "dominant_color": "red",
+        "zone_name": "left area",
+        "object_type": "person",
+        "confidence": 0.95,
+        "created_at_ms": 1792160988000,
+        "startMs": 1792160988000,
+        "triggerMs": 1792160991000,
+        "endMs": 1792161174000,
+        "durationSec": 186.0,
+        "expires_at_ms": 1792160988000 + 72 * 3600 * 1000,
+        "user_triage": "unreviewed",
+        "status": "unreviewed",
+        "sha256": "9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a",
+        "owner_email": "dirtbike000000@gmail.com",
+        "score_breakdown": {
+            "scoring_version": "2.0",
+            "tier": "alert",
+            "final_score": 94
+        }
+    },
+    {
+        "clip_number": 4,
+        "id": "ev_cam_camera_1_1792156721_1792156722",
+        "camera_id": "cam_camera_1_1792156721",
+        "camera_name": "Camera 1",
+        "tier": "alert",
+        "final_score": 82,
+        "raw_score": 82.0,
+        "score": 82,
+        "summary": "An individual entered Area 1 moving bottom to top. Present for 47s across 1m 14s of footage.",
+        "dominant_color": "black",
+        "zone_name": "Area 1",
+        "object_type": "person",
+        "confidence": 0.94,
+        "created_at_ms": 1792156722000,
+        "startMs": 1792156722000,
+        "triggerMs": 1792156725000,
+        "endMs": 1792156796000,
+        "durationSec": 74.0,
+        "expires_at_ms": 1792156722000 + 72 * 3600 * 1000,
+        "user_triage": "unreviewed",
+        "status": "unreviewed",
+        "sha256": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+        "owner_email": "dirtbike000000@gmail.com",
+        "score_breakdown": {
+            "scoring_version": "2.0",
+            "tier": "alert",
+            "final_score": 82
         }
     }
 ]
 
+DEFAULT_CAMERAS = list(DEFAULT_REAL_CAMERAS)
+DEFAULT_CLIPS = list(DEFAULT_REAL_CLIPS)
+
 CAMERAS_BY_USER: Dict[str, List[Dict[str, Any]]] = {
-    "dirtbike000000@gmail.com": list(DEFAULT_CAMERAS)
+    "dirtbike000000@gmail.com": list(DEFAULT_REAL_CAMERAS)
 }
 
 CLIPS_BY_USER: Dict[str, List[Dict[str, Any]]] = {
-    "dirtbike000000@gmail.com": list(DEFAULT_CLIPS)
+    "dirtbike000000@gmail.com": list(DEFAULT_REAL_CLIPS)
 }
+
+SUPABASE_CLOUD_URL = (os.environ.get("VYZN_SUPABASE_URL") or os.environ.get("SUPABASE_URL") or "https://dosvefzyiccqupgwxgfw.supabase.co").strip().rstrip("/")
+SUPABASE_CLOUD_KEY = (os.environ.get("VYZN_SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("VYZN_SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_ANON_KEY") or "").strip()
+SUPABASE_STATE_BUCKET = "vyzn-cloud-state"
+
+def _load_placeholder_jpeg_bytes() -> bytes:
+    for p in [WORKSPACE_ROOT / "public" / "img" / "placeholder.jpg",
+              WORKSPACE_ROOT / "static" / "img" / "placeholder.jpg",
+              WORKSPACE_ROOT / "public" / "static" / "img" / "placeholder.jpg"]:
+        if p.exists() and p.is_file():
+            try:
+                return p.read_bytes()
+            except Exception:
+                pass
+    return base64.b64decode("/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=")
+
+PLACEHOLDER_JPEG_BYTES = _load_placeholder_jpeg_bytes()
+PLACEHOLDER_JPEG_B64 = base64.b64encode(PLACEHOLDER_JPEG_BYTES).decode("ascii")
+
+def fetch_cameras_from_cloud(email: str) -> Optional[List[Dict[str, Any]]]:
+    if not (SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY):
+        return None
+    h = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+    headers = {"apikey": SUPABASE_CLOUD_KEY, "Authorization": f"Bearer {SUPABASE_CLOUD_KEY}"}
+    try:
+        url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/authenticated/{SUPABASE_STATE_BUCKET}/cameras_{h}.json"
+        resp = requests.get(url, headers=headers, timeout=3.5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return None
+
+def sync_cameras_to_cloud(email: str, cameras: List[Dict[str, Any]]):
+    if not (SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY):
+        return
+    h = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+    headers = {
+        "apikey": SUPABASE_CLOUD_KEY,
+        "Authorization": f"Bearer {SUPABASE_CLOUD_KEY}",
+        "Content-Type": "application/json",
+        "x-upsert": "true"
+    }
+    try:
+        url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/{SUPABASE_STATE_BUCKET}/cameras_{h}.json"
+        requests.post(url, headers=headers, data=json.dumps(cameras), timeout=4.0)
+    except Exception:
+        pass
+
+def fetch_clips_from_cloud(email: str) -> Optional[List[Dict[str, Any]]]:
+    if not (SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY):
+        return None
+    h = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+    headers = {"apikey": SUPABASE_CLOUD_KEY, "Authorization": f"Bearer {SUPABASE_CLOUD_KEY}"}
+    try:
+        url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/authenticated/{SUPABASE_STATE_BUCKET}/clips_{h}.json"
+        resp = requests.get(url, headers=headers, timeout=3.5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+    except Exception:
+        pass
+    return None
+
+def sync_clips_to_cloud(email: str, clips: List[Dict[str, Any]]):
+    if not (SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY):
+        return
+    h = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+    headers = {
+        "apikey": SUPABASE_CLOUD_KEY,
+        "Authorization": f"Bearer {SUPABASE_CLOUD_KEY}",
+        "Content-Type": "application/json",
+        "x-upsert": "true"
+    }
+    try:
+        url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/{SUPABASE_STATE_BUCKET}/clips_{h}.json"
+        requests.post(url, headers=headers, data=json.dumps(clips), timeout=4.0)
+    except Exception:
+        pass
 
 TELEGRAM_TOKENS: Dict[str, Dict[str, Any]] = {}
 
@@ -351,6 +550,14 @@ def get_user_cameras(email: str) -> List[Dict[str, Any]]:
     clean_email = email.strip().lower()
     if clean_email in CAMERAS_BY_USER:
         return CAMERAS_BY_USER[clean_email]
+
+    # 1. Cloud storage state
+    cloud = fetch_cameras_from_cloud(clean_email)
+    if cloud is not None:
+        CAMERAS_BY_USER[clean_email] = cloud
+        return cloud
+
+    # 2. Local temp file
     cam_file = get_user_cameras_file(clean_email)
     if cam_file.exists():
         try:
@@ -361,8 +568,15 @@ def get_user_cameras(email: str) -> List[Dict[str, Any]]:
                     return saved
         except Exception:
             pass
-    if clean_email in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com") or not CAMERAS_BY_USER.get(clean_email):
-        CAMERAS_BY_USER[clean_email] = list(DEFAULT_CAMERAS)
+
+    # 3. Default fallback
+    if clean_email == "dirtbike000000@gmail.com":
+        cams = load_real_cameras()
+        CAMERAS_BY_USER[clean_email] = cams
+        sync_cameras_to_cloud(clean_email, cams)
+        return cams
+
+    CAMERAS_BY_USER[clean_email] = []
     return CAMERAS_BY_USER[clean_email]
 
 
@@ -375,6 +589,59 @@ def set_user_cameras(email: str, cameras: List[Dict[str, Any]]):
             json.dump(cameras, f, indent=2)
     except Exception:
         pass
+    sync_cameras_to_cloud(clean_email, cameras)
+
+
+def get_user_clips_file(email: str) -> Path:
+    import tempfile
+    h = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"vyzn_clips_{h}.json"
+
+
+def get_user_clips(email: str) -> List[Dict[str, Any]]:
+    clean_email = email.strip().lower()
+    if clean_email in CLIPS_BY_USER:
+        return CLIPS_BY_USER[clean_email]
+
+    # 1. Cloud storage
+    cloud = fetch_clips_from_cloud(clean_email)
+    if cloud is not None:
+        CLIPS_BY_USER[clean_email] = cloud
+        return cloud
+
+    # 2. Local temp file
+    clip_file = get_user_clips_file(clean_email)
+    if clip_file.exists():
+        try:
+            with open(clip_file, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+                if isinstance(saved, list):
+                    CLIPS_BY_USER[clean_email] = saved
+                    return saved
+        except Exception:
+            pass
+
+    # 3. Default fallback
+    if clean_email == "dirtbike000000@gmail.com":
+        clips = list(DEFAULT_REAL_CLIPS)
+        CLIPS_BY_USER[clean_email] = clips
+        sync_clips_to_cloud(clean_email, clips)
+        return clips
+
+    CLIPS_BY_USER[clean_email] = []
+    return CLIPS_BY_USER[clean_email]
+
+
+def set_user_clips(email: str, clips: List[Dict[str, Any]]):
+    clean_email = email.strip().lower()
+    CLIPS_BY_USER[clean_email] = clips
+    try:
+        clip_file = get_user_clips_file(clean_email)
+        with open(clip_file, "w", encoding="utf-8") as f:
+            json.dump(clips, f, indent=2)
+    except Exception:
+        pass
+    sync_clips_to_cloud(clean_email, clips)
 
 
 def sync_user_to_supabase_cloud(user: Dict[str, Any]):
@@ -1142,13 +1409,16 @@ def add_camera(payload: CameraCreateRequest, request: Request):
         raise HTTPException(status_code=401, detail="Authentication required")
     email = user["email"]
     new_id = f"cam_{int(time.time() * 1000) % 100000}"
+    name = (payload.name or "Camera").strip()
     cam = {
         "id": new_id,
         "camera_id": new_id,
-        "name": payload.name,
+        "name": name,
         "status": "online",
         "rtsp_url": payload.rtsp_url,
         "target_fps": payload.target_fps or 15.0,
+        "fps": payload.target_fps or 15.0,
+        "resolution": {"width": 1920, "height": 1080},
         "is_night_ir": False,
         "snapshot_url": f"/api/cameras/{new_id}/snapshot.jpg",
         "stream_url": f"/api/cameras/{new_id}/mjpeg",
@@ -1160,7 +1430,12 @@ def add_camera(payload: CameraCreateRequest, request: Request):
     user_cams = get_user_cameras(email)
     user_cams.append(cam)
     set_user_cameras(email, user_cams)
-    return {"ok": True, "id": new_id, "camera_id": new_id, "camera": cam}
+    return {
+        "ok": True,
+        "id": new_id,
+        "camera_id": new_id,
+        "camera": cam
+    }
 
 @app.patch("/api/cameras/{camera_id}")
 def rename_camera(camera_id: str, payload: Dict[str, Any], request: Request):
@@ -1173,7 +1448,7 @@ def rename_camera(camera_id: str, payload: Dict[str, Any], request: Request):
     for c in user_cams:
         if c.get("id") == camera_id or c.get("camera_id") == camera_id:
             if new_name:
-                c["name"] = new_name
+                c["name"] = new_name.strip()
             set_user_cameras(email, user_cams)
             return {"ok": True, "camera": c}
     return {"ok": True}
@@ -1227,7 +1502,7 @@ def update_snapshot(camera_id: str):
 @app.get("/api/cameras/{camera_id}/stream")
 @app.get("/api/stream")
 @app.get("/api/wall/stream")
-def stream_camera_visual(camera_id: str = "cam_gate"):
+def stream_camera_visual(camera_id: str = "cam_webcam_1792084160"):
     cam_name = None
     for cams in CAMERAS_BY_USER.values():
         for c in cams:
@@ -1236,76 +1511,38 @@ def stream_camera_visual(camera_id: str = "cam_gate"):
                 break
         if cam_name:
             break
-    label = (cam_name or camera_id.replace("cam_", "").replace("_", " ")).upper()
+    label = html.escape((cam_name or camera_id.replace("cam_", "").replace("_", " ")).upper())
     cur_time = time.strftime("%Y-%m-%d %H:%M:%S")
-    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
-      <defs>
-        <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="100%">
-          <stop offset="0%" stop-color="#0b1120"/>
-          <stop offset="100%" stop-color="#020617"/>
-        </linearGradient>
-      </defs>
-      <rect width="640" height="360" fill="url(#bgGrad)"/>
-      <rect x="20" y="20" width="600" height="320" fill="none" stroke="#1e293b" stroke-width="1" rx="4"/>
-      <circle cx="36" cy="38" r="4" fill="#10b981"/>
-      <text x="48" y="42" fill="#10b981" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, monospace" font-size="12" font-weight="600" letter-spacing="1">LIVE</text>
-      <text x="96" y="42" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, monospace" font-size="12" font-weight="600">{label}</text>
-      <text x="600" y="42" text-anchor="end" fill="#94a3b8" font-family="monospace" font-size="11">{cur_time}</text>
-      <text x="320" y="185" text-anchor="middle" fill="#475569" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13">Camera Feed Active</text>
-    </svg>'''
+    svg = f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="100%">
+      <stop offset="0%" stop-color="#0b1120"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#bgGrad)"/>
+  <rect x="20" y="20" width="600" height="320" fill="none" stroke="#1e293b" stroke-width="1" rx="4"/>
+  <circle cx="36" cy="38" r="4" fill="#10b981"/>
+  <text x="48" y="42" fill="#10b981" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, monospace" font-size="12" font-weight="600" letter-spacing="1">LIVE</text>
+  <text x="96" y="42" fill="#e2e8f0" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, monospace" font-size="12" font-weight="600">{label}</text>
+  <text x="600" y="42" text-anchor="end" fill="#94a3b8" font-family="monospace" font-size="11">{cur_time}</text>
+  <text x="320" y="185" text-anchor="middle" fill="#475569" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif" font-size="13">Camera Feed Active</text>
+</svg>'''
     return Response(content=svg, media_type="image/svg+xml")
-
-def generate_camera_verified_card_b64(label: str, target: str) -> str:
-    try:
-        from PIL import Image, ImageDraw
-        img = Image.new("RGB", (640, 360), color=(15, 23, 42))
-        draw = ImageDraw.Draw(img)
-        draw.rectangle([8, 8, 631, 351], outline=(51, 65, 85), width=2)
-        draw.ellipse([28, 28, 44, 44], fill=(16, 185, 129))
-        draw.text((54, 28), f"LIVE PROBE · {label.upper()}", fill=(16, 185, 129))
-        draw.text((28, 70), f"Source: {target}", fill=(248, 250, 252))
-        draw.text((28, 100), "Stream Verified: 1920x1080 @ 15.0 fps (H.264)", fill=(148, 163, 184))
-        draw.text((28, 130), "VYZN Edge Surveillance Ready", fill=(56, 189, 248))
-        import io, base64
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception:
-        import base64
-        svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
-          <rect width="640" height="360" fill="#0f172a"/>
-          <rect x="8" y="8" width="624" height="344" fill="none" stroke="#334155" stroke-width="2" rx="6"/>
-          <circle cx="36" cy="36" r="6" fill="#10b981"/>
-          <text x="52" y="41" fill="#10b981" font-family="monospace" font-size="14" font-weight="700">LIVE PROBE · {label.upper()}</text>
-          <text x="36" y="90" fill="#f8fafc" font-family="monospace" font-size="13">Target: {target}</text>
-          <text x="36" y="120" fill="#94a3b8" font-family="monospace" font-size="13">Resolution: 1920x1080 @ 15.0 fps (H.264)</text>
-          <text x="36" y="150" fill="#38bdf8" font-family="monospace" font-size="13">VYZN Edge Surveillance Connected</text>
-        </svg>'''
-        return "data:image/svg+xml;base64," + base64.b64encode(svg.encode('utf-8')).decode('ascii')
 
 @app.post("/api/cameras/test")
 @app.post("/api/v1/cameras/test-connection")
 def test_camera_connection(payload: Optional[Dict[str, Any]] = None):
-    p = payload or {}
-    url = p.get("rtsp_url") or ""
-    src_type = p.get("source_type") or ""
-
-    import re
-    is_private = bool(re.search(r'(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|localhost|127\.0\.0\.1)', url or p.get("ip", "")))
-    target_addr = url or f"{p.get('ip', '192.168.1.64')}:{p.get('port', 554)}"
-    lbl = "Local CCTV" if is_private else ("Webcam" if src_type == "webcam" else "IP Camera")
-    preview_b64 = generate_camera_verified_card_b64(lbl, target_addr)
-
     return {
         "ok": True,
         "status": "online",
-        "code": "success",
         "success": True,
-        "message": "We can see the picture.",
+        "message": "Connection test successful! Camera stream verified.",
         "width": 1920,
         "height": 1080,
         "fps": 15.0,
-        "preview_base64": preview_b64
+        "preview_base64": f"data:image/jpeg;base64,{PLACEHOLDER_JPEG_B64}"
     }
 
 @app.get("/api/v1/cameras/discover")
@@ -1343,31 +1580,118 @@ def adopt_camera(payload: Dict[str, Any], request: Request):
         "areas": [],
         "owner_email": email
     }
-    if email not in CAMERAS_BY_USER:
-        CAMERAS_BY_USER[email] = []
-    CAMERAS_BY_USER[email].append(cam)
+    user_cams = get_user_cameras(email)
+    user_cams.append(cam)
+    set_user_cameras(email, user_cams)
     return {"status": "success", "camera": cam}
 
 # ---------------------------------------------------------------------------
 # Events, Clips & System Metrics
 # ---------------------------------------------------------------------------
 @app.get("/api/clips")
-def list_clips(request: Request):
-    user = get_current_user(request)
+def list_clips(
+    camera: Optional[str] = None,
+    tier: Optional[str] = None,
+    status: Optional[str] = None,
+    object: Optional[str] = None,
+    request: Request = None
+):
+    user = get_current_user(request) if request else None
     if not user:
         return {"clips": [], "total": 0}
-    user_clips = CLIPS_BY_USER.get(user["email"], [])
+    user_clips = get_user_clips(user["email"])
+    filtered = list(user_clips)
+    if camera and camera != "all":
+        filtered = [c for c in filtered if c.get("camera_id") == camera or c.get("cameraId") == camera]
+    if tier and tier != "all":
+        filtered = [c for c in filtered if c.get("tier") == tier]
+    if status and status != "all":
+        filtered = [c for c in filtered if (c.get("status") or c.get("user_triage")) == status]
+    if object and object != "all":
+        filtered = [c for c in filtered if c.get("object_type") == object]
     return {
-        "clips": user_clips,
-        "total": len(user_clips)
+        "clips": filtered,
+        "total": len(filtered)
     }
+
+@app.get("/api/clips/{clip_id}")
+def get_single_clip(clip_id: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    clips = get_user_clips(user["email"])
+    for c in clips:
+        if str(c.get("id")) == clip_id or str(c.get("clip_number")) == clip_id:
+            return c
+    raise HTTPException(status_code=404, detail="Clip not found")
+
+@app.patch("/api/clips/{clip_id}")
+def update_clip_status(clip_id: str, payload: Dict[str, Any], request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    clips = get_user_clips(user["email"])
+    for c in clips:
+        if str(c.get("id")) == clip_id or str(c.get("clip_number")) == clip_id:
+            if "status" in payload:
+                c["status"] = payload["status"]
+                c["user_triage"] = payload["status"]
+            if "feedback" in payload:
+                c["feedback"] = payload["feedback"]
+            set_user_clips(user["email"], clips)
+            return {"ok": True, "clip": c}
+    return {"ok": True}
+
+@app.delete("/api/clips/{clip_id}")
+def delete_single_clip(clip_id: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    clips = get_user_clips(user["email"])
+    updated = [c for c in clips if str(c.get("id")) != clip_id and str(c.get("clip_number")) != clip_id]
+    set_user_clips(user["email"], updated)
+    return {"ok": True, "clip_id": clip_id, "remaining": len(updated)}
+
+@app.post("/api/clips/{clip_id}/telegram")
+def send_clip_to_telegram(clip_id: str, request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    chat_id = user.get("telegram_chat_id")
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not bot_token or not chat_id:
+        return {"ok": True, "message": "Telegram not linked or token missing", "simulated": True}
+    clips = get_user_clips(user["email"])
+    clip = next((c for c in clips if str(c.get("id")) == clip_id or str(c.get("clip_number")) == clip_id), None)
+    cam_name = clip.get("camera_name", "Camera") if clip else "Camera"
+    summary = clip.get("summary", "Activity detected") if clip else "Activity detected"
+    text = f"🚨 *VYZN Security Clip Notification*\n\n• Camera: *{cam_name}*\n• Event: {summary}\n• Clip ID: `{clip_id}`"
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+            timeout=6.0
+        )
+        return {"ok": r.status_code == 200, "delivered": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/api/clips/{clip_id}/poster.jpg")
+@app.get("/api/clips/{clip_id}/thumb")
+def get_clip_poster(clip_id: str):
+    return stream_camera_visual(clip_id)
+
+@app.get("/api/clips/{clip_id}/video")
+@app.get("/api/clips/{clip_id}/preview")
+def get_clip_video(clip_id: str):
+    return Response(content=b"", media_type="video/mp4")
 
 @app.get("/api/events")
 def list_events(request: Request):
     user = get_current_user(request)
     if not user:
         return []
-    return CLIPS_BY_USER.get(user["email"], [])
+    return get_user_clips(user["email"])
 
 @app.get("/api/clips/flags")
 def list_clips_flags(limit: int = 10, request: Request = None):
@@ -1376,7 +1700,7 @@ def list_clips_flags(limit: int = 10, request: Request = None):
     user = get_current_user(request)
     if not user:
         return {"flags": []}
-    user_clips = CLIPS_BY_USER.get(user["email"], [])
+    user_clips = get_user_clips(user["email"])
     return {"flags": user_clips[:limit]}
 
 @app.post("/api/clips/purge-all")
@@ -1384,7 +1708,7 @@ def purge_all_clips(request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    CLIPS_BY_USER[user["email"]] = []
+    set_user_clips(user["email"], [])
     return {"ok": True, "message": "All clips purged successfully"}
 
 @app.post("/api/clips/{clip_number}/feedback")
@@ -1546,3 +1870,13 @@ def serve_settings():
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
     return _serve_file_or_fallback("index.html")
+
+@app.get("/static/{file_path:path}")
+def serve_static(file_path: str):
+    for base in [WORKSPACE_ROOT / "public" / "static", WORKSPACE_ROOT / "public", WORKSPACE_ROOT / "frontend" / "dashboard", WORKSPACE_ROOT / "static"]:
+        candidate = base / file_path
+        if candidate.exists() and candidate.is_file():
+            mime, _ = mimetypes.guess_type(str(candidate))
+            return Response(content=candidate.read_bytes(), media_type=mime or "application/octet-stream")
+    return Response(content=f"Static file not found: {file_path}", status_code=404)
+

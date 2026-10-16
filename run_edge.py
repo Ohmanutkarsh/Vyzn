@@ -246,7 +246,10 @@ def main():
     start_time = time.monotonic()
     try:
         while True:
-            time.sleep(1.0)
+            try:
+                time.sleep(1.0)
+            except Exception as e:
+                logger.warning(f"Main loop tick exception: {e}")
             if args.duration > 0 and (time.monotonic() - start_time >= args.duration):
                 logger.info(f"Target test duration of {args.duration}s reached.")
                 break
