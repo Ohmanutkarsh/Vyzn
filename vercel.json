@@ -11,32 +11,32 @@
       "destination": "/api"
     },
     {
-      "source": "/cameras/new",
-      "destination": "/add-camera.html"
+      "source": "/cameras/new(.*)",
+      "destination": "/add-camera"
     },
     {
       "source": "/areas/(.*)",
-      "destination": "/areas.html"
+      "destination": "/areas"
     },
     {
       "source": "/clips/(.*)",
-      "destination": "/clips.html"
+      "destination": "/clips"
     },
     {
       "source": "/login/(.*)",
-      "destination": "/index.html"
+      "destination": "/"
     },
     {
       "source": "/login",
-      "destination": "/index.html"
+      "destination": "/"
     },
     {
       "source": "/setup/(.*)",
-      "destination": "/index.html"
+      "destination": "/"
     },
     {
       "source": "/setup",
-      "destination": "/index.html"
+      "destination": "/"
     }
   ]
 }

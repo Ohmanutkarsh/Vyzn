@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Camera — VYZN</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css?v=20261011">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* High-Contrast Enterprise Dark Mode (Tailwind Zinc Palette) */
+    .shell-main-wrapper {
+      overflow-x: hidden !important;
+    }
+
+    .wizard-container {
+      max-width: 680px !important;
+      width: 100% !important;
+      margin: 0 auto !important;
+      padding: 48px 24px 64px 24px !important;
+      box-sizing: border-box !important;
+    }
+
+    .wizard-stepper {
+      font-size: 12px !important;
+      font-weight: 600 !important;
+      letter-spacing: 0.1em !important;
+      text-transform: uppercase !important;
+      color: #71717a !important; /* text-zinc-500 */
+      margin-bottom: 8px !important;
+      display: block !important;
+    }
+
+    .wizard-step-title {
+      font-size: 30px !important;
+      font-weight: 700 !important;
+      letter-spacing: -0.025em !important;
+      color: #ffffff !important;
+      margin: 0 0 8px 0 !important;
+      line-height: 1.25 !important;
+    }
+
+    .wizard-subhead {
+      font-size: 14px !important;
+      color: #a1a1aa !important; /* text-zinc-400 */
+      margin: 0 0 32px 0 !important;
+      line-height: 1.5 !important;
+    }
+
+    .option-cards-stack {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 14px !important; /* gap-3.5 */
+      width: 100% !important;
+    }
+
+    .option-card {
+      all: unset !important;
+      display: flex !important;
+      align-items: flex-start !important;
+      justify-content: space-between !important;
+      background: rgba(24, 24, 27, 0.6) !important; /* bg-zinc-900/60 */
+      border: 1px solid #27272a !important; /* border-zinc-800 */
+      border-radius: 12px !important; /* rounded-xl */
+      padding: 20px !important; /* p-5 */
+      cursor: pointer !important;
+      transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+      box-sizing: border-box !important;
+      width: 100% !important;
+      text-align: left !important;
+      position: relative !important;
+    }
+
+    .option-card:hover {
+      background: rgba(24, 24, 27, 0.9) !important; /* hover:bg-zinc-900/90 */
+      border-color: #3f3f46 !important; /* hover:border-zinc-700 */
+      transform: translateY(-1px) !important;
+    }
+
+    .option-icon-box {
+      padding: 10px !important; /* p-2.5 */
+      border-radius: 8px !important; /* rounded-lg */
+      background: rgba(39, 39, 42, 0.6) !important; /* bg-zinc-800/60 */
+      border: 1px solid rgba(63, 63, 70, 0.5) !important; /* border-zinc-700/50 */
+      color: #d4d4d8 !important; /* text-zinc-300 */
+      margin-right: 16px !important; /* mr-4 */
+      flex-shrink: 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      transition: color 150ms ease !important;
+    }
+
+    .option-card:hover .option-icon-box {
+      color: #ffffff !important; /* group-hover:text-white */
+    }
+
+    .option-card-body {
+      flex: 1 1 0% !important;
+      min-width: 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+    }
+
+    .option-title-row {
+      display: flex !important;
+      align-items: center !important;
+      flex-wrap: wrap !important;
+      gap: 8px !important;
+    }
+
+    .option-card-title {
+      font-size: 16px !important; /* text-base */
+      font-weight: 600 !important;
+      color: #ffffff !important; /* text-white */
+      line-height: 1.3 !important;
+    }
+
+    .option-badge {
+      font-size: 11px !important; /* text-[11px] */
+      font-weight: 500 !important;
+      padding: 2px 8px !important; /* px-2 py-0.5 */
+      border-radius: 9999px !important; /* rounded-full */
+      display: inline-flex !important;
+      align-items: center !important;
+      line-height: 1.4 !important;
+    }
+
+    .badge-blue {
+      background: rgba(59, 130, 246, 0.1) !important; /* bg-blue-500/10 */
+      color: #60a5fa !important; /* text-blue-400 */
+      border: 1px solid rgba(59, 130, 246, 0.2) !important; /* border-blue-500/20 */
+    }
+
+    .badge-emerald {
+      background: rgba(16, 185, 129, 0.1) !important; /* bg-emerald-500/10 */
+      color: #34d399 !important; /* text-emerald-400 */
+      border: 1px solid rgba(16, 185, 129, 0.2) !important; /* border-emerald-500/20 */
+    }
+
+    .badge-purple {
+      background: rgba(168, 85, 247, 0.1) !important; /* bg-purple-500/10 */
+      color: #c084fc !important; /* text-purple-400 */
+      border: 1px solid rgba(168, 85, 247, 0.2) !important; /* border-purple-500/20 */
+    }
+
+    .option-card-desc {
+      font-size: 14px !important; /* text-sm */
+      color: #a1a1aa !important; /* text-zinc-400 */
+      margin-top: 4px !important; /* mt-1 */
+      margin-bottom: 8px !important; /* mb-2 */
+      line-height: 1.5 !important;
+    }
+
+    .option-card-tags {
+      font-size: 12px !important; /* text-xs */
+      color: #71717a !important; /* text-zinc-500 */
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+      letter-spacing: 0.02em !important;
+    }
+
+    .option-arrow {
+      color: #52525b !important; /* text-zinc-600 */
+      margin-top: 4px !important; /* mt-1 */
+      margin-left: 12px !important;
+      flex-shrink: 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      transition: all 150ms ease !important;
+    }
+
+    .option-card:hover .option-arrow {
+      color: #ffffff !important; /* group-hover:text-white */
+      transform: translateX(2px) !important; /* group-hover:translate-x-0.5 */
+    }
+
+    .stepper-progress-wrap {
+      margin-top: 40px !important; /* mt-10 */
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 16px !important; /* gap-4 */
+      width: 100% !important;
+      user-select: none !important;
+    }
+
+    .stepper-progress-track {
+      height: 6px !important; /* h-1.5 for easy clicking */
+      background: #27272a !important; /* bg-zinc-800 */
+      border-radius: 9999px !important; /* rounded-full */
+      flex: 1 1 0% !important;
+      overflow: hidden !important;
+      position: relative !important;
+      cursor: pointer !important;
+      transition: background 150ms ease !important;
+    }
+
+    .stepper-progress-track:hover {
+      background: #3f3f46 !important;
+    }
+
+    .stepper-progress-active {
+      height: 100% !important;
+      width: 33.333%; /* Not !important so JS can change width freely */
+      background: #3b82f6 !important; /* bg-blue-500 */
+      border-radius: 9999px !important;
+      transition: width 250ms ease !important;
+      pointer-events: none !important;
+    }
+
+    .stepper-counter {
+      font-size: 12px !important; /* text-xs */
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+      color: #71717a !important; /* text-zinc-500 */
+      flex-shrink: 0 !important;
+      cursor: pointer !important;
+      transition: color 150ms ease !important;
+    }
+
+    .stepper-counter:hover {
+      color: #ffffff !important;
+    }
+  </style>
+</head>
+<body class="app-shell">
+
+  <!-- Desktop Sidebar -->
+  <div id="app-sidebar"></div>
+
+  <!-- Main Content Wrapper -->
+  <div class="shell-main-wrapper">
+    <!-- Top Header -->
+    <div id="app-header"></div>
+
+    <!-- Wizard Content -->
+    <main class="shell-content" id="main-content">
+      <div class="wizard-container">
+        
+        <!-- Step Indicator (Single clean marker) -->
+        <div class="wizard-stepper" id="wizard-stepper">STEP 1 OF 3</div>
+
+        <!-- Step 1: Choose Connection Type -->
+        <section class="wizard-step" id="step-1">
+          <h1 class="wizard-step-title" id="step1-title">How is the camera connected?</h1>
+          <p class="wizard-subhead">Select a connection method to stream footage into VYZN.</p>
+
+          <div class="option-cards-stack">
+            <!-- Card 1: IP Camera or Recorder -->
+            <button type="button" class="option-card" data-choice="ip">
+              <div class="option-icon-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+              </div>
+              <div class="option-card-body">
+                <div class="option-title-row">
+                  <span class="option-card-title">IP camera or recorder</span>
+                  <span class="option-badge badge-blue">Direct RTSP</span>
+                </div>
+                <div class="option-card-desc">CCTV camera, DVR, or NVR. Connect directly using its local IP address and credentials.</div>
+                <div class="option-card-tags">Hikvision • CP Plus • Dahua • ONVIF / NVR</div>
+              </div>
+              <div class="option-arrow">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </div>
+            </button>
+
+            <!-- Card 2: Find on my network -->
+            <button type="button" class="option-card" data-choice="network">
+              <div class="option-icon-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                  <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                  <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                  <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                </svg>
+              </div>
+              <div class="option-card-body">
+                <div class="option-title-row">
+                  <span class="option-card-title">Find on my network</span>
+                  <span class="option-badge badge-emerald">Auto-Discovery</span>
+                </div>
+                <div class="option-card-desc">VYZN scans your premises Wi-Fi and local network for active CCTV feeds automatically.</div>
+                <div class="option-card-tags">Zero Setup • Auto-Detect Local Subnet</div>
+              </div>
+              <div class="option-arrow">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </div>
+            </button>
+
+            <!-- Card 3: Phone or webcam -->
+            <button type="button" class="option-card" data-choice="phone">
+              <div class="option-icon-box">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                  <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                </svg>
+              </div>
+              <div class="option-card-body">
+                <div class="option-title-row">
+                  <span class="option-card-title">Phone or webcam</span>
+                  <span class="option-badge badge-purple">Instant Test</span>
+                </div>
+                <div class="option-card-desc">Use a spare phone running IP Webcam, or this computer's webcam for instant testing.</div>
+                <div class="option-card-tags">Computer Webcam • Android / iOS App</div>
+              </div>
+              <div class="option-arrow">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </div>
+            </button>
+          </div>
+        </section>
+
+        <!-- Step 2: Form & Connection Test -->
+        <section class="wizard-step" id="step-2" style="display: none;">
+          <div style="margin-bottom: 16px;">
+            <button type="button" class="btn btn-quiet" id="btn-step2-back" style="padding: 4px 8px; font-size: 13px; color: #a1a1aa; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">← Change connection method</button>
+          </div>
+          <h2 class="wizard-step-title" id="step2-title">Connect the camera</h2>
+
+          <!-- Path A: IP Camera or Recorder -->
+          <div class="path-section" id="path-ip" style="display: none;">
+            <!-- Simple standard fields -->
+            <div id="ip-standard-fields">
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-3);">
+                <div class="form-group">
+                  <label for="ip-address" class="form-label">IP address</label>
+                  <input type="text" id="ip-address" class="form-input mono-input" placeholder="192.168.1.64" autocomplete="off" />
+                </div>
+                <div class="form-group">
+                  <label for="ip-port" class="form-label">Port</label>
+                  <input type="number" id="ip-port" class="form-input mono-input" value="554" />
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);">
+                <div class="form-group">
+                  <label for="ip-username" class="form-label">Username</label>
+                  <input type="text" id="ip-username" class="form-input" value="admin" autocomplete="off" />
+                </div>
+                <div class="form-group">
+                  <label for="ip-password" class="form-label">Password</label>
+                  <div style="position: relative;">
+                    <input type="password" id="ip-password" class="form-input" style="width: 100%; padding-right: 36px;" autocomplete="new-password" />
+                    <button type="button" id="btn-toggle-pw" style="position: absolute; right: 8px; top: 10px; background: none; border: none; color: var(--text-3); cursor: pointer;" aria-label="Show password">👁</button>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-3);">
+                <div class="form-group">
+                  <label for="ip-brand" class="form-label">Brand</label>
+                  <select id="ip-brand" class="form-input">
+                    <option value="Hikvision">Hikvision</option>
+                    <option value="CP Plus">CP Plus</option>
+                    <option value="Dahua">Dahua</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div class="form-group" id="group-channel">
+                  <label for="ip-channel" class="form-label">Channel</label>
+                  <input type="number" id="ip-channel" class="form-input mono-input" value="1" min="1" max="32" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Advanced toggle -->
+            <div style="margin-bottom: var(--space-3);">
+              <button type="button" class="btn btn-quiet" id="btn-toggle-advanced" style="font-size: 13px; padding: 4px 0;">Advanced: paste a full stream address</button>
+            </div>
+
+            <!-- Advanced URL input -->
+            <div class="form-group" id="group-full-url" style="display: none;">
+              <label for="ip-full-url" class="form-label">Stream address</label>
+              <input type="text" id="ip-full-url" class="form-input mono-input" placeholder="rtsp://admin:pass@192.168.1.64:554/Streaming/Channels/101" />
+            </div>
+
+            <!-- Live Address Preview -->
+            <div class="address-preview-box">
+              <div class="address-preview-label">Stream address preview</div>
+              <div class="address-preview-text" id="address-preview-text">rtsp://admin:••••@192.168.1.64:554/Streaming/Channels/101</div>
+            </div>
+          </div>
+
+          <!-- Path B: Find on My Network -->
+          <div class="path-section" id="path-network" style="display: none;">
+            <div id="network-scanning-state" style="padding: var(--space-6) 0; text-align: center;">
+              <div class="skeleton" style="height: 6px; width: 100%; margin-bottom: var(--space-4);"></div>
+              <div style="font-size: 15px; color: var(--text-2);">Looking for cameras on your network…</div>
+            </div>
+            <div id="network-found-list" class="choice-cards-stack" style="display: none;"></div>
+            <div id="network-empty-state" class="empty-state" style="display: none;">
+              <p class="empty-state-text">No cameras found. Check that this computer is on the same network as your cameras, or add one by IP address.</p>
+              <div style="display: flex; gap: var(--space-3);">
+                <button type="button" class="btn btn-secondary" id="btn-network-retry">Scan again</button>
+                <button type="button" class="btn btn-primary" id="btn-network-to-ip">Add by IP address</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Path C: Phone or Webcam -->
+          <div class="path-section" id="path-phone" style="display: none;">
+            <div class="choice-card" style="margin-bottom: var(--space-4); cursor: default;">
+              <div class="choice-card-title">Use a smartphone</div>
+              <div style="font-size: 13px; color: var(--text-2); margin-top: 8px; line-height: 1.6;">
+                1. Install the free "IP Webcam" app on Android or "DroidCam" on iOS or Android.<br>
+                2. Connect the phone to the premises Wi-Fi and tap Start server.<br>
+                3. Paste the address shown on the phone below.
+              </div>
+              <div class="form-group" style="margin-top: var(--space-3); margin-bottom: 0;">
+                <label for="phone-stream-url" class="form-label">Phone stream address</label>
+                <input type="text" id="phone-stream-url" class="form-input mono-input" placeholder="http://192.168.1.15:8080/video" />
+              </div>
+            </div>
+
+            <div style="text-align: center; margin: var(--space-3) 0; color: var(--text-3); font-size: 13px;">— or —</div>
+
+            <div class="choice-card" style="cursor: default;">
+              <div class="choice-card-title">This computer's webcam</div>
+              <div class="choice-card-desc" style="margin-bottom: var(--space-3);">Good for trying VYZN. Use a CCTV camera for your society or premises.</div>
+              <button type="button" class="btn btn-secondary" id="btn-use-webcam">Use this computer's webcam</button>
+            </div>
+          </div>
+
+          <!-- Test Connection Action & Diagnostics Box -->
+          <div style="margin-top: var(--space-6);">
+            <button type="button" class="btn btn-primary" id="btn-test-connection" style="width: 100%;">Test connection</button>
+          </div>
+
+          <!-- Diagnostic Feedback Box -->
+          <div id="test-result-container" style="display: none;">
+            <div class="test-result-box" id="test-result-box">
+              <div id="test-result-message" style="font-size: 14px; font-weight: 500;"></div>
+              <div id="test-result-facts" class="mono-facts" style="margin-top: 4px;"></div>
+              <div class="test-preview-thumb" id="test-preview-thumb" style="display: none;">
+                <img id="test-preview-img" src="" alt="Live camera test preview" />
+              </div>
+              <div style="margin-top: var(--space-4);" id="test-continue-wrap" style="display: none;">
+                <button type="button" class="btn btn-primary" id="btn-step2-continue" style="width: 100%;">Continue</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Step 3: Name it -->
+        <section class="wizard-step" id="step-3" style="display: none;">
+          <div style="margin-bottom: 16px;">
+            <button type="button" class="btn btn-quiet" id="btn-step3-back" style="padding: 4px 8px; font-size: 13px; color: #a1a1aa; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">← Back to connection test</button>
+          </div>
+          <h2 class="wizard-step-title" id="step3-title">Name the camera</h2>
+          <div class="form-group">
+            <label for="camera-name-input" class="form-label">Camera name</label>
+            <input type="text" id="camera-name-input" class="form-input" value="Camera 1" autocomplete="off" />
+            <div class="name-chips-row">
+              <button type="button" class="chip-btn" data-suggest="Main gate / Security">Main gate / Security</button>
+              <button type="button" class="chip-btn" data-suggest="Building lobby">Building lobby</button>
+              <button type="button" class="chip-btn" data-suggest="Lift & elevator">Lift & elevator</button>
+              <button type="button" class="chip-btn" data-suggest="Parking & basement">Parking & basement</button>
+              <button type="button" class="chip-btn" data-suggest="Clubhouse & garden">Clubhouse & garden</button>
+              <button type="button" class="chip-btn" data-suggest="Boundary wall">Boundary wall</button>
+              <button type="button" class="chip-btn" data-suggest="Back gate">Back gate</button>
+              <button type="button" class="chip-btn" data-suggest="Shop entrance">Shop entrance</button>
+              <button type="button" class="chip-btn" data-suggest="Cash counter">Cash counter</button>
+              <button type="button" class="chip-btn" data-suggest="Godown">Godown</button>
+            </div>
+          </div>
+          <div style="margin-top: var(--space-6);">
+            <button type="button" class="btn btn-primary" id="btn-save-camera" style="width: 100%;">Save camera</button>
+          </div>
+        </section>
+
+        <!-- Success Screen -->
+        <section class="wizard-step" id="step-success" style="display: none; text-align: center; padding: var(--space-8) 0;">
+          <div style="font-size: 40px; margin-bottom: var(--space-3);">✓</div>
+          <h2 class="wizard-step-title" id="success-headline" style="margin-bottom: var(--space-2);">Camera is connected.</h2>
+          <p style="font-size: 15px; color: var(--text-2); margin-bottom: var(--space-6);">Now choose the part of the picture VYZN should watch.</p>
+          <div style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 320px; margin: 0 auto;">
+            <a href="/areas" class="btn btn-primary" id="btn-go-to-areas" style="text-decoration: none;">Choose the area to watch</a>
+            <button type="button" class="btn btn-quiet" id="btn-add-another">Add another camera</button>
+          </div>
+        </section>
+
+        <!-- Stepper Progress Indicator -->
+        <div class="stepper-progress-wrap" id="stepper-progress-wrap" title="Click progress bar to switch steps">
+          <div class="stepper-progress-track" id="stepper-progress-track">
+            <div class="stepper-progress-active" id="stepper-progress-fill"></div>
+          </div>
+          <span class="stepper-counter" id="stepper-counter" title="Click to advance step">1/3</span>
+        </div>
+
+      </div>
+
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <div id="app-bottom-nav"></div>
+  </div>
+
+  <script type="module" src="/static/add-camera.js"></script>
+</body>
+</html>
