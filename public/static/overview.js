@@ -150,6 +150,7 @@ function renderStrip() {
 
 let currentStreamTrack = null;
 let edgeBaseUrl = null;
+let edgeCameras = null;
 
 async function checkEdgeServer() {
   if (edgeBaseUrl !== null) return edgeBaseUrl;
@@ -168,6 +169,12 @@ async function checkEdgeServer() {
     clearTimeout(timer);
     if (res.ok) {
       edgeBaseUrl = 'http://127.0.0.1:8000';
+      try {
+        const camRes = await fetch('http://127.0.0.1:8000/api/cameras', { mode: 'cors' });
+        if (camRes.ok) {
+          edgeCameras = await camRes.json();
+        }
+      } catch (e) {}
       return edgeBaseUrl;
     }
   } catch (e) {
@@ -292,6 +299,17 @@ async function startLiveStream(cid) {
 
   const edge = await checkEdgeServer();
 
+  // Find corresponding local edge camera if ID differs (e.g. cloud assigned cam_81559 while local edge has cam_camera_1_...)
+  let localCid = cid;
+  if (edge && Array.isArray(edgeCameras) && edgeCameras.length > 0) {
+    const match = edgeCameras.find(c => (c.id || c.camera_id) === cid)
+      || edgeCameras.find(c => c.name && cam.name && c.name.trim().toLowerCase() === cam.name.trim().toLowerCase())
+      || (edgeCameras.length === 1 ? edgeCameras[0] : null);
+    if (match) {
+      localCid = match.id || match.camera_id;
+    }
+  }
+
   // If this is a hardware webcam and no edge daemon is present, try direct browser webcam first
   if (isWebcam && !edge) {
     const started = await activateBrowserWebcam(cam, cid);
@@ -300,7 +318,10 @@ async function startLiveStream(cid) {
 
   const streamCandidates = [];
   if (edge) {
-    streamCandidates.push(`${edge}/api/cameras/${cid}/stream?t=${Date.now()}`);
+    streamCandidates.push(`${edge}/api/cameras/${localCid}/stream?t=${Date.now()}`);
+    if (localCid !== cid) {
+      streamCandidates.push(`${edge}/api/cameras/${cid}/stream?t=${Date.now()}`);
+    }
   }
   if (isDirectHttp) {
     streamCandidates.push(cam.rtsp_url);

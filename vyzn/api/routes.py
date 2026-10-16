@@ -1300,6 +1300,7 @@ async def stream_camera_mjpeg(camera_id: str, request: Request):
     """
     async def frame_generator():
         fallback_frame = None
+        unavail_count = 0
         try:
             while True:
                 # Disconnection watchdog: terminate immediately if client closed tab/socket
@@ -1311,6 +1312,11 @@ async def stream_camera_mjpeg(camera_id: str, request: Request):
                     jpeg_bytes = _pipeline_instance.get_camera_live_jpeg(camera_id, quality=70)
 
                 if jpeg_bytes is None:
+                    unavail_count += 1
+                    # If camera stream has no frames after 4 attempts (2s), close stream so frontend onerror triggers failover
+                    if unavail_count > 4:
+                        break
+
                     if fallback_frame is None:
                         card = np.full((360, 640, 3), (25, 28, 36), dtype=np.uint8)
                         cv2.putText(card, f"Connecting: {camera_id}", (150, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (148, 163, 184), 2)
@@ -1319,6 +1325,7 @@ async def stream_camera_mjpeg(camera_id: str, request: Request):
                     jpeg_bytes = fallback_frame
                     await asyncio.sleep(0.5)
                 else:
+                    unavail_count = 0
                     await asyncio.sleep(0.06)  # ~16 FPS non-blocking
 
                 yield (

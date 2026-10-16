@@ -160,5 +160,36 @@
     "post_roll_sec": null,
     "merge_gap_sec": null,
     "max_clip_duration_sec": null
+  },
+  {
+    "camera_id": "cam_81559",
+    "name": "Camera 1",
+    "rtsp_url": "0",
+    "enabled": true,
+    "location_id": "loc_primary",
+    "target_fps": 15.0,
+    "capture_fps": 15.0,
+    "ai_inference_fps": 15.0,
+    "downscale_width": 854,
+    "downscale_height": 480,
+    "is_night_ir": false,
+    "owner_email": "dirtbike000000@gmail.com",
+    "business_hours": {
+      "enabled": true,
+      "start_hour": 9,
+      "start_minute": 0,
+      "end_hour": 21,
+      "end_minute": 0
+    },
+    "restricted_zones": [],
+    "privacy_zones": [],
+    "watch_areas": [],
+    "osd_exclude_polygon": null,
+    "start_motion_threshold": null,
+    "continue_motion_threshold": null,
+    "pre_roll_sec": null,
+    "post_roll_sec": null,
+    "merge_gap_sec": null,
+    "max_clip_duration_sec": null
   }
 ]

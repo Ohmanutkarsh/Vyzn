@@ -261,6 +261,7 @@ class EdgePipeline:
 
     def get_camera_live_jpeg(self, camera_id: str, quality: int = 75, max_width: int = 960) -> Optional[bytes]:
         """Fetches the latest live JPEG from the camera's capture thread or ring buffer capped at max_width."""
+        # 1. Exact match by camera_id
         for t in self.capture_threads:
             if getattr(t, "config", None) and t.config.camera_id == camera_id:
                 if hasattr(t, "get_latest_jpeg"):
@@ -268,7 +269,7 @@ class EdgePipeline:
                     if jpeg:
                         return jpeg
 
-        # Fallback to ring buffer
+        # Exact match in ring buffer
         if camera_id in self.ring_buffers and self.ring_buffers[camera_id]:
             frame = self.ring_buffers[camera_id][-1]
             h, w = frame.shape[:2]
@@ -277,6 +278,46 @@ class EdgePipeline:
             ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if ret:
                 return jpeg.tobytes()
+
+        # 2. Check any capture thread running the hardware webcam (device 0)
+        for t in self.capture_threads:
+            cfg = getattr(t, "config", None)
+            if cfg and str(cfg.rtsp_url) == "0":
+                if hasattr(t, "get_latest_jpeg"):
+                    jpeg = t.get_latest_jpeg(quality=quality, max_width=max_width)
+                    if jpeg:
+                        return jpeg
+
+        # 3. Fuzzy match across active capture threads
+        clean_id = (camera_id or "").strip().lower()
+        for t in self.capture_threads:
+            cfg = getattr(t, "config", None)
+            if cfg:
+                c_id = cfg.camera_id.lower()
+                c_name = (cfg.name or "").lower()
+                if c_id.endswith(clean_id) or clean_id.endswith(c_id) or (c_name and (c_name in clean_id or clean_id in c_name)):
+                    if hasattr(t, "get_latest_jpeg"):
+                        jpeg = t.get_latest_jpeg(quality=quality, max_width=max_width)
+                        if jpeg:
+                            return jpeg
+
+        # 4. Check ANY capture thread that currently has a live frame
+        for t in self.capture_threads:
+            if hasattr(t, "get_latest_jpeg"):
+                jpeg = t.get_latest_jpeg(quality=quality, max_width=max_width)
+                if jpeg:
+                    return jpeg
+
+        # 5. Check ANY ring buffer that has frames
+        for buf in self.ring_buffers.values():
+            if buf:
+                frame = buf[-1]
+                h, w = frame.shape[:2]
+                if w > max_width:
+                    frame = cv2.resize(frame, (max_width, int(max_width * h / w)))
+                ret, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                if ret:
+                    return jpeg.tobytes()
 
         return None
 
