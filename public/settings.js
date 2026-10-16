@@ -716,9 +716,11 @@ async function initStorageControls() {
         if (valFree) {
           const used = data.disk_used_gb || 0;
           const total = data.disk_total_gb || 0;
-          const freePct = data.disk_free_pct !== undefined ? data.disk_free_pct : (data.free_gb && data.total_gb ? Math.round((data.free_gb / data.total_gb) * 100) : 85);
-          const freeGb = (total > used && total > 0) ? (total - used).toFixed(1) : (data.free_gb || 128.5);
-          valFree.textContent = `${freePct}% free (${freeGb} GB free of ${total > 0 ? total.toFixed(1) : 512} GB)`;
+          const freeGb = (total >= used && total > 0) ? (total - used).toFixed(1) : 0;
+          const freePct = data.disk_free_pct !== undefined ? data.disk_free_pct : (total > 0 ? Math.round((freeGb / total) * 100) : 0);
+          valFree.textContent = total > 0
+            ? `${freePct}% free (${freeGb} GB free of ${total.toFixed(1)} GB)`
+            : 'Available';
         }
         if (valClips) {
           valClips.textContent = `${data.clips_count || 0} clips (Safe & Preserved)`;
@@ -799,7 +801,19 @@ async function initStorageControls() {
     };
   }
 
-  // Opens native Windows file explorer folder selection dialog via local edge server
+  // Quick preset chips listeners
+  document.querySelectorAll('.btn-preset-path').forEach(btn => {
+    btn.onclick = () => {
+      const p = btn.getAttribute('data-path');
+      if (p && inputFolder) {
+        inputFolder.value = p;
+        showToast(`Selected preset: ${p}`);
+        if (btnSave) btnSave.click();
+      }
+    };
+  });
+
+  // Opens native Windows file explorer folder selection dialog via local edge server or prompts for path
   const btnBrowse = document.getElementById('btn-browse-folder');
   const inputDirPicker = document.getElementById('input-folder-picker');
 
@@ -809,56 +823,47 @@ async function initStorageControls() {
       btnBrowse.textContent = '📁 Opening Explorer…';
 
       let backendSuccess = false;
-      try {
-        const edge = await checkEdgeServer();
-        const browseUrl = edge ? `${edge}/api/settings/browse-folder` : '/api/settings/browse-folder';
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
+      const edge = await checkEdgeServer();
 
-        const res = await fetch(browseUrl, {
-          method: 'POST',
-          credentials: 'include',
-          mode: 'cors',
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        const data = await res.json();
-        if (data.ok && data.selected_path) {
-          if (inputFolder) inputFolder.value = data.selected_path;
-          showToast(`Selected folder: ${data.selected_path}`);
-          if (btnSave) btnSave.click();
-          backendSuccess = true;
-        } else if (data.cancelled) {
-          backendSuccess = true; // User intentionally cancelled
-        }
-      } catch (err) {
-        console.warn('Backend browse-folder error:', err);
-      }
-
-      // Method B: Browser File System Access API fallback
-      if (!backendSuccess && typeof window.showDirectoryPicker === 'function') {
+      if (edge) {
         try {
-          const dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-          if (dirHandle && dirHandle.name) {
-            const currentDir = inputFolder.value.trim() || 'C:\\VyznStorage';
-            const baseParent = currentDir.includes('\\') ? currentDir.substring(0, currentDir.lastIndexOf('\\')) : 'C:\\';
-            const guessedPath = `${baseParent}\\${dirHandle.name}`;
-            inputFolder.value = guessedPath;
-            showToast(`Selected folder: ${dirHandle.name}`);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+          const res = await fetch(`${edge}/api/settings/browse-folder`, {
+            method: 'POST',
+            mode: 'cors',
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+
+          const data = await res.json();
+          if (data.ok && data.selected_path) {
+            if (inputFolder) inputFolder.value = data.selected_path;
+            showToast(`Selected folder: ${data.selected_path}`);
             if (btnSave) btnSave.click();
             backendSuccess = true;
+          } else if (data.cancelled) {
+            backendSuccess = true;
           }
-        } catch (pickErr) {
-          if (pickErr.name !== 'AbortError') {
-            console.warn('showDirectoryPicker error:', pickErr);
-          }
+        } catch (err) {
+          console.warn('Backend browse-folder error:', err);
         }
       }
 
-      // Method C: Webkitdirectory input trigger
-      if (!backendSuccess && inputDirPicker) {
-        inputDirPicker.click();
+      if (!backendSuccess) {
+        // When edge server is running on cloud or offline, open a clean prompt to choose/enter local folder
+        const cur = inputFolder ? inputFolder.value.trim() : 'C:\\VyznFootage';
+        const entered = window.prompt(
+          'Select Local Storage Folder:\nEnter the local directory path on your computer where clips and whole footage should be saved:',
+          cur || 'C:\\VyznFootage'
+        );
+        if (entered && entered.trim()) {
+          const cleaned = entered.trim();
+          if (inputFolder) inputFolder.value = cleaned;
+          showToast(`Storage path set to: ${cleaned}`);
+          if (btnSave) btnSave.click();
+        }
       }
 
       btnBrowse.disabled = false;

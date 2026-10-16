@@ -40,9 +40,36 @@ let pictureTimestamp = 'Now';
 const SVG_W = 1000;
 const SVG_H = 562.5;
 
+let edgeBaseUrl = null;
+
+async function checkEdgeServer() {
+  if (edgeBaseUrl !== null) return edgeBaseUrl;
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    edgeBaseUrl = '';
+    return edgeBaseUrl;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch('http://127.0.0.1:8000/api/status', {
+      method: 'GET',
+      mode: 'cors',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      edgeBaseUrl = 'http://127.0.0.1:8000';
+      return edgeBaseUrl;
+    }
+  } catch (e) {}
+  edgeBaseUrl = '';
+  return edgeBaseUrl;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await initI18n();
   initShell({ activePage: 'areas' });
+  await checkEdgeServer();
 
   // Resolve camera ID from URL path or query parameter
   const pathParts = window.location.pathname.split('/').filter(Boolean);
@@ -146,7 +173,7 @@ function renderPicker(container, cameras) {
           <div class="camera-tile" style="display:flex; flex-direction:column; justify-content:space-between;">
             <div>
               <div class="tile-thumbnail-frame" style="position:relative; width:100%; aspect-ratio:16/9; background:var(--video-bg); border-radius:var(--radius-interactive); overflow:hidden;">
-                <img src="${c.snapshot_url || `/api/cameras/${c.id}/snapshot.jpg`}" alt="${escapeHtml(c.name)}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='/static/img/offline-placeholder.png';">
+                <img src="${edgeBaseUrl ? `${edgeBaseUrl}/api/cameras/${c.id}/snapshot.jpg?t=${Date.now()}` : (c.snapshot_url || `/api/cameras/${c.id}/snapshot.jpg?t=${Date.now()}`)}" alt="${escapeHtml(c.name)}" style="width:100%; height:100%; object-fit:cover;" onerror="this.src='/static/img/offline-placeholder.png';">
               </div>
               <div style="margin-top:12px;">
                 <div style="display:flex; align-items:center; justify-content:space-between;">
@@ -251,7 +278,7 @@ function buildEditorDom(container) {
       <!-- Left Column: Video Frame & SVG Overlay Canvas -->
       <div class="areas-canvas-column">
         <div class="areas-canvas-container" id="canvas-container">
-          <img class="areas-canvas-img" id="canvas-img" src="/api/cameras/${currentCameraId}/snapshot.jpg?t=${Date.now()}" alt="${escapeHtml(camName)}">
+          <img class="areas-canvas-img" id="canvas-img" src="${edgeBaseUrl || ''}/api/cameras/${currentCameraId}/snapshot.jpg?t=${Date.now()}" alt="${escapeHtml(camName)}">
           <svg class="areas-canvas-svg" id="canvas-svg" viewBox="0 0 ${SVG_W} ${SVG_H}" preserveAspectRatio="none">
             <!-- Scrim Fill (Even-Odd) -->
             <path class="scrim-fill" id="svg-scrim" d="M 0 0 H ${SVG_W} V ${SVG_H} H 0 Z"></path>
@@ -448,8 +475,11 @@ function attachSidebarEventListeners() {
       btnUpdatePic.disabled = true;
       try {
         await fetch(`/api/cameras/${currentCameraId}/snapshot`, { method: 'POST' });
+        if (edgeBaseUrl) {
+          await fetch(`${edgeBaseUrl}/api/cameras/${currentCameraId}/snapshot`, { method: 'POST' }).catch(() => {});
+        }
         const img = document.getElementById('canvas-img');
-        if (img) img.src = `/api/cameras/${currentCameraId}/snapshot.jpg?t=${Date.now()}`;
+        if (img) img.src = `${edgeBaseUrl || ''}/api/cameras/${currentCameraId}/snapshot.jpg?t=${Date.now()}`;
         const now = new Date();
         pictureTimestamp = now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
         const stampEl = document.getElementById('txt-picture-timestamp');
@@ -463,6 +493,14 @@ function attachSidebarEventListeners() {
       }
     };
   }
+
+  // Periodic background refresh of canvas-img every 10 seconds if user is not actively drawing
+  setInterval(() => {
+    const img = document.getElementById('canvas-img');
+    if (img && !isDrawing) {
+      img.src = `${edgeBaseUrl || ''}/api/cameras/${currentCameraId}/snapshot.jpg?t=${Date.now()}`;
+    }
+  }, 10000);
 
   // Add area button
   const btnAddArea = document.getElementById('btn-add-area');
@@ -1365,11 +1403,30 @@ async function saveWatchAreas() {
       }))
     };
 
-    const res = await fetch(`/api/cameras/${currentCameraId}/areas`, {
+    let res = await fetch(`/api/cameras/${currentCameraId}/areas`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+
+    if (res.status === 405) {
+      res = await fetch(`/api/cameras/${currentCameraId}/areas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    try {
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        fetch(`http://127.0.0.1:8000/api/cameras/${currentCameraId}/areas`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          mode: 'cors'
+        }).catch(() => {});
+      }
+    } catch (_) {}
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));

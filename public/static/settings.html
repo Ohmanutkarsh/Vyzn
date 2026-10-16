@@ -477,10 +477,16 @@
               Video & Clips Storage Directory
             </label>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <input type="text" class="settings-input" id="input-storage-folder" placeholder="e.g. C:\Vyzn Ai\data\clips or D:\Recordings" style="flex: 1; min-width: 260px; font-family: var(--font-mono, monospace);">
+              <input type="text" class="settings-input" id="input-storage-folder" placeholder="e.g. C:\VyznFootage or D:\Recordings" style="flex: 1; min-width: 260px; font-family: var(--font-mono, monospace);">
               <input type="file" id="input-folder-picker" webkitdirectory directory style="display: none;">
               <button type="button" class="btn btn-secondary" id="btn-browse-folder" style="white-space: nowrap;">📁 Choose Folder</button>
               <button type="button" class="btn btn-primary" id="btn-save-storage" style="white-space: nowrap;">Save Storage Folder</button>
+            </div>
+            <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center;">
+              <span style="font-size: 11px; color: var(--text-muted, #94a3b8);">Quick presets:</span>
+              <button type="button" class="btn-preset-path btn btn-xs" data-path="C:\VyznFootage" style="font-size: 11px; padding: 2px 8px; cursor: pointer; border: 1px solid var(--border-color, #334155); background: transparent; color: var(--text-color, #e2e8f0); border-radius: 4px;">C:\VyznFootage</button>
+              <button type="button" class="btn-preset-path btn btn-xs" data-path="D:\VyznFootage" style="font-size: 11px; padding: 2px 8px; cursor: pointer; border: 1px solid var(--border-color, #334155); background: transparent; color: var(--text-color, #e2e8f0); border-radius: 4px;">D:\VyznFootage</button>
+              <button type="button" class="btn-preset-path btn btn-xs" data-path="C:\Vyzn testing data" style="font-size: 11px; padding: 2px 8px; cursor: pointer; border: 1px solid var(--border-color, #334155); background: transparent; color: var(--text-color, #e2e8f0); border-radius: 4px;">C:\Vyzn testing data</button>
             </div>
             <div id="storage-feedback" style="font-size: 12px; margin-top: 6px; display: none;"></div>
           </div>

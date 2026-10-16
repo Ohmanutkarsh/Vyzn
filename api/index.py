@@ -16,7 +16,7 @@ import html
 import requests
 import urllib.parse
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -217,139 +217,41 @@ def load_real_cameras() -> List[Dict[str, Any]]:
             pass
     return list(DEFAULT_REAL_CAMERAS)
 
-DEFAULT_REAL_CLIPS: List[Dict[str, Any]] = [
-    {
-        "clip_number": 1,
-        "id": "ev_cam_webcam_1792084160_1792167524",
-        "camera_id": "cam_webcam_1792084160",
-        "camera_name": "webcam",
-        "tier": "review",
-        "final_score": 35,
-        "raw_score": 35.0,
-        "score": 35,
-        "summary": "An individual entered webcam moving stationary. Present for 43s across 1m 10s of footage. Warning: this activity was recorded outside scheduled business hours.",
-        "dominant_color": "blue",
-        "zone_name": "Area 1",
-        "object_type": "person",
-        "confidence": 0.93,
-        "created_at_ms": 1792167524000,
-        "startMs": 1792167524000,
-        "triggerMs": 1792167527000,
-        "endMs": 1792167594000,
-        "durationSec": 70.0,
-        "expires_at_ms": 1792167524000 + 72 * 3600 * 1000,
-        "user_triage": "unreviewed",
-        "status": "unreviewed",
-        "sha256": "7a3e1b0c9f8d2e4a5b6c7d8e9f0a1b2c3d4e5f6a",
-        "owner_email": "dirtbike000000@gmail.com",
-        "score_breakdown": {
-            "scoring_version": "2.0",
-            "tier": "review",
-            "final_score": 35
-        }
-    },
-    {
-        "clip_number": 2,
-        "id": "ev_cam_camera_1_1792156721_1792161405",
-        "camera_id": "cam_camera_1_1792156721",
-        "camera_name": "Camera 1",
-        "tier": "alert",
-        "final_score": 76,
-        "raw_score": 76.2,
-        "score": 76,
-        "summary": "Two or more individuals were observed in center area moving right to left. Activity continued for 58s within 1m 30s of footage.",
-        "dominant_color": "dark",
-        "zone_name": "center area",
-        "object_type": "person",
-        "confidence": 0.95,
-        "created_at_ms": 1792161405000,
-        "startMs": 1792161405000,
-        "triggerMs": 1792161408000,
-        "endMs": 1792161495000,
-        "durationSec": 90.0,
-        "expires_at_ms": 1792161405000 + 72 * 3600 * 1000,
-        "user_triage": "unreviewed",
-        "status": "unreviewed",
-        "sha256": "4b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c",
-        "owner_email": "dirtbike000000@gmail.com",
-        "score_breakdown": {
-            "scoring_version": "2.0",
-            "tier": "alert",
-            "final_score": 76
-        }
-    },
-    {
-        "clip_number": 3,
-        "id": "ev_cam_camera_1_1792156721_1792160988",
-        "camera_id": "cam_camera_1_1792156721",
-        "camera_name": "Camera 1",
-        "tier": "alert",
-        "final_score": 94,
-        "raw_score": 94.0,
-        "score": 94,
-        "summary": "An individual entered left area moving right to left. Present for 2m 40s across 3m 6s of footage.",
-        "dominant_color": "red",
-        "zone_name": "left area",
-        "object_type": "person",
-        "confidence": 0.95,
-        "created_at_ms": 1792160988000,
-        "startMs": 1792160988000,
-        "triggerMs": 1792160991000,
-        "endMs": 1792161174000,
-        "durationSec": 186.0,
-        "expires_at_ms": 1792160988000 + 72 * 3600 * 1000,
-        "user_triage": "unreviewed",
-        "status": "unreviewed",
-        "sha256": "9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a",
-        "owner_email": "dirtbike000000@gmail.com",
-        "score_breakdown": {
-            "scoring_version": "2.0",
-            "tier": "alert",
-            "final_score": 94
-        }
-    },
-    {
-        "clip_number": 4,
-        "id": "ev_cam_camera_1_1792156721_1792156722",
-        "camera_id": "cam_camera_1_1792156721",
-        "camera_name": "Camera 1",
-        "tier": "alert",
-        "final_score": 82,
-        "raw_score": 82.0,
-        "score": 82,
-        "summary": "An individual entered Area 1 moving bottom to top. Present for 47s across 1m 14s of footage.",
-        "dominant_color": "black",
-        "zone_name": "Area 1",
-        "object_type": "person",
-        "confidence": 0.94,
-        "created_at_ms": 1792156722000,
-        "startMs": 1792156722000,
-        "triggerMs": 1792156725000,
-        "endMs": 1792156796000,
-        "durationSec": 74.0,
-        "expires_at_ms": 1792156722000 + 72 * 3600 * 1000,
-        "user_triage": "unreviewed",
-        "status": "unreviewed",
-        "sha256": "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
-        "owner_email": "dirtbike000000@gmail.com",
-        "score_breakdown": {
-            "scoring_version": "2.0",
-            "tier": "alert",
-            "final_score": 82
-        }
-    }
-]
+DEFAULT_REAL_CLIPS: List[Dict[str, Any]] = []
 
 DEFAULT_CAMERAS = list(DEFAULT_REAL_CAMERAS)
-DEFAULT_CLIPS = list(DEFAULT_REAL_CLIPS)
+DEFAULT_CLIPS: List[Dict[str, Any]] = []
 
 CAMERAS_BY_USER: Dict[str, List[Dict[str, Any]]] = {
     "dirtbike000000@gmail.com": list(DEFAULT_REAL_CAMERAS)
 }
 
-CLIPS_BY_USER: Dict[str, List[Dict[str, Any]]] = {
-    "dirtbike000000@gmail.com": list(DEFAULT_REAL_CLIPS)
+CLIPS_BY_USER: Dict[str, List[Dict[str, Any]]] = {}
+
+MOCK_CLIP_IDS = {
+    "ev_cam_webcam_1792084160_1792167524",
+    "ev_cam_camera_1_1792156721_1792161405",
+    "ev_cam_camera_1_1792156721_1792160988",
+    "ev_cam_camera_1_1792156721_1792156722"
 }
+
+MOCK_CLIP_HASHES = {
+    "7a3e1b0c9f8d2e4a5b6c7d8e9f0a1b2c3d4e5f6a",
+    "4b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c",
+    "9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a",
+    "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"
+}
+
+def is_mock_clip(clip: Dict[str, Any]) -> bool:
+    if not isinstance(clip, dict):
+        return True
+    cid = str(clip.get("id") or "")
+    if cid in MOCK_CLIP_IDS:
+        return True
+    sha = str(clip.get("sha256") or "")
+    if sha in MOCK_CLIP_HASHES:
+        return True
+    return False
 
 SUPABASE_CLOUD_URL = (os.environ.get("VYZN_SUPABASE_URL") or os.environ.get("SUPABASE_URL") or "https://dosvefzyiccqupgwxgfw.supabase.co").strip().rstrip("/")
 SUPABASE_CLOUD_KEY = (os.environ.get("VYZN_SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("VYZN_SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_ANON_KEY") or "").strip()
@@ -601,13 +503,16 @@ def get_user_clips_file(email: str) -> Path:
 def get_user_clips(email: str) -> List[Dict[str, Any]]:
     clean_email = email.strip().lower()
     if clean_email in CLIPS_BY_USER:
-        return CLIPS_BY_USER[clean_email]
+        return [c for c in CLIPS_BY_USER[clean_email] if not is_mock_clip(c)]
 
     # 1. Cloud storage
     cloud = fetch_clips_from_cloud(clean_email)
     if cloud is not None:
-        CLIPS_BY_USER[clean_email] = cloud
-        return cloud
+        filtered = [c for c in cloud if not is_mock_clip(c)]
+        if len(filtered) != len(cloud):
+            sync_clips_to_cloud(clean_email, filtered)
+        CLIPS_BY_USER[clean_email] = filtered
+        return filtered
 
     # 2. Local temp file
     clip_file = get_user_clips_file(clean_email)
@@ -616,18 +521,15 @@ def get_user_clips(email: str) -> List[Dict[str, Any]]:
             with open(clip_file, "r", encoding="utf-8") as f:
                 saved = json.load(f)
                 if isinstance(saved, list):
-                    CLIPS_BY_USER[clean_email] = saved
-                    return saved
+                    filtered = [c for c in saved if not is_mock_clip(c)]
+                    CLIPS_BY_USER[clean_email] = filtered
+                    return filtered
         except Exception:
             pass
 
-    # 3. Default fallback for any authenticated user
-    clips = list(DEFAULT_REAL_CLIPS)
+    # 3. Default fallback for any authenticated user - completely clean empty list
+    clips: List[Dict[str, Any]] = []
     CLIPS_BY_USER[clean_email] = clips
-    try:
-        sync_clips_to_cloud(clean_email, clips)
-    except Exception:
-        pass
     return clips
 
 
@@ -1029,8 +931,8 @@ def update_security_pin(payload: SecurityPinUpdateRequest, request: Request):
 # Settings & Storage
 # ---------------------------------------------------------------------------
 @app.get("/api/settings/storage")
-def get_storage_settings():
-    storage_dir = "C:\\Vyzn testing data"
+def get_storage_settings(request: Request = None):
+    storage_dir = "C:\\VyznFootage"
     cfg_file = WORKSPACE_ROOT / "config" / "storage.json"
     if cfg_file.exists():
         try:
@@ -1040,19 +942,31 @@ def get_storage_settings():
                     storage_dir = d["storage_dir"]
         except Exception:
             pass
-    used_gb = 42.1
-    total_gb = 512.0
-    free_pct = 91.8
+
+    check_path = Path(storage_dir)
+    while not check_path.exists() and check_path.parent != check_path:
+        check_path = check_path.parent
+
     try:
-        p = Path(storage_dir)
-        if p.exists():
+        import shutil
+        usage = shutil.disk_usage(str(check_path))
+        used_gb = usage.used / (1024 ** 3)
+        total_gb = usage.total / (1024 ** 3)
+        free_pct = (usage.free / float(usage.total)) * 100.0
+    except Exception:
+        try:
             import shutil
-            usage = shutil.disk_usage(str(p))
+            usage = shutil.disk_usage(str(WORKSPACE_ROOT))
             used_gb = usage.used / (1024 ** 3)
             total_gb = usage.total / (1024 ** 3)
             free_pct = (usage.free / float(usage.total)) * 100.0
-    except Exception:
-        pass
+        except Exception:
+            used_gb = 0.0
+            total_gb = 0.0
+            free_pct = 0.0
+
+    user = get_current_user(request) if request else None
+    clips = get_user_clips(user["email"]) if user else []
 
     return {
         "storage_dir": storage_dir,
@@ -1060,13 +974,15 @@ def get_storage_settings():
         "disk_total_gb": round(total_gb, 2),
         "disk_free_pct": round(free_pct, 1),
         "is_writable": True,
-        "clips_count": 0,
+        "clips_count": len(clips),
         "raw_retention_hours": 72
     }
 
 @app.post("/api/settings/storage")
 def update_storage_settings(payload: Dict[str, Any]):
-    new_dir = payload.get("storage_dir", "C:\\Vyzn testing data")
+    new_dir = payload.get("storage_dir", "C:\\VyznFootage").strip()
+    if not new_dir:
+        new_dir = "C:\\VyznFootage"
     cfg_file = WORKSPACE_ROOT / "config" / "storage.json"
     try:
         cfg_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1078,17 +994,11 @@ def update_storage_settings(payload: Dict[str, Any]):
 
 @app.post("/api/settings/browse-folder")
 def browse_folder():
-    storage_dir = "C:\\Vyzn testing data"
-    cfg_file = WORKSPACE_ROOT / "config" / "storage.json"
-    if cfg_file.exists():
-        try:
-            with open(cfg_file, "r", encoding="utf-8") as f:
-                d = json.load(f)
-                if d.get("storage_dir"):
-                    storage_dir = d["storage_dir"]
-        except Exception:
-            pass
-    return {"ok": True, "path": storage_dir, "selected_path": storage_dir}
+    return {
+        "ok": False,
+        "cloud": True,
+        "error": "Native desktop folder browser requires the local VYZN Edge server (python run_edge.py). Please enter or paste your desired local storage path (e.g. C:\\VyznFootage) and click Save Storage Folder."
+    }
 
 @app.get("/api/settings/business-hours")
 def get_business_hours():
@@ -1541,21 +1451,39 @@ def get_camera_areas(camera_id: str, request: Request):
             return {"camera_id": camera_id, "areas": c.get("areas", [])}
     return {"camera_id": camera_id, "areas": []}
 
+@app.put("/api/cameras/{camera_id}/areas")
 @app.post("/api/cameras/{camera_id}/areas")
+@app.patch("/api/cameras/{camera_id}/areas")
+@app.put("/api/cameras/{camera_id}/zones")
 @app.post("/api/cameras/{camera_id}/zones")
-def save_camera_areas(camera_id: str, payload: WatchAreasUpdateRequest, request: Request):
+@app.patch("/api/cameras/{camera_id}/zones")
+def save_camera_areas(
+    camera_id: str,
+    payload: Union[WatchAreasUpdateRequest, List[Dict[str, Any]], Dict[str, Any]],
+    request: Request
+):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     email = user["email"]
+
+    if isinstance(payload, WatchAreasUpdateRequest):
+        areas_list = payload.areas
+    elif isinstance(payload, dict):
+        areas_list = payload.get("areas", payload.get("zones", []))
+    elif isinstance(payload, list):
+        areas_list = payload
+    else:
+        areas_list = []
+
     user_cams = get_user_cameras(email)
     for c in user_cams:
         if c.get("id") == camera_id or c.get("camera_id") == camera_id:
-            c["areas"] = payload.areas
-            c["area_count"] = len(payload.areas)
-            set_user_cameras(email, user_cams)
-            return {"ok": True, "areas": payload.areas}
-    return {"ok": True, "areas": payload.areas}
+            c["areas"] = areas_list
+            c["area_count"] = len(areas_list)
+            break
+    set_user_cameras(email, user_cams)
+    return {"ok": True, "camera_id": camera_id, "areas": areas_list}
 
 USER_SNAPSHOTS: Dict[str, bytes] = {}
 

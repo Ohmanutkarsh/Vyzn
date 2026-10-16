@@ -1577,9 +1577,14 @@ def get_camera_watch_areas(camera_id: str, db: EventDatabase = Depends(get_db)):
 
 
 @app.put("/api/cameras/{camera_id}/areas")
+@app.post("/api/cameras/{camera_id}/areas")
+@app.patch("/api/cameras/{camera_id}/areas")
+@app.put("/api/cameras/{camera_id}/zones")
+@app.post("/api/cameras/{camera_id}/zones")
+@app.patch("/api/cameras/{camera_id}/zones")
 def update_camera_watch_areas(
     camera_id: str,
-    req_body: Union[WatchAreasUpdateRequest, List[WatchAreaPayload]],
+    req_body: Union[WatchAreasUpdateRequest, List[WatchAreaPayload], Dict[str, Any]],
     db: EventDatabase = Depends(get_db)
 ):
     """
@@ -1591,7 +1596,14 @@ def update_camera_watch_areas(
     if not cam:
         raise HTTPException(status_code=404, detail=f"Camera {camera_id} not found")
 
-    areas_input = req_body.areas if isinstance(req_body, WatchAreasUpdateRequest) else req_body
+    if isinstance(req_body, WatchAreasUpdateRequest):
+        areas_input = req_body.areas
+    elif isinstance(req_body, dict):
+        areas_input = req_body.get("areas", req_body.get("zones", []))
+    elif isinstance(req_body, list):
+        areas_input = req_body
+    else:
+        areas_input = []
 
     if len(areas_input) > 5:
         raise HTTPException(status_code=400, detail="Maximum 5 areas per camera.")
@@ -1600,12 +1612,19 @@ def update_camera_watch_areas(
     current_version = max([getattr(a, "version", 1) for a in getattr(cam, "watch_areas", [])] or [0]) + 1
 
     for idx, item in enumerate(areas_input):
-        if len(item.polygon) < 3:
-            raise HTTPException(status_code=400, detail=f"Area '{item.name}' must have at least 3 points.")
+        item_name = item.name if hasattr(item, "name") else item.get("name", f"Area {idx+1}")
+        item_poly = item.polygon if hasattr(item, "polygon") else item.get("polygon", [])
+        item_id = item.id if hasattr(item, "id") else item.get("id")
+        item_resp = item.response if hasattr(item, "response") else item.get("response", "alert")
+        item_stay = item.min_stay_seconds if hasattr(item, "min_stay_seconds") else item.get("min_stay_seconds", 0)
+        item_sched = item.schedule if hasattr(item, "schedule") else item.get("schedule", "always")
+
+        if len(item_poly) < 3:
+            raise HTTPException(status_code=400, detail=f"Area '{item_name}' must have at least 3 points.")
 
         # Ensure normalized coordinates clamped to [0.0, 1.0]
         clamped_poly = []
-        for pt in item.polygon:
+        for pt in item_poly:
             if len(pt) < 2:
                 continue
             x = max(0.0, min(1.0, float(pt[0])))
@@ -1613,19 +1632,18 @@ def update_camera_watch_areas(
             clamped_poly.append([round(x, 4), round(y, 4)])
 
         if len(clamped_poly) < 3:
-            raise HTTPException(status_code=400, detail=f"Area '{item.name}' must have at least 3 valid points.")
+            raise HTTPException(status_code=400, detail=f"Area '{item_name}' must have at least 3 valid points.")
 
-        area_id = item.id or f"area_{camera_id}_{int(time.time())}_{idx+1}"
-        # In simple terms: validate response type to ensure it is alert, review, or ignore
-        resp_tier = item.response if item.response in ("alert", "review", "ignore") else "alert"
-        dwell = item.min_stay_seconds if item.min_stay_seconds in (0, 10, 30, 60) else 0
-        sched = item.schedule if item.schedule in ("always", "outside_shop_hours") else "always"
+        area_id = item_id or f"area_{camera_id}_{int(time.time())}_{idx+1}"
+        resp_tier = item_resp if item_resp in ("alert", "review", "ignore") else "alert"
+        dwell = item_stay if item_stay in (0, 10, 30, 60) else 0
+        sched = item_sched if item_sched in ("always", "outside_shop_hours") else "always"
 
         validated_areas.append(
             WatchAreaConfig(
                 id=area_id,
                 camera_id=camera_id,
-                name=item.name.strip() or f"Area {idx+1}",
+                name=str(item_name).strip() or f"Area {idx+1}",
                 polygon=clamped_poly,
                 response=resp_tier,
                 min_stay_seconds=dwell,
@@ -3387,16 +3405,20 @@ def get_storage_settings(db: EventDatabase = Depends(get_db)):
     settings = get_settings()
     target_path = Path(settings.data_dir).resolve()
 
-    # Calculate disk usage stats safely
+    # Calculate disk usage stats safely by walking up to existing directory or drive root
+    check_path = target_path
+    while not check_path.exists() and check_path.parent != check_path:
+        check_path = check_path.parent
+
     try:
-        usage = shutil.disk_usage(str(target_path))
+        usage = shutil.disk_usage(str(check_path))
         used_gb = usage.used / (1024 ** 3)
         total_gb = usage.total / (1024 ** 3)
         free_pct = (usage.free / float(usage.total)) * 100.0
     except Exception:
         used_gb = 0.0
         total_gb = 0.0
-        free_pct = 100.0
+        free_pct = 0.0
 
     # Test write permissions
     is_writable = False
@@ -3410,9 +3432,16 @@ def get_storage_settings(db: EventDatabase = Depends(get_db)):
     except Exception:
         is_writable = False
 
-    # Count clips currently recorded in system
+    # Count clips currently recorded in system (both in DB and on disk)
     clips_res = db.query_clips(limit=1)
     clips_count = clips_res.get("total", 0)
+    try:
+        clips_folder = target_path / "clips"
+        if clips_folder.exists():
+            disk_clips = [f for f in clips_folder.iterdir() if f.is_file() and f.suffix.lower() in ('.mp4', '.mkv', '.webm')]
+            clips_count = max(clips_count, len(disk_clips))
+    except Exception:
+        pass
 
     return {
         "storage_dir": str(target_path),

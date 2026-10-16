@@ -1403,11 +1403,30 @@ async function saveWatchAreas() {
       }))
     };
 
-    const res = await fetch(`/api/cameras/${currentCameraId}/areas`, {
+    let res = await fetch(`/api/cameras/${currentCameraId}/areas`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+
+    if (res.status === 405) {
+      res = await fetch(`/api/cameras/${currentCameraId}/areas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+    }
+
+    try {
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        fetch(`http://127.0.0.1:8000/api/cameras/${currentCameraId}/areas`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          mode: 'cors'
+        }).catch(() => {});
+      }
+    } catch (_) {}
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
