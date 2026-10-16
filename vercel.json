@@ -12,31 +12,31 @@
     },
     {
       "source": "/cameras/new",
-      "destination": "/add-camera.html"
+      "destination": "/add-camera"
     },
     {
       "source": "/areas/(.*)",
-      "destination": "/areas.html"
+      "destination": "/areas"
     },
     {
       "source": "/clips/(.*)",
-      "destination": "/clips.html"
+      "destination": "/clips"
     },
     {
       "source": "/login/(.*)",
-      "destination": "/index.html"
+      "destination": "/login"
     },
     {
       "source": "/login",
-      "destination": "/index.html"
+      "destination": "/login"
     },
     {
       "source": "/setup/(.*)",
-      "destination": "/index.html"
+      "destination": "/setup"
     },
     {
       "source": "/setup",
-      "destination": "/index.html"
+      "destination": "/setup"
     }
   ]
 }
