@@ -35,20 +35,13 @@ app.add_middleware(
 async def vercel_path_rewrite_middleware(request: Request, call_next):
     """
     Normalizes Vercel serverless request paths.
-    When Vercel rewrites /api/(.*) -> /api/index.py?__vercel_subpath__=$1,
-    this middleware extracts the real subpath and sets request.scope['path'] accordingly.
+    Extracts the true client-requested endpoint from Vercel proxy headers
+    (x-forwarded-uri, x-original-uri, x-invoke-path, x-matched-path) or query params,
+    routing accurately to FastAPI endpoints.
     """
     subpath = request.query_params.get("__vercel_subpath__")
-    matched_path = (
-        request.headers.get("x-matched-path")
-        or request.headers.get("x-vercel-matched-path")
-        or request.headers.get("x-forwarded-uri")
-        or request.headers.get("x-invoke-path")
-    )
-    current_path = request.scope.get("path", "")
-
     if subpath is not None:
-        cleaned = subpath.lstrip("/")
+        cleaned = subpath.strip().lstrip("/")
         request.scope["path"] = f"/api/{cleaned}" if cleaned else "/api/status"
         if request.scope.get("query_string"):
             params = [
@@ -56,13 +49,39 @@ async def vercel_path_rewrite_middleware(request: Request, call_next):
                 if k != "__vercel_subpath__"
             ]
             request.scope["query_string"] = urllib.parse.urlencode(params).encode("latin1")
-    elif matched_path and matched_path not in ("/api/index.py", "/api/index", "/api/index.py/"):
-        request.scope["path"] = matched_path.split("?")[0]
-    elif current_path in ("/api/index.py", "/api/index", "/api/index.py/", ""):
-        request.scope["path"] = "/api/status"
-    elif current_path and not current_path.startswith("/api"):
-        request.scope["path"] = f"/api{current_path}"
+        return await call_next(request)
 
+    ignored = {
+        "/api/index.py", "/api/index", "/api/index.py/", "/api/index/",
+        "/api", "/api/"
+    }
+    resolved_path = None
+
+    for h in (
+        "x-forwarded-uri",
+        "x-original-uri",
+        "x-invoke-path",
+        "x-matched-path",
+        "x-vercel-matched-path",
+    ):
+        val = request.headers.get(h)
+        if val:
+            path_part = val.split("?")[0].strip()
+            if path_part and path_part not in ignored:
+                resolved_path = path_part
+                break
+
+    if not resolved_path:
+        current_path = (request.scope.get("path") or "").split("?")[0].strip()
+        if current_path and current_path not in ignored:
+            resolved_path = current_path
+        else:
+            resolved_path = "/api/status"
+
+    if not resolved_path.startswith("/"):
+        resolved_path = f"/{resolved_path}"
+
+    request.scope["path"] = resolved_path
     return await call_next(request)
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
@@ -1385,6 +1404,8 @@ def get_shell_status(request: Request):
         "telegram_connected": is_conn
     }
 
+@app.get("/api")
+@app.get("/api/")
 @app.get("/api/status")
 def get_status(request: Request):
     user = get_current_user(request)
@@ -1395,6 +1416,14 @@ def get_status(request: Request):
             "platform": "VYZN Multi-Tenant Cloud / Edge Node",
             "active_cameras": len(cams)
         }
+    }
+
+@app.get("/api/debug-routing")
+def debug_routing(request: Request):
+    return {
+        "resolved_path": request.scope.get("path"),
+        "method": request.method,
+        "headers": {k: v for k, v in request.headers.items() if any(x in k.lower() for x in ("path", "uri", "forward", "vercel", "invoke", "host"))}
     }
 
 @app.get("/api/v1/locations")

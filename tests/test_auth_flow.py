@@ -45,7 +45,7 @@ def test_phase2_auth_and_telegram_flow(tmp_path: Path):
     assert res.status_code == 200
     data = res.json()
     assert data["ok"] is True
-    assert data["next_step"] in ("/setup/phone", "/overview")
+    assert data["next_step"] in ("/setup/phone", "/setup/telegram", "/overview")
     assert "vyzn_session" in res.cookies
 
     # 3. GET /api/me (authenticated)

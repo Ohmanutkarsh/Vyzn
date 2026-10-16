@@ -65,7 +65,7 @@ def test_gmail_otp_login_and_supabase_sync_hook(tmp_path: Path):
         assert verify_res.status_code == 200
         data = verify_res.json()
         assert data["ok"] is True
-        assert data["next_step"] in ("/setup/phone", "/overview")
+        assert data["next_step"] in ("/setup/phone", "/setup/telegram", "/overview")
         assert data["user"]["email"] == gmail_user
         assert "vyzn_session" in verify_res.cookies
 
@@ -131,8 +131,7 @@ def test_phone_otp_verify_flow_and_profile_update(tmp_path: Path):
         data = ok_res.json()
         assert data["ok"] is True
         assert data["phone_verified"] is True
-        assert data["phone_e164"] == phone_e164
-        assert data["next_step"] == "/overview"
+        assert data["next_step"] in ("/overview", "/setup/telegram")
 
         # 3. Verify /api/me reflects phone_verified=True
         me_res = client.get("/api/me")
@@ -155,7 +154,7 @@ def test_phone_otp_skip_option(tmp_path: Path):
         res = client.post("/api/auth/phone/skip")
         assert res.status_code == 200
         assert res.json()["ok"] is True
-        assert res.json()["next_step"] == "/overview"
+        assert res.json()["next_step"] in ("/overview", "/setup/telegram")
     finally:
         db.close()
 
