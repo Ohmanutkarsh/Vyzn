@@ -223,7 +223,8 @@ async function activateBrowserWebcam(cam, cid) {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 1280 },
-        height: { ideal: 720 }
+        height: { ideal: 720 },
+        frameRate: { ideal: 20, max: 20 }
       },
       audio: false
     });
@@ -319,8 +320,8 @@ async function startLiveStream(cid) {
     }
   }
 
-  // If this is a hardware webcam and no edge daemon is present, try direct browser webcam first
-  if (isWebcam && !edge) {
+  // If this is a hardware webcam, try direct browser webcam first for zero-latency 20 fps authentic video
+  if (isWebcam) {
     const started = await activateBrowserWebcam(cam, cid);
     if (started) return;
   }

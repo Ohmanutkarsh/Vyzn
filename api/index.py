@@ -121,8 +121,8 @@ DEFAULT_REAL_CAMERAS: List[Dict[str, Any]] = [
         "name": "phone cam",
         "status": "online",
         "rtsp_url": "http://192.168.31.216:8080/video",
-        "target_fps": 25.0,
-        "fps": 25.0,
+        "target_fps": 20.0,
+        "fps": 20.0,
         "resolution": {"width": 854, "height": 480},
         "is_night_ir": False,
         "snapshot_url": "/api/cameras/cam_phone_cam_1792084106/snapshot.jpg",
@@ -149,8 +149,8 @@ DEFAULT_REAL_CAMERAS: List[Dict[str, Any]] = [
         "name": "webcam",
         "status": "online",
         "rtsp_url": "0",
-        "target_fps": 15.0,
-        "fps": 15.0,
+        "target_fps": 20.0,
+        "fps": 20.0,
         "resolution": {"width": 854, "height": 480},
         "is_night_ir": False,
         "snapshot_url": "/api/cameras/cam_webcam_1792084160/snapshot.jpg",
@@ -757,10 +757,28 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
     security_pin: Optional[str] = "202600"
 
+def normalize_camera_stream_url(url: str) -> str:
+    url = str(url).strip()
+    if not any(url.startswith(p) for p in ["http://", "https://", "rtsp://", "sim://", "test://", "webcam://"]) and not url.isdigit():
+        if ":8080" in url or ":4747" in url or ":8081" in url or url.startswith("192.168.") or url.startswith("10.") or url.startswith("172."):
+            if ":554" in url:
+                url = "rtsp://" + url
+            else:
+                url = "http://" + url
+        elif ":554" in url:
+            url = "rtsp://" + url
+        else:
+            url = "rtsp://" + url
+    if ":8080" in url and not any(p in url for p in ["/video", "/shot.jpg", "/videofeed"]):
+        url = url.rstrip("/") + "/video"
+    elif ":4747" in url and not any(p in url for p in ["/video", "/mjpegfeed"]):
+        url = url.rstrip("/") + "/video"
+    return url
+
 class CameraCreateRequest(BaseModel):
     name: str
     rtsp_url: str
-    target_fps: Optional[float] = 15.0
+    target_fps: Optional[float] = 20.0
 
 class WatchAreasUpdateRequest(BaseModel):
     areas: List[Dict[str, Any]]
@@ -1454,14 +1472,16 @@ def add_camera(payload: CameraCreateRequest, request: Request):
     email = user["email"]
     new_id = f"cam_{int(time.time() * 1000) % 100000}"
     name = (payload.name or "Camera").strip()
+    norm_url = normalize_camera_stream_url(payload.rtsp_url)
+    target_fps = payload.target_fps or 20.0
     cam = {
         "id": new_id,
         "camera_id": new_id,
         "name": name,
         "status": "online",
-        "rtsp_url": payload.rtsp_url,
-        "target_fps": payload.target_fps or 15.0,
-        "fps": payload.target_fps or 15.0,
+        "rtsp_url": norm_url,
+        "target_fps": target_fps,
+        "fps": target_fps,
         "resolution": {"width": 1920, "height": 1080},
         "is_night_ir": False,
         "snapshot_url": f"/api/cameras/{new_id}/snapshot.jpg",
@@ -1568,9 +1588,6 @@ def get_camera_snapshot_jpg(camera_id: str):
     for k, v in USER_SNAPSHOTS.items():
         if k in camera_id or camera_id in k:
             return Response(content=v, media_type="image/jpeg")
-    if USER_SNAPSHOTS:
-        first_img = next(iter(USER_SNAPSHOTS.values()))
-        return Response(content=first_img, media_type="image/jpeg")
     return stream_camera_visual(camera_id)
 
 @app.post("/api/clips/sync")
@@ -1637,7 +1654,7 @@ def test_camera_connection(payload: Optional[Dict[str, Any]] = None):
         "message": "Connection test successful! Camera stream verified.",
         "width": 1920,
         "height": 1080,
-        "fps": 15.0,
+        "fps": 20.0,
         "preview_base64": f"data:image/jpeg;base64,{PLACEHOLDER_JPEG_B64}"
     }
 

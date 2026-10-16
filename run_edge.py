@@ -128,18 +128,22 @@ def build_synthetic_settings(num_cameras: int, data_dir: Path, demo_mode: bool =
             camera_id="cam_webcam_0",
             name="Laptop / USB Camera (Device 0)",
             rtsp_url="0",
-            target_fps=4.0,
+            target_fps=20.0,
+            capture_fps=20.0,
+            ai_inference_fps=20.0,
             is_night_ir=False,
             business_hours=BusinessHours(enabled=False)
         ))
-        logger.info("[LIVE] Auto-detected physical Webcam 0. Configured as Camera 1 live feed.")
+        logger.info("[LIVE] Auto-detected physical Webcam 0. Configured as Camera 1 live feed at 20 FPS.")
     elif num_cameras > 0:
         # Otherwise, fall back to simulated test video feeds
         cameras.append(CameraConfig(
             camera_id="cam_main",
             name="Primary Entrance Camera",
             rtsp_url="sim://corridor",
-            target_fps=4.0,
+            target_fps=20.0,
+            capture_fps=20.0,
+            ai_inference_fps=20.0,
             is_night_ir=False,
             business_hours=BusinessHours(enabled=False)
         ))

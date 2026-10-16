@@ -1886,7 +1886,7 @@ class CameraCreateRequest(BaseModel):
     password: Optional[str] = None
     brand: Optional[str] = None
     channel: Optional[int] = 1
-    target_fps: float = 4.0
+    target_fps: float = 20.0
     location_id: Optional[str] = "loc_primary"
     source_type: Optional[str] = "ip"
 
@@ -1919,10 +1919,16 @@ def create_camera(
         name=req.name,
         rtsp_url=final_url,
         enabled=True,
-        target_fps=req.target_fps,
+        target_fps=req.target_fps or 20.0,
+        capture_fps=req.target_fps or 20.0,
+        ai_inference_fps=req.target_fps or 20.0,
         location_id=loc_id,
         owner_email=owner
     )
+
+    if final_url == "0":
+        # Ensure only one physical webcam is active in settings
+        settings.cameras = [c for c in settings.cameras if str(c.rtsp_url) != "0" or c.camera_id == cid]
 
     existing_idx = next((i for i, c in enumerate(settings.cameras) if c.camera_id == cid), None)
     if existing_idx is not None:

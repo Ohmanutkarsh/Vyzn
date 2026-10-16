@@ -446,7 +446,16 @@
               <div id="test-result-message" style="font-size: 14px; font-weight: 500;"></div>
               <div id="test-result-facts" class="mono-facts" style="margin-top: 4px;"></div>
               <div class="test-preview-thumb" id="test-preview-thumb" style="display: none;">
-                <img id="test-preview-img" src="" alt="Live camera test preview" />
+                <video id="test-preview-video" style="display: none; width: 100%; border-radius: 6px; aspect-ratio: 16/9; object-fit: cover; background: #000;" autoplay playsinline muted></video>
+                <img id="test-preview-img" src="" alt="Live camera test preview" style="display: none; width: 100%; border-radius: 6px; aspect-ratio: 16/9; object-fit: cover; background: #000;" />
+              </div>
+              <div style="margin-top: 14px; display: none;" id="test-error-actions">
+                <button type="button" class="btn btn-secondary" id="btn-add-anyway" style="width: 100%; padding: 10px; font-weight: 600; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.08); color: #f1f5f9; cursor: pointer; border-radius: 6px;">
+                  Add Camera Anyway (Skip Test)
+                </button>
+                <div style="font-size: 11px; color: #94a3b8; text-align: center; margin-top: 6px; line-height: 1.4;">
+                  You can register your camera right now. VYZN will automatically start receiving footage once your camera/phone is online on your Wi-Fi.
+                </div>
               </div>
               <div style="margin-top: var(--space-4);" id="test-continue-wrap" style="display: none;">
                 <button type="button" class="btn btn-primary" id="btn-step2-continue" style="width: 100%;">Continue</button>

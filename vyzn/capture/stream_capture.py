@@ -52,6 +52,16 @@ class ProbeResult:
 def normalize_camera_stream_url(url: str) -> str:
     """Auto-formats smartphone and RTSP camera URLs to valid stream endpoints."""
     url = str(url).strip()
+    if not any(url.startswith(p) for p in ["http://", "https://", "rtsp://", "sim://", "test://", "webcam://"]) and not url.isdigit():
+        if ":8080" in url or ":4747" in url or ":8081" in url or url.startswith("192.168.") or url.startswith("10.") or url.startswith("172."):
+            if ":554" in url:
+                url = "rtsp://" + url
+            else:
+                url = "http://" + url
+        elif ":554" in url:
+            url = "rtsp://" + url
+        else:
+            url = "rtsp://" + url
     if ":8080" in url and not any(p in url for p in ["/video", "/shot.jpg", "/videofeed"]):
         url = url.rstrip("/") + "/video"
     elif ":4747" in url and not any(p in url for p in ["/video", "/mjpegfeed"]):
@@ -87,45 +97,79 @@ def probe_stream_connection(url_str: str, timeout_sec: float = 3.5) -> ProbeResu
         else:  # success
             card = np.full((720, 1280, 3), (25, 28, 36), dtype=np.uint8)
             cv2.putText(card, "VYZN Live Probe: Shop entrance", (80, 340), cv2.FONT_HERSHEY_SIMPLEX, 1.3, (255, 255, 255), 2)
-            cv2.putText(card, "1280 x 720 @ 15.0 fps", (80, 400), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (52, 211, 153), 2)
+            cv2.putText(card, "1280 x 720 @ 20.0 fps", (80, 400), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (52, 211, 153), 2)
             ret, jpeg = cv2.imencode(".jpg", card, [cv2.IMWRITE_JPEG_QUALITY, 85])
             b64 = "data:image/jpeg;base64," + base64.b64encode(jpeg.tobytes()).decode("ascii") if ret else None
-            return ProbeResult(True, "success", "We can see the picture.", width=1280, height=720, fps=15.0, preview_base64=b64)
+            return ProbeResult(True, "success", "We can see the picture.", width=1280, height=720, fps=20.0, preview_base64=b64)
 
     # 2. Local Webcam device check (device index or webcam://)
     if norm_url.isdigit() or norm_url.startswith("webcam://"):
         dev_idx = int(norm_url.replace("webcam://", ""))
         try:
-            cap = cv2.VideoCapture(dev_idx, cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
-            if not cap.isOpened():
-                return ProbeResult(False, "port_closed", f"The camera device {dev_idx} could not be opened.")
-            ret, frame = cap.read()
-            if not ret or frame is None:
+            with _DSHOW_LOCK:
+                cap = cv2.VideoCapture(dev_idx, cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+                if not cap.isOpened():
+                    cap = cv2.VideoCapture(dev_idx, cv2.CAP_MSMF if os.name == "nt" else cv2.CAP_ANY)
+                if not cap.isOpened():
+                    return ProbeResult(False, "port_closed", f"The camera device {dev_idx} could not be opened.")
+                ret, frame = cap.read()
+                if not ret or frame is None or (frame.mean() < 3.0 and frame.max() > 180):
+                    # DirectShow glitch fallback
+                    cap.release()
+                    cap = cv2.VideoCapture(dev_idx, cv2.CAP_MSMF if os.name == "nt" else cv2.CAP_ANY)
+                    ret, frame = cap.read() if cap.isOpened() else (False, None)
+                if not ret or frame is None:
+                    cap.release()
+                    return ProbeResult(False, "unsupported_codec", "The camera's video format isn't supported.")
+
+                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or frame.shape[1])
+                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or frame.shape[0])
+                fps = 20.0
+
+                # Scale preview for lightweight UI display
+                disp_frame = frame.copy()
+                if disp_frame.shape[1] > 640:
+                    h, w = disp_frame.shape[:2]
+                    disp_frame = cv2.resize(disp_frame, (640, int(640 * h / w)))
+                ret, jpeg = cv2.imencode(".jpg", disp_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 cap.release()
-                return ProbeResult(False, "unsupported_codec", "The camera's video format isn't supported. In the camera settings, switch the stream to H.264.")
-
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or frame.shape[1])
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or frame.shape[0])
-            fps = float(cap.get(cv2.CAP_PROP_FPS) or 15.0)
-            if fps <= 0 or fps > 120:
-                fps = 15.0
-
-            # Scale preview for lightweight UI display
-            disp_frame = frame.copy()
-            if disp_frame.shape[1] > 640:
-                h, w = disp_frame.shape[:2]
-                disp_frame = cv2.resize(disp_frame, (640, int(640 * h / w)))
-            ret, jpeg = cv2.imencode(".jpg", disp_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-            cap.release()
             b64 = "data:image/jpeg;base64," + base64.b64encode(jpeg.tobytes()).decode("ascii") if ret else None
-            return ProbeResult(True, "success", "We can see the picture.", width=width, height=height, fps=round(fps, 1), preview_base64=b64)
+            return ProbeResult(True, "success", "We can see the picture.", width=width, height=height, fps=fps, preview_base64=b64)
         except Exception as e:
             return ProbeResult(False, "unsupported_codec", f"Webcam probe failed: {e}")
 
-    # 3. Network Camera (RTSP or HTTP) check
+    # 3. Network Camera (RTSP or HTTP / IP Webcam) check
     parsed = urllib.parse.urlparse(norm_url)
     ip = parsed.hostname or "192.168.1.64"
-    port = parsed.port or (554 if parsed.scheme == "rtsp" else 80)
+    port = parsed.port or (554 if parsed.scheme == "rtsp" else (8080 if ":8080" in norm_url else 80))
+
+    # Fast HTTP snapshot probe for smartphone IP Webcam / DroidCam
+    if norm_url.startswith("http://") or norm_url.startswith("https://"):
+        shot_candidates = []
+        if "/video" in norm_url:
+            shot_candidates.append(norm_url.replace("/video", "/shot.jpg"))
+        shot_candidates.append(norm_url.rstrip("/") + "/shot.jpg")
+        shot_candidates.append(norm_url)
+        for s_url in shot_candidates:
+            try:
+                req = urllib.request.Request(s_url, headers={"User-Agent": "VYZN-Probe/1.0"})
+                with urllib.request.urlopen(req, timeout=2.0) as resp:
+                    c_type = resp.headers.get("Content-Type", "")
+                    if "image/jpeg" in c_type or "image/jpg" in c_type:
+                        raw_data = resp.read()
+                        if len(raw_data) > 1000:
+                            arr = np.frombuffer(raw_data, dtype=np.uint8)
+                            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                            if frame is not None and frame.shape[0] > 0:
+                                h, w = frame.shape[:2]
+                                disp_frame = frame
+                                if w > 640:
+                                    disp_frame = cv2.resize(frame, (640, int(640 * h / w)))
+                                ret, jpeg = cv2.imencode(".jpg", disp_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                                b64 = "data:image/jpeg;base64," + base64.b64encode(jpeg.tobytes()).decode("ascii") if ret else None
+                                return ProbeResult(True, "success", "We can see the picture.", width=w, height=h, fps=20.0, preview_base64=b64)
+            except Exception:
+                pass
 
     # Rapid TCP socket connectivity pre-check
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -134,15 +178,15 @@ def probe_stream_connection(url_str: str, timeout_sec: float = 3.5) -> ProbeResu
         sock.connect((ip, port))
         sock.close()
     except socket.timeout:
-        return ProbeResult(False, "timeout", f"Couldn't reach {ip}. Check that the camera is on and on the same network as this computer.")
+        return ProbeResult(False, "timeout", f"Couldn't reach {ip}:{port}. Check that device is powered on, app is started, and on premises Wi-Fi.")
     except ConnectionRefusedError:
-        return ProbeResult(False, "port_closed", f"The camera didn't answer on port {port}. Check the port, or try 8554.")
+        return ProbeResult(False, "port_closed", f"The camera didn't answer on port {port}. Check the port, or verify IP Webcam server is running.")
     except OSError as e:
         win_err = getattr(e, "winerror", None)
         if win_err == 10061:  # WSAECONNREFUSED
-            return ProbeResult(False, "port_closed", f"The camera didn't answer on port {port}. Check the port, or try 8554.")
+            return ProbeResult(False, "port_closed", f"The camera didn't answer on port {port}. Check the port, or verify IP Webcam server is running.")
         elif win_err in (10060, 10065):  # WSAETIMEDOUT, WSAEHOSTUNREACH
-            return ProbeResult(False, "timeout", f"Couldn't reach {ip}. Check that the camera is on and on the same network as this computer.")
+            return ProbeResult(False, "timeout", f"Couldn't reach {ip}:{port}. Check that device is powered on, app is started, and on premises Wi-Fi.")
 
     # Socket reached; probe video decode with OpenCV
     try:
@@ -294,6 +338,8 @@ class RTSPCaptureThread(threading.Thread):
                 if url_str.isdigit():
                     with _DSHOW_LOCK:
                         cap = cv2.VideoCapture(int(url_str), cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+                        if not cap.isOpened():
+                            cap = cv2.VideoCapture(int(url_str), cv2.CAP_MSMF if os.name == "nt" else cv2.CAP_ANY)
                 elif url_str.startswith("webcam://"):
                     try:
                         dev_idx = int(url_str.split("://")[1])
@@ -301,6 +347,8 @@ class RTSPCaptureThread(threading.Thread):
                         dev_idx = 0
                     with _DSHOW_LOCK:
                         cap = cv2.VideoCapture(dev_idx, cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY)
+                        if not cap.isOpened():
+                            cap = cv2.VideoCapture(dev_idx, cv2.CAP_MSMF if os.name == "nt" else cv2.CAP_ANY)
                 elif url_str.startswith("http://") or url_str.startswith("https://"):
                     # Phone camera / IP Webcam / MJPEG stream
                     cap = cv2.VideoCapture(url_str)
@@ -350,6 +398,11 @@ class RTSPCaptureThread(threading.Thread):
                         f"[{self.config.camera_id}] Watchdog: frame silence > 8s or read failure. Tearing down connection."
                     )
                     break
+
+                # Discard DirectShow corrupted scanlines artifact (all black with a bottom glitch stripe)
+                if frame is not None and frame.mean() < 3.0 and frame.max() > 180:
+                    time.sleep(0.02)
+                    continue
 
                 last_read_mono = now_mono
                 self.last_frame_timestamp = now_wall

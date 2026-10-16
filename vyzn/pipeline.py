@@ -968,7 +968,25 @@ class EdgePipeline:
 
     def add_camera_stream(self, cam: CameraConfig):
         """Dynamically launches a capture thread for an adopted camera without pipeline restart."""
-        self.remove_camera_stream(cam.camera_id)
+        is_webcam = str(cam.rtsp_url) in ("0", "webcam://0") or getattr(cam, "source_type", None) == "webcam"
+        # Stop and join existing threads for this camera_id OR same physical webcam
+        for t in list(self.capture_threads):
+            cfg = getattr(t, "config", None)
+            if cfg and (cfg.camera_id == cam.camera_id or (is_webcam and str(cfg.rtsp_url) in ("0", "webcam://0"))):
+                if hasattr(t, "stop"):
+                    t.stop()
+                    try:
+                        t.join(timeout=2.0)
+                    except Exception:
+                        pass
+                try:
+                    self.capture_threads.remove(t)
+                except ValueError:
+                    pass
+                self.ring_buffers.pop(cfg.camera_id, None)
+                self.event_buffers.pop(cfg.camera_id, None)
+                self.active_event_ids.pop(cfg.camera_id, None)
+
         self.ring_buffers[cam.camera_id] = deque(maxlen=int(cam.target_fps * 10))
 
         # In simple terms: if the camera uses a simulation or test address, use our built-in video generator
@@ -996,6 +1014,10 @@ class EdgePipeline:
             if getattr(t, "config", None) and t.config.camera_id == camera_id:
                 if hasattr(t, "stop"):
                     t.stop()
+                    try:
+                        t.join(timeout=2.0)
+                    except Exception:
+                        pass
                 try:
                     self.capture_threads.remove(t)
                 except ValueError:

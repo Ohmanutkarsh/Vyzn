@@ -61,9 +61,9 @@ class CameraConfig(BaseModel):
     rtsp_url: str
     enabled: bool = True
     location_id: Optional[str] = "loc_primary"
-    target_fps: float = 15.0
-    capture_fps: float = 15.0
-    ai_inference_fps: float = 15.0
+    target_fps: float = 20.0
+    capture_fps: float = 20.0
+    ai_inference_fps: float = 20.0
     downscale_width: int = 854
     downscale_height: int = 480
     is_night_ir: bool = False
