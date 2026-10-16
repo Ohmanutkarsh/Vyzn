@@ -338,7 +338,27 @@ async function runConnectionTest(payload) {
       testedFps = data.fps || 15.0;
       factsEl.textContent = `${testedWidth}×${testedHeight} · ${testedFps} fps`;
 
-      if (data.preview_base64) {
+      if ((payload.source_type === 'webcam' || payload.rtsp_url === '0') && navigator.mediaDevices?.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 } });
+          const tempVideo = document.createElement('video');
+          tempVideo.srcObject = stream;
+          await tempVideo.play();
+          const canvas = document.createElement('canvas');
+          canvas.width = 640;
+          canvas.height = 360;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(tempVideo, 0, 0, 640, 360);
+          thumbImg.src = canvas.toDataURL('image/jpeg', 0.85);
+          thumbWrap.style.display = 'block';
+          stream.getTracks().forEach(t => t.stop());
+        } catch (e) {
+          if (data.preview_base64) {
+            thumbImg.src = data.preview_base64;
+            thumbWrap.style.display = 'block';
+          }
+        }
+      } else if (data.preview_base64) {
         thumbImg.src = data.preview_base64;
         thumbWrap.style.display = 'block';
       } else {
