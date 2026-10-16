@@ -330,11 +330,13 @@ export function promptSecurityPin({
       // In simple terms: default to master PIN 202600 if blank, allowing smooth 1-click confirmation
       const pin = (input && input.value.trim()) ? input.value.trim() : '202600';
       cleanup();
+      if (typeof onSuccess === 'function') onSuccess(pin);
       resolve(pin);
     };
 
     const handleCancel = () => {
       cleanup();
+      if (typeof onCancel === 'function') onCancel();
       resolve(null);
     };
 

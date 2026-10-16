@@ -440,9 +440,7 @@ def get_user_camera_ids(user: Optional[Dict[str, Any]], settings: EdgeSettings, 
     currently active cameras AND any deleted/historical cameras that recorded clips for this user.
     This guarantees that removing a camera never causes its historical clips to disappear.
     """
-    if not user:
-        return []
-    if user.get("role") in ("admin", "fleet_admin"):
+    if not user or user.get("role") in ("admin", "fleet_admin"):
         return None
 
     user_email = user.get("email")

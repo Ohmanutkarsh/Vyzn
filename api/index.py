@@ -10,6 +10,8 @@ import time
 import mimetypes
 import secrets
 import hashlib
+import hmac
+import base64
 import requests
 import urllib.parse
 from pathlib import Path
@@ -215,6 +217,148 @@ CLIPS_BY_USER: Dict[str, List[Dict[str, Any]]] = {
 
 TELEGRAM_TOKENS: Dict[str, Dict[str, Any]] = {}
 
+SESSION_SIGNING_KEY = os.environ.get("VYZN_SESSION_SECRET") or os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "vyzn_session_secret_2026_vercel"
+
+
+def create_session_token(email: str, max_age: int = 86400 * 30) -> str:
+    """Generates a tamper-proof HMAC-SHA256 signed session token for stateless Vercel lambdas."""
+    payload = {
+        "email": email.strip().lower(),
+        "exp": int(time.time()) + max_age
+    }
+    raw_json = json.dumps(payload, separators=(',', ':'))
+    b64_payload = base64.urlsafe_b64encode(raw_json.encode()).decode().rstrip("=")
+    sig = hmac.new(SESSION_SIGNING_KEY.encode(), b64_payload.encode(), hashlib.sha256).hexdigest()
+    return f"{b64_payload}.{sig}"
+
+
+def verify_session_token(token: str) -> Optional[str]:
+    """Validates signature and expiration of session token, returning user email if valid."""
+    if not token or "." not in token:
+        return None
+    parts = token.split(".")
+    if len(parts) != 2:
+        return None
+    b64_payload, sig = parts
+    expected_sig = hmac.new(SESSION_SIGNING_KEY.encode(), b64_payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected_sig):
+        return None
+    try:
+        padded = b64_payload + "=" * ((4 - len(b64_payload) % 4) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded).decode())
+        if data.get("exp", 0) < time.time():
+            return None
+        return data.get("email")
+    except Exception:
+        return None
+
+
+def fetch_user_from_supabase_cloud(email: str) -> Optional[Dict[str, Any]]:
+    """Loads user record directly from Supabase PostgreSQL database."""
+    url = (os.environ.get("VYZN_SUPABASE_URL") or os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
+    key = (os.environ.get("VYZN_SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("VYZN_SUPABASE_ANON_KEY") or os.environ.get("SUPABASE_ANON_KEY") or "").strip()
+    if not (url and key and url.startswith("http")):
+        return None
+    if url.endswith("/rest/v1"):
+        url = url[:-len("/rest/v1")].rstrip("/")
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+    }
+    try:
+        clean_email = email.strip().lower()
+        resp = requests.get(f"{url}/rest/v1/vyzn_users?email=eq.{clean_email}&select=*", headers=headers, timeout=3.5)
+        if resp.status_code == 200:
+            rows = resp.json()
+            if rows and len(rows) > 0:
+                r = rows[0]
+                return {
+                    "id": r.get("id") or f"usr_{hashlib.sha256(clean_email.encode()).hexdigest()[:12]}",
+                    "email": r.get("email"),
+                    "full_name": clean_email.split("@")[0].capitalize(),
+                    "business_name": "Primary Premises / Society",
+                    "business_type": "society",
+                    "role": "shopkeeper",
+                    "phone_e164": r.get("phone_e164") or "+919876543210",
+                    "phone_verified": bool(r.get("phone_verified")),
+                    "security_pin": "202600",
+                    "telegram_status": r.get("telegram_status", "not_linked"),
+                    "telegram_chat_id": r.get("telegram_chat_id"),
+                    "telegram_username": None,
+                    "telegram_alerts_enabled": bool(r.get("telegram_alerts_enabled", True)),
+                    "telegram_linked_at_ms": None,
+                }
+    except Exception:
+        pass
+    return None
+
+
+def get_user_by_email(email: str) -> Dict[str, Any]:
+    """Retrieves user profile with multi-tenant isolation and Supabase fallback."""
+    clean_email = email.strip().lower()
+    if clean_email in USERS_STORE:
+        return USERS_STORE[clean_email]
+    supa_user = fetch_user_from_supabase_cloud(clean_email)
+    if supa_user:
+        USERS_STORE[clean_email] = supa_user
+        return supa_user
+    user = {
+        "id": f"usr_{hashlib.sha256(clean_email.encode()).hexdigest()[:12]}",
+        "email": clean_email,
+        "full_name": clean_email.split("@")[0].capitalize(),
+        "business_name": "Primary Premises / Society",
+        "business_type": "society",
+        "role": "shopkeeper",
+        "phone_e164": "+919876543210",
+        "phone_verified": True,
+        "security_pin": "202600",
+        "telegram_status": "not_linked",
+        "telegram_chat_id": None,
+        "telegram_username": None,
+        "telegram_alerts_enabled": True,
+        "telegram_linked_at_ms": None,
+    }
+    USERS_STORE[clean_email] = user
+    return user
+
+
+def get_user_cameras_file(email: str) -> Path:
+    import tempfile
+    h = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:12]
+    return Path(tempfile.gettempdir()) / f"vyzn_cams_{h}.json"
+
+
+def get_user_cameras(email: str) -> List[Dict[str, Any]]:
+    clean_email = email.strip().lower()
+    if clean_email in CAMERAS_BY_USER:
+        return CAMERAS_BY_USER[clean_email]
+    cam_file = get_user_cameras_file(clean_email)
+    if cam_file.exists():
+        try:
+            with open(cam_file, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+                if isinstance(saved, list):
+                    CAMERAS_BY_USER[clean_email] = saved
+                    return saved
+        except Exception:
+            pass
+    if clean_email == "dirtbike000000@gmail.com":
+        CAMERAS_BY_USER[clean_email] = list(DEFAULT_CAMERAS)
+    else:
+        CAMERAS_BY_USER[clean_email] = []
+    return CAMERAS_BY_USER[clean_email]
+
+
+def set_user_cameras(email: str, cameras: List[Dict[str, Any]]):
+    clean_email = email.strip().lower()
+    CAMERAS_BY_USER[clean_email] = cameras
+    try:
+        cam_file = get_user_cameras_file(clean_email)
+        with open(cam_file, "w", encoding="utf-8") as f:
+            json.dump(cameras, f, indent=2)
+    except Exception:
+        pass
+
 
 def sync_user_to_supabase_cloud(user: Dict[str, Any]):
     """Syncs user state changes to Supabase PostgreSQL database."""
@@ -265,9 +409,19 @@ def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
         auth_hdr = request.headers.get("Authorization", "")
         if auth_hdr.startswith("Bearer "):
             token = auth_hdr[7:].strip()
-    if token and token in SESSIONS_STORE:
+    if not token:
+        return None
+
+    # 1. Memory store fast path
+    if token in SESSIONS_STORE:
         email = SESSIONS_STORE[token]
-        return USERS_STORE.get(email)
+        return get_user_by_email(email)
+
+    # 2. Cryptographic signature check (stateless across Vercel Lambdas)
+    email = verify_session_token(token)
+    if email:
+        return get_user_by_email(email)
+
     return None
 
 # ---------------------------------------------------------------------------
@@ -367,9 +521,9 @@ def api_auth_login(req: LoginRequest, response: Response):
         elif not stored_hash:
             user["password_hash"] = pwd_hash
 
-    session_token = f"sess_{secrets.token_hex(16)}"
-    SESSIONS_STORE[session_token] = email
     max_age = 30 * 86400 if req.remember else 86400
+    session_token = create_session_token(email, max_age=max_age)
+    SESSIONS_STORE[session_token] = email
     response.set_cookie(key="vyzn_session", value=session_token, httponly=True, path="/", max_age=max_age)
     response.set_cookie(key="vyzn_access_token", value=session_token, httponly=False, path="/", max_age=max_age)
 
@@ -406,13 +560,14 @@ def api_auth_signup(req: SignupRequest, response: Response):
         "telegram_linked_at_ms": None,
     }
     USERS_STORE[email] = user
-    CAMERAS_BY_USER[email] = []
+    set_user_cameras(email, [])
     CLIPS_BY_USER[email] = []
 
-    session_token = f"sess_{secrets.token_hex(16)}"
+    max_age = 86400 * 30
+    session_token = create_session_token(email, max_age=max_age)
     SESSIONS_STORE[session_token] = email
-    response.set_cookie(key="vyzn_session", value=session_token, httponly=True, path="/")
-    response.set_cookie(key="vyzn_access_token", value=session_token, httponly=False, path="/")
+    response.set_cookie(key="vyzn_session", value=session_token, httponly=True, path="/", max_age=max_age)
+    response.set_cookie(key="vyzn_access_token", value=session_token, httponly=False, path="/", max_age=max_age)
 
     sync_user_to_supabase_cloud(user)
     return {
@@ -420,6 +575,17 @@ def api_auth_signup(req: SignupRequest, response: Response):
         "redirect": "/overview",
         "user": user
     }
+
+@app.post("/api/auth/signout")
+@app.post("/api/auth/logout")
+@app.post("/api/v1/auth/logout")
+def api_auth_logout(response: Response, request: Request):
+    token = request.cookies.get("vyzn_session") or request.cookies.get("vyzn_access_token")
+    if token and token in SESSIONS_STORE:
+        del SESSIONS_STORE[token]
+    response.delete_cookie(key="vyzn_session", path="/")
+    response.delete_cookie(key="vyzn_access_token", path="/")
+    return {"ok": True, "redirect": "/login"}
 
 @app.post("/api/auth/reset-password")
 def api_auth_reset_password(req: ResetPasswordRequest):
@@ -950,12 +1116,14 @@ def list_cameras(request: Request):
     user = get_current_user(request)
     if not user:
         return []
-    return CAMERAS_BY_USER.get(user["email"], [])
+    return get_user_cameras(user["email"])
 
 @app.post("/api/cameras")
 def add_camera(payload: CameraCreateRequest, request: Request):
     user = get_current_user(request)
-    email = user["email"] if user else "dirtbike000000@gmail.com"
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    email = user["email"]
     new_id = f"cam_{int(time.time() * 1000) % 100000}"
     cam = {
         "id": new_id,
@@ -972,37 +1140,46 @@ def add_camera(payload: CameraCreateRequest, request: Request):
         "owner_email": email,
         "areas": []
     }
-    user_cams = CAMERAS_BY_USER.setdefault(email, [])
+    user_cams = get_user_cameras(email)
     user_cams.append(cam)
+    set_user_cameras(email, user_cams)
     return {"ok": True, "camera": cam}
 
 @app.patch("/api/cameras/{camera_id}")
 def rename_camera(camera_id: str, payload: Dict[str, Any], request: Request):
     user = get_current_user(request)
-    email = user["email"] if user else "dirtbike000000@gmail.com"
-    user_cams = CAMERAS_BY_USER.get(email, [])
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    email = user["email"]
+    user_cams = get_user_cameras(email)
     new_name = payload.get("name")
     for c in user_cams:
         if c.get("id") == camera_id or c.get("camera_id") == camera_id:
             if new_name:
                 c["name"] = new_name
+            set_user_cameras(email, user_cams)
             return {"ok": True, "camera": c}
     return {"ok": True}
 
 @app.delete("/api/cameras/{camera_id}")
 def delete_camera(camera_id: str, request: Request):
     user = get_current_user(request)
-    email = user["email"] if user else "dirtbike000000@gmail.com"
-    user_cams = CAMERAS_BY_USER.get(email, [])
-    CAMERAS_BY_USER[email] = [c for c in user_cams if c.get("id") != camera_id and c.get("camera_id") != camera_id]
-    return {"ok": True}
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    email = user["email"]
+    user_cams = get_user_cameras(email)
+    updated = [c for c in user_cams if c.get("id") != camera_id and c.get("camera_id") != camera_id]
+    set_user_cameras(email, updated)
+    return {"ok": True, "camera_id": camera_id, "remaining_count": len(updated)}
 
 @app.get("/api/cameras/{camera_id}/areas")
 @app.get("/api/cameras/{camera_id}/zones")
 def get_camera_areas(camera_id: str, request: Request):
     user = get_current_user(request)
-    email = user["email"] if user else "dirtbike000000@gmail.com"
-    user_cams = CAMERAS_BY_USER.get(email, [])
+    if not user:
+        return {"camera_id": camera_id, "areas": []}
+    email = user["email"]
+    user_cams = get_user_cameras(email)
     for c in user_cams:
         if c.get("id") == camera_id or c.get("camera_id") == camera_id:
             return {"camera_id": camera_id, "areas": c.get("areas", [])}
@@ -1012,12 +1189,15 @@ def get_camera_areas(camera_id: str, request: Request):
 @app.post("/api/cameras/{camera_id}/zones")
 def save_camera_areas(camera_id: str, payload: WatchAreasUpdateRequest, request: Request):
     user = get_current_user(request)
-    email = user["email"] if user else "dirtbike000000@gmail.com"
-    user_cams = CAMERAS_BY_USER.get(email, [])
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    email = user["email"]
+    user_cams = get_user_cameras(email)
     for c in user_cams:
         if c.get("id") == camera_id or c.get("camera_id") == camera_id:
             c["areas"] = payload.areas
             c["area_count"] = len(payload.areas)
+            set_user_cameras(email, user_cams)
             return {"ok": True, "areas": payload.areas}
     return {"ok": True, "areas": payload.areas}
 

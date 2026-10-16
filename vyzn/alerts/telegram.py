@@ -400,7 +400,17 @@ class TelegramAlertProvider(AlertProvider):
             caption = caption[:997] + "..."
 
         clip_id = str(event.event_group_id)
-        clip_url = f"{base_url.rstrip('/')}/clips/{clip_id}"
+        # Determine public clip url for Telegram inline button.
+        # Telegram Bot API strictly forbids 'localhost' or '127.0.0.1' in inline button URLs with 400 Bad Request.
+        public_base = os.environ.get("VYZN_PUBLIC_URL") or os.environ.get("VERCEL_URL")
+        if public_base:
+            if not public_base.startswith("http://") and not public_base.startswith("https://"):
+                public_base = f"https://{public_base}"
+            clip_url = f"{public_base.rstrip('/')}/clips/{clip_id}"
+        elif "localhost" in base_url or "127.0.0.1" in base_url:
+            clip_url = f"https://vyzn-ai.vercel.app/clips/{clip_id}"
+        else:
+            clip_url = f"{base_url.rstrip('/')}/clips/{clip_id}"
 
         inline_keyboard = {
             "inline_keyboard": [

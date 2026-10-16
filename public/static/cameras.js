@@ -100,6 +100,7 @@ function closeAllMenus() {
 }
 
 function openRemoveModal(camId, camName) {
+  pendingRemoveId = camId;
   const modal = document.getElementById('modal-remove');
   const title = document.getElementById('modal-remove-title');
   const body = document.getElementById('modal-remove-body');

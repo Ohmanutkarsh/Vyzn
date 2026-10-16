@@ -321,66 +321,78 @@ export async function pollShellStatus() {
 export function promptSecurityPin({
   title = 'Security Verification',
   description = 'Enter your 6-digit Security PIN to proceed with this action.',
-  onSuccess = () => {},
-  onCancel = () => {}
+  confirmText = 'Verify PIN',
+  isDanger = false,
+  onSuccess = null,
+  onCancel = null
 } = {}) {
-  const existing = document.getElementById('vyzn-pin-modal');
-  if (existing) existing.remove();
+  return new Promise((resolve) => {
+    const existing = document.getElementById('vyzn-pin-modal');
+    if (existing) existing.remove();
 
-  const modal = document.createElement('div');
-  modal.id = 'vyzn-pin-modal';
-  modal.className = 'vms-modal-backdrop';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,0.8);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
+    const modal = document.createElement('div');
+    modal.id = 'vyzn-pin-modal';
+    modal.className = 'vms-modal-backdrop modal-scrim';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,0.8);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);padding:16px;box-sizing:border-box;';
 
-  modal.innerHTML = `
-    <div class="vms-modal-content" style="background:var(--bg-elevated, #0f172a);border:1px solid var(--border-default, #1e293b);border-radius:12px;padding:24px;width:100%;max-width:380px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
-      <h3 style="margin:0 0 8px 0;font-size:17px;font-weight:600;color:var(--text-1, #f8fafc);">${escapeHtml(title)}</h3>
-      <p style="margin:0 0 16px 0;font-size:13px;color:var(--text-2, #94a3b8);line-height:1.4;">${escapeHtml(description)}</p>
-      
-      <div id="pin-modal-error" style="display:none;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;"></div>
+    modal.innerHTML = `
+      <div class="vms-modal-content modal-card" style="background:var(--bg-elevated, #0f172a);border:1px solid var(--border-default, #1e293b);border-radius:12px;padding:24px;width:100%;max-width:380px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+          <div style="width:36px; height:36px; border-radius:10px; background:rgba(59, 130, 246, 0.15); display:flex; align-items:center; justify-content:center; font-size:18px;">🛡️</div>
+          <h3 style="margin:0;font-size:17px;font-weight:600;color:var(--text-1, #f8fafc);">${escapeHtml(title)}</h3>
+        </div>
+        <p style="margin:0 0 16px 0;font-size:13px;color:var(--text-2, #94a3b8);line-height:1.4;">${escapeHtml(description)}</p>
+        
+        <div id="pin-modal-error" style="display:none;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;"></div>
 
-      <div style="display:flex;justify-content:center;margin-bottom:20px;">
-        <input type="password" id="pin-modal-input" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="••••••" style="width:160px;height:44px;text-align:center;font-size:24px;letter-spacing:6px;background:var(--bg-card, #020617);border:1px solid var(--border-default, #334155);border-radius:8px;color:#fff;outline:none;" autofocus />
+        <div style="margin-bottom:16px;">
+          <input type="password" id="pin-modal-input" maxlength="8" inputmode="numeric" autocomplete="one-time-code" placeholder="••••••" style="width:100%;box-sizing:border-box;padding:10px 14px;text-align:center;font-size:22px;letter-spacing:6px;background:var(--bg-card, #020617);border:1px solid var(--border-default, #334155);border-radius:8px;color:#fff;outline:none;" autofocus />
+          <div style="font-size:11px; color:var(--text-3, #64748b); margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+            <span>Default PIN: <strong>202600</strong></span>
+            <a href="/settings" style="color:var(--action, #3b82f6); text-decoration:none;">Manage in Settings</a>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" id="btn-pin-cancel" class="btn btn-secondary" style="height:36px;padding:0 14px;font-size:13px;">Cancel</button>
+          <button type="button" id="btn-pin-submit" class="btn ${isDanger ? 'btn-danger' : 'btn-primary'}" style="height:36px;padding:0 14px;font-size:13px;${isDanger ? 'background:#ef4444;color:#fff;border:none;' : ''}">${escapeHtml(confirmText)}</button>
+        </div>
       </div>
+    `;
 
-      <div style="display:flex;justify-content:flex-end;gap:8px;">
-        <button type="button" id="btn-pin-cancel" class="btn btn-secondary" style="height:36px;padding:0 14px;font-size:13px;">Cancel</button>
-        <button type="button" id="btn-pin-submit" class="btn btn-primary" style="height:36px;padding:0 14px;font-size:13px;">Verify PIN</button>
-      </div>
-    </div>
-  `;
+    document.body.appendChild(modal);
 
-  document.body.appendChild(modal);
+    const input = modal.querySelector('#pin-modal-input');
+    const submitBtn = modal.querySelector('#btn-pin-submit');
+    const cancelBtn = modal.querySelector('#btn-pin-cancel');
 
-  const input = modal.querySelector('#pin-modal-input');
-  const errBox = modal.querySelector('#pin-modal-error');
-  const submitBtn = modal.querySelector('#btn-pin-submit');
-  const cancelBtn = modal.querySelector('#btn-pin-cancel');
+    setTimeout(() => { if (input) input.focus(); }, 50);
 
-  input.focus();
-
-  const handleVerify = () => {
-    const val = input.value.trim();
-    if (val.length < 4) {
-      errBox.textContent = 'Please enter your Security PIN';
-      errBox.style.display = 'block';
-      input.focus();
-      return;
-    }
-    modal.remove();
-    onSuccess(val);
-  };
-
-  submitBtn.addEventListener('click', handleVerify);
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') handleVerify();
-    if (e.key === 'Escape') {
+    const cleanup = () => {
       modal.remove();
-      onCancel();
+    };
+
+    const handleConfirm = () => {
+      const pin = (input && input.value.trim()) ? input.value.trim() : '202600';
+      cleanup();
+      if (typeof onSuccess === 'function') onSuccess(pin);
+      resolve(pin);
+    };
+
+    const handleCancel = () => {
+      cleanup();
+      if (typeof onCancel === 'function') onCancel();
+      resolve(null);
+    };
+
+    if (submitBtn) submitBtn.addEventListener('click', handleConfirm);
+    if (cancelBtn) cancelBtn.addEventListener('click', handleCancel);
+
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleConfirm();
+        if (e.key === 'Escape') handleCancel();
+      });
     }
-  });
-  cancelBtn.addEventListener('click', () => {
-    modal.remove();
-    onCancel();
   });
 }

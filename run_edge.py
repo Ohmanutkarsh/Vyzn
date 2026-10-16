@@ -100,7 +100,7 @@ def build_synthetic_settings(num_cameras: int, data_dir: Path, demo_mode: bool =
             import json
             with open(cfg_file, "r") as f:
                 saved = json.load(f)
-                if saved and isinstance(saved, list) and len(saved) > 0:
+                if isinstance(saved, list):
                     cameras = [CameraConfig(**item) for item in saved]
                     logger.info(f"Loaded {len(cameras)} persistent cameras from config/cameras.json")
                     settings.cameras = cameras
