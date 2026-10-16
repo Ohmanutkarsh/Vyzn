@@ -7,6 +7,32 @@ let camerasList = [];
 let pendingRemoveId = null;
 let pendingRenameId = null;
 
+let edgeBaseUrl = null;
+
+async function checkEdgeServer() {
+  if (edgeBaseUrl !== null) return edgeBaseUrl;
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    edgeBaseUrl = '';
+    return edgeBaseUrl;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch('http://127.0.0.1:8000/api/status', {
+      method: 'GET',
+      mode: 'cors',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      edgeBaseUrl = 'http://127.0.0.1:8000';
+      return edgeBaseUrl;
+    }
+  } catch (e) {}
+  edgeBaseUrl = '';
+  return edgeBaseUrl;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   await initI18n();
   initShell({ activePage: 'cameras' });
@@ -18,8 +44,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadCameras();
   attachEventListeners();
 
-  // Snapshot refresh every 15 seconds per spec
-  setInterval(refreshSnapshots, 15000);
+  // Snapshot refresh every 8 seconds per spec
+  setInterval(refreshSnapshots, 8000);
 });
 
 async function loadCameras() {
@@ -27,9 +53,22 @@ async function loadCameras() {
   const countEl = document.getElementById('txt-cameras-count');
 
   try {
+    await checkEdgeServer();
     const res = await fetch('/api/cameras', { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load cameras');
     camerasList = await res.json();
+
+    if (edgeBaseUrl) {
+      camerasList.forEach(c => {
+        const cid = c.id || c.camera_id;
+        c.snapshot_url = `${edgeBaseUrl}/api/cameras/${cid}/snapshot.jpg?t=${Date.now()}`;
+      });
+    } else {
+      camerasList.forEach(c => {
+        const cid = c.id || c.camera_id;
+        c.snapshot_url = `/api/cameras/${cid}/snapshot.jpg?t=${Date.now()}`;
+      });
+    }
 
     if (countEl) {
       const count = camerasList.length;
@@ -161,6 +200,14 @@ function attachEventListeners() {
             'X-Security-Pin': pin
           }
         });
+        if (edgeBaseUrl) {
+          fetch(`${edgeBaseUrl}/api/cameras/${encodeURIComponent(targetId)}`, {
+            method: 'DELETE',
+            headers: {
+              'X-Security-Pin': pin
+            }
+          }).catch(() => {});
+        }
         if (res.ok) {
           await loadCameras();
         } else {
@@ -211,7 +258,15 @@ function refreshSnapshots() {
   const images = document.querySelectorAll('.camera-thumb-img');
   const now = Date.now();
   images.forEach(img => {
-    const currentSrc = img.src.split('?')[0];
-    img.src = `${currentSrc}?t=${now}`;
+    const tile = img.closest('.camera-tile');
+    const cid = tile ? tile.getAttribute('data-camera-id') : null;
+    if (cid && edgeBaseUrl) {
+      img.src = `${edgeBaseUrl}/api/cameras/${cid}/snapshot.jpg?t=${now}`;
+    } else {
+      const currentSrc = img.src.split('?')[0];
+      if (currentSrc && !currentSrc.startsWith('data:')) {
+        img.src = `${currentSrc}?t=${now}`;
+      }
+    }
   });
 }

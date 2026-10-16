@@ -11,7 +11,10 @@ import { escapeHtml } from '../utils.js';
  */
 export function renderCameraTile({ camera, isSelected = false, showActions = false }) {
   const camId = camera.id || camera.camera_id;
-  const thumbUrl = camera.snapshot_url || camera.snapshotUrl || `/api/cameras/${camId}/snapshot.jpg`;
+  let thumbUrl = camera.snapshot_url || camera.snapshotUrl || `/api/cameras/${camId}/snapshot.jpg`;
+  if (typeof window !== 'undefined' && window.__vyzn_edge_url && thumbUrl.startsWith('/api/')) {
+    thumbUrl = `${window.__vyzn_edge_url}${thumbUrl}`;
+  }
   const isOnline = camera.status === 'online';
   const statusDotClass = isOnline ? 'neutral' : 'amber';
   const statusText = isOnline ? 'Online' : (camera.offline_since ? `Offline since ${camera.offline_since}` : 'Offline');

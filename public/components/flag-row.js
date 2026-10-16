@@ -28,7 +28,10 @@ function resolveHeadline(clip) {
  * @returns {string} HTML string
  */
 export function renderFlagRow({ clip }) {
-  const thumbUrl = clip.thumbnailUrl || '/static/img/placeholder.jpg';
+  let thumbUrl = clip.thumbnailUrl || '/static/img/placeholder.jpg';
+  if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
+    if (thumbUrl && thumbUrl.startsWith('/api/')) thumbUrl = `${window.__vyzn_edge_url}${thumbUrl}`;
+  }
   const headline = resolveHeadline(clip);
   const whenStr = formatWhen(clip.startMs || clip.triggerMs);
   const locationStr = `${escapeHtml(clip.cameraName || clip.cameraId)}${clip.areaName ? ` · ${escapeHtml(clip.areaName)}` : ''}`;

@@ -39,7 +39,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // Periodic snapshot refresh for non-active camera tiles in strip
-  setInterval(refreshStripSnapshots, 15000);
+  setInterval(refreshStripSnapshots, 8000);
+  // Periodic real-time snapshot capture from active stream to update strip and cloud
+  setInterval(captureAndUploadActiveSnapshot, 5000);
 });
 
 async function loadOverviewData() {
@@ -76,6 +78,7 @@ async function loadOverviewData() {
     const onlineCam = camerasList.find(c => c.status === 'online');
     activeCameraId = onlineCam ? (onlineCam.id || onlineCam.camera_id) : (camerasList[0].id || camerasList[0].camera_id);
 
+    await checkEdgeServer();
     renderPicker();
     renderStrip();
     startLiveStream(activeCameraId);
@@ -137,7 +140,13 @@ function renderStrip() {
 
   strip.innerHTML = camerasList.map(c => {
     const cid = c.id || c.camera_id;
-    return renderCameraTile({ camera: c, isSelected: cid === activeCameraId, showActions: false });
+    const camCopy = { ...c };
+    if (edgeBaseUrl) {
+      camCopy.snapshot_url = `${edgeBaseUrl}/api/cameras/${cid}/snapshot.jpg?t=${Date.now()}`;
+    } else {
+      camCopy.snapshot_url = `/api/cameras/${cid}/snapshot.jpg?t=${Date.now()}`;
+    }
+    return renderCameraTile({ camera: camCopy, isSelected: cid === activeCameraId, showActions: false });
   }).join('');
 
   strip.querySelectorAll('.camera-tile').forEach(tile => {
@@ -562,12 +571,64 @@ async function renderWatchAreasOverlay() {
   }
 }
 
+async function captureAndUploadActiveSnapshot() {
+  if (!activeCameraId) return;
+  const videoEl = document.getElementById('live-stream-video');
+  const activeTileImg = document.querySelector(`.camera-tile[data-camera-id="${activeCameraId}"] .camera-thumb-img`);
+
+  if (videoEl && videoEl.style.display !== 'none' && videoEl.readyState >= 2 && videoEl.videoWidth > 0) {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 360;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoEl, 0, 0, 640, 360);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+
+      if (activeTileImg) {
+        activeTileImg.src = dataUrl;
+      }
+
+      fetch(`/api/cameras/${encodeURIComponent(activeCameraId)}/snapshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preview_base64: dataUrl })
+      }).catch(() => {});
+
+      if (edgeBaseUrl) {
+        fetch(`${edgeBaseUrl}/api/cameras/${encodeURIComponent(activeCameraId)}/snapshot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preview_base64: dataUrl })
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('Snapshot capture error:', e);
+    }
+  } else if (edgeBaseUrl) {
+    if (activeTileImg) {
+      activeTileImg.src = `${edgeBaseUrl}/api/cameras/${encodeURIComponent(activeCameraId)}/snapshot.jpg?t=${Date.now()}`;
+    }
+  }
+}
+
 function refreshStripSnapshots() {
   const images = document.querySelectorAll('#cameras-strip-list .camera-thumb-img');
   const now = Date.now();
   images.forEach(img => {
-    const baseSrc = img.src.split('?')[0];
-    img.src = `${baseSrc}?t=${now}`;
+    const tile = img.closest('.camera-tile');
+    const cid = tile ? tile.getAttribute('data-camera-id') : null;
+    if (cid === activeCameraId) {
+      return;
+    }
+    if (cid && edgeBaseUrl) {
+      img.src = `${edgeBaseUrl}/api/cameras/${cid}/snapshot.jpg?t=${now}`;
+    } else {
+      const baseSrc = img.src.split('?')[0];
+      if (baseSrc && !baseSrc.startsWith('data:')) {
+        img.src = `${baseSrc}?t=${now}`;
+      }
+    }
   });
 }
 
@@ -584,10 +645,55 @@ async function loadFlags() {
   if (!container) return;
 
   try {
-    const res = await fetch('/api/clips/flags?limit=10', { credentials: 'include' });
-    if (!res.ok) return;
-    const data = await res.json();
+    const edge = await checkEdgeServer();
+    let data = null;
+    if (edge) {
+      try {
+        const edgeRes = await fetch(`${edge}/api/clips/flags?limit=10`, { mode: 'cors' });
+        if (edgeRes.ok) {
+          data = await edgeRes.json();
+          // Sync edge clips to cloud in background
+          fetch(`${edge}/api/clips?limit=50`, { mode: 'cors' })
+            .then(r => r.ok ? r.json() : null)
+            .then(allClipsData => {
+              if (allClipsData && allClipsData.clips && allClipsData.clips.length > 0) {
+                fetch('/api/clips/sync', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'include',
+                  body: JSON.stringify({ clips: allClipsData.clips })
+                }).catch(() => {});
+              }
+            }).catch(() => {});
+        }
+      } catch (e) {
+        console.warn('Edge flags fetch error:', e);
+      }
+    }
+
+    if (!data) {
+      const res = await fetch('/api/clips/flags?limit=10', { credentials: 'include' });
+      if (!res.ok) return;
+      data = await res.json();
+    }
+
     flagsData = data.flags || [];
+    if (edge) {
+      window.__vyzn_edge_url = edge;
+      flagsData.forEach(clip => {
+        if (clip.thumbnailUrl && clip.thumbnailUrl.startsWith('/')) clip.thumbnailUrl = `${edge}${clip.thumbnailUrl}`;
+        if (clip.posterUrl && clip.posterUrl.startsWith('/')) clip.posterUrl = `${edge}${clip.posterUrl}`;
+        if (clip.previewUrl && clip.previewUrl.startsWith('/')) clip.previewUrl = `${edge}${clip.previewUrl}`;
+        if (clip.videoUrl && clip.videoUrl.startsWith('/')) clip.videoUrl = `${edge}${clip.videoUrl}`;
+        if (clip.urls) {
+          if (clip.urls.thumb && clip.urls.thumb.startsWith('/')) clip.urls.thumb = `${edge}${clip.urls.thumb}`;
+          if (clip.urls.poster && clip.urls.poster.startsWith('/')) clip.urls.poster = `${edge}${clip.urls.poster}`;
+          if (clip.urls.preview && clip.urls.preview.startsWith('/')) clip.urls.preview = `${edge}${clip.urls.preview}`;
+          if (clip.urls.video && clip.urls.video.startsWith('/')) clip.urls.video = `${edge}${clip.urls.video}`;
+        }
+      });
+    }
+
     const totalWaiting = data.totalWaiting !== undefined ? data.totalWaiting : flagsData.length;
     const expiringSoon = data.expiringSoonCount || 0;
 

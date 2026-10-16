@@ -287,11 +287,14 @@ function bindDrawerEvents() {
     actTelegram.textContent = 'Sending…';
     try {
       const resp = await fetch(`/api/clips/${encodeURIComponent(activeClip.id)}/telegram`, { credentials: 'include', method: 'POST' });
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
+        fetch(`${window.__vyzn_edge_url}/api/clips/${encodeURIComponent(activeClip.id)}/telegram`, { method: 'POST' }).catch(() => {});
+      }
       if (resp.ok) {
         showToast(t('clips.toast_sent_telegram', 'Sent to Telegram.'));
       } else {
-        showToast(data.detail || 'Failed to send alert to Telegram');
+        showToast(data.detail || data.message || 'Failed to send alert to Telegram');
       }
     } catch (e) {
       showToast('Could not reach server.');
@@ -508,9 +511,15 @@ function renderDrawerContent(clip) {
   const video = document.getElementById('drawer-video-player');
 
   // In simple terms: immediately set the poster snapshot image so the preview is visible right away even before video buffers
-  const posterUrl = clip.posterUrl || clip.thumbnailUrl || (clip.urls && clip.urls.poster) || `/api/clips/${encodeURIComponent(clip.id)}/poster.jpg`;
+  let posterUrl = clip.posterUrl || clip.thumbnailUrl || (clip.urls && clip.urls.poster) || `/api/clips/${encodeURIComponent(clip.id)}/poster.jpg`;
+  let videoSrc = clip.videoUrl || `/api/clips/${encodeURIComponent(clip.id)}/video`;
+  if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
+    const edge = window.__vyzn_edge_url;
+    if (posterUrl && posterUrl.startsWith('/api/')) posterUrl = `${edge}${posterUrl}`;
+    if (videoSrc && videoSrc.startsWith('/api/')) videoSrc = `${edge}${videoSrc}`;
+  }
   video.poster = posterUrl;
-  video.src = clip.videoUrl || `/api/clips/${encodeURIComponent(clip.id)}/video`;
+  video.src = videoSrc;
 
   // In simple terms: force the browser video engine to load metadata and show the first video frame
   try {

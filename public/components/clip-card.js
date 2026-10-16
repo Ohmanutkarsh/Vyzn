@@ -75,9 +75,15 @@ function renderTickTrack(clip, durSec) {
  */
 export function renderClipCard({ clip }) {
   // URLs for thumbnail snapshot, poster image, and inline short preview video
-  const thumbUrl = clip.thumbnailUrl || '/static/img/placeholder.jpg';
-  const posterUrl = clip.posterUrl || (clip.urls && clip.urls.poster) || thumbUrl;
-  const previewUrl = clip.previewUrl || (clip.urls && clip.urls.preview) || '';
+  let thumbUrl = clip.thumbnailUrl || '/static/img/placeholder.jpg';
+  let posterUrl = clip.posterUrl || (clip.urls && clip.urls.poster) || thumbUrl;
+  let previewUrl = clip.previewUrl || (clip.urls && clip.urls.preview) || '';
+  if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
+    const edge = window.__vyzn_edge_url;
+    if (thumbUrl && thumbUrl.startsWith('/api/')) thumbUrl = `${edge}${thumbUrl}`;
+    if (posterUrl && posterUrl.startsWith('/api/')) posterUrl = `${edge}${posterUrl}`;
+    if (previewUrl && previewUrl.startsWith('/api/')) previewUrl = `${edge}${previewUrl}`;
+  }
 
   // Calculate clip duration in minutes and seconds for the badge
   const durSec = clip.durationSec || Math.round((clip.endMs - clip.startMs) / 1000) || 15;

@@ -38,11 +38,51 @@ document.addEventListener('DOMContentLoaded', async () => {
   checkDeepLink();
 });
 
+let edgeBaseUrl = null;
+
+async function checkEdgeServer() {
+  if (edgeBaseUrl !== null) return edgeBaseUrl;
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    edgeBaseUrl = '';
+    return edgeBaseUrl;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch('http://127.0.0.1:8000/api/status', {
+      method: 'GET',
+      mode: 'cors',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      edgeBaseUrl = 'http://127.0.0.1:8000';
+      return edgeBaseUrl;
+    }
+  } catch (e) {}
+  edgeBaseUrl = '';
+  return edgeBaseUrl;
+}
+
 /**
  * Loads cameras to populate the filter dropdowns.
  */
 async function loadCamerasList() {
   try {
+    const edge = await checkEdgeServer();
+    if (edge) {
+      try {
+        const edgeRes = await fetch(`${edge}/api/cameras`, { mode: 'cors' });
+        if (edgeRes.ok) {
+          const edgeCams = await edgeRes.json();
+          if (Array.isArray(edgeCams) && edgeCams.length > 0) {
+            allCameras = edgeCams;
+            populateCameraDropdowns();
+            return;
+          }
+        }
+      } catch (e) {}
+    }
     const res = await fetch('/api/cameras');
     if (res.ok) {
       allCameras = await res.json();
@@ -327,10 +367,51 @@ async function loadClips() {
   }
 
   try {
-    const res = await fetch(`/api/clips?${params.toString()}`, { credentials: 'include' });
-    if (!res.ok) throw new Error('Failed to load clips');
-    const data = await res.json();
+    const edge = await checkEdgeServer();
+    let data = null;
+    if (edge) {
+      try {
+        const edgeRes = await fetch(`${edge}/api/clips?${params.toString()}`, { mode: 'cors' });
+        if (edgeRes.ok) {
+          data = await edgeRes.json();
+          if (data && data.clips && data.clips.length > 0) {
+            // Sync to cloud in background
+            fetch('/api/clips/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ clips: data.clips })
+            }).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn('Edge clips fetch error:', e);
+      }
+    }
+
+    if (!data) {
+      const res = await fetch(`/api/clips?${params.toString()}`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load clips');
+      data = await res.json();
+    }
+
     loadedClips = data.clips || [];
+    if (edge) {
+      window.__vyzn_edge_url = edge;
+      loadedClips.forEach(clip => {
+        if (clip.thumbnailUrl && clip.thumbnailUrl.startsWith('/')) clip.thumbnailUrl = `${edge}${clip.thumbnailUrl}`;
+        if (clip.posterUrl && clip.posterUrl.startsWith('/')) clip.posterUrl = `${edge}${clip.posterUrl}`;
+        if (clip.previewUrl && clip.previewUrl.startsWith('/')) clip.previewUrl = `${edge}${clip.previewUrl}`;
+        if (clip.videoUrl && clip.videoUrl.startsWith('/')) clip.videoUrl = `${edge}${clip.videoUrl}`;
+        if (clip.urls) {
+          if (clip.urls.thumb && clip.urls.thumb.startsWith('/')) clip.urls.thumb = `${edge}${clip.urls.thumb}`;
+          if (clip.urls.poster && clip.urls.poster.startsWith('/')) clip.urls.poster = `${edge}${clip.urls.poster}`;
+          if (clip.urls.preview && clip.urls.preview.startsWith('/')) clip.urls.preview = `${edge}${clip.urls.preview}`;
+          if (clip.urls.video && clip.urls.video.startsWith('/')) clip.urls.video = `${edge}${clip.urls.video}`;
+        }
+      });
+    }
+
     const total = data.total !== undefined ? data.total : loadedClips.length;
 
     // In simple terms: update the camera dropdown so any cameras with existing clips can be selected

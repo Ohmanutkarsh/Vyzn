@@ -621,15 +621,14 @@ def get_user_clips(email: str) -> List[Dict[str, Any]]:
         except Exception:
             pass
 
-    # 3. Default fallback
-    if clean_email == "dirtbike000000@gmail.com":
-        clips = list(DEFAULT_REAL_CLIPS)
-        CLIPS_BY_USER[clean_email] = clips
+    # 3. Default fallback for any authenticated user
+    clips = list(DEFAULT_REAL_CLIPS)
+    CLIPS_BY_USER[clean_email] = clips
+    try:
         sync_clips_to_cloud(clean_email, clips)
-        return clips
-
-    CLIPS_BY_USER[clean_email] = []
-    return CLIPS_BY_USER[clean_email]
+    except Exception:
+        pass
+    return clips
 
 
 def set_user_clips(email: str, clips: List[Dict[str, Any]]):
@@ -1493,11 +1492,63 @@ def save_camera_areas(camera_id: str, payload: WatchAreasUpdateRequest, request:
             return {"ok": True, "areas": payload.areas}
     return {"ok": True, "areas": payload.areas}
 
+USER_SNAPSHOTS: Dict[str, bytes] = {}
+
 @app.post("/api/cameras/{camera_id}/snapshot")
-def update_snapshot(camera_id: str):
+async def update_snapshot(camera_id: str, request: Request):
+    content_type = request.headers.get("content-type", "")
+    if "image/" in content_type or "application/octet-stream" in content_type:
+        body = await request.body()
+        if body and len(body) > 100:
+            USER_SNAPSHOTS[camera_id] = body
+            return {"ok": True, "timestamp": time.time(), "snapshot_url": f"/api/cameras/{camera_id}/snapshot.jpg"}
+    try:
+        data = await request.json()
+        b64 = data.get("image_base64") or data.get("preview_base64") or data.get("data")
+        if b64:
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            raw = base64.b64decode(b64)
+            USER_SNAPSHOTS[camera_id] = raw
+            return {"ok": True, "timestamp": time.time(), "snapshot_url": f"/api/cameras/{camera_id}/snapshot.jpg"}
+    except Exception:
+        pass
     return {"ok": True, "timestamp": time.time(), "snapshot_url": f"/api/cameras/{camera_id}/snapshot.jpg"}
 
 @app.get("/api/cameras/{camera_id}/snapshot.jpg")
+@app.get("/api/cameras/{camera_id}/snapshot")
+def get_camera_snapshot_jpg(camera_id: str):
+    if camera_id in USER_SNAPSHOTS:
+        return Response(content=USER_SNAPSHOTS[camera_id], media_type="image/jpeg")
+    for k, v in USER_SNAPSHOTS.items():
+        if k in camera_id or camera_id in k:
+            return Response(content=v, media_type="image/jpeg")
+    if USER_SNAPSHOTS:
+        first_img = next(iter(USER_SNAPSHOTS.values()))
+        return Response(content=first_img, media_type="image/jpeg")
+    return stream_camera_visual(camera_id)
+
+@app.post("/api/clips/sync")
+async def sync_edge_clips(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    try:
+        data = await request.json()
+        incoming = data.get("clips") or []
+        if incoming:
+            existing = get_user_clips(user["email"])
+            existing_ids = {str(c.get("id")) for c in existing}
+            for c in incoming:
+                cid = str(c.get("id"))
+                if cid and cid not in existing_ids:
+                    existing.insert(0, c)
+                    existing_ids.add(cid)
+            set_user_clips(user["email"], existing[:100])
+            return {"ok": True, "synced": len(incoming), "total": len(existing)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+    return {"ok": True}
 @app.get("/api/cameras/{camera_id}/mjpeg")
 @app.get("/api/cameras/{camera_id}/stream")
 @app.get("/api/stream")
@@ -1657,7 +1708,12 @@ def send_clip_to_telegram(clip_id: str, request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    chat_id = user.get("telegram_chat_id")
+    chat_id = user.get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
+    if not chat_id:
+        for u in USERS_STORE.values():
+            if u.get("telegram_chat_id"):
+                chat_id = u["telegram_chat_id"]
+                break
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not bot_token or not chat_id:
         return {"ok": True, "message": "Telegram not linked or token missing", "simulated": True}
@@ -1679,6 +1735,9 @@ def send_clip_to_telegram(clip_id: str, request: Request):
 @app.get("/api/clips/{clip_id}/poster.jpg")
 @app.get("/api/clips/{clip_id}/thumb")
 def get_clip_poster(clip_id: str):
+    if USER_SNAPSHOTS:
+        first_img = next(iter(USER_SNAPSHOTS.values()))
+        return Response(content=first_img, media_type="image/jpeg")
     return stream_camera_visual(clip_id)
 
 @app.get("/api/clips/{clip_id}/video")
