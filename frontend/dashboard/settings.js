@@ -817,6 +817,25 @@ async function initStorageControls() {
   const btnBrowse = document.getElementById('btn-browse-folder');
   const inputDirPicker = document.getElementById('input-folder-picker');
 
+  if (inputDirPicker) {
+    inputDirPicker.addEventListener('change', () => {
+      if (inputDirPicker.files && inputDirPicker.files.length > 0) {
+        const file = inputDirPicker.files[0];
+        let folderPath = '';
+        if (file.webkitRelativePath) {
+          folderPath = file.webkitRelativePath.split('/')[0];
+        } else if (file.name) {
+          folderPath = file.name;
+        }
+        if (folderPath && inputFolder) {
+          inputFolder.value = folderPath;
+          showToast(`Selected storage folder: ${folderPath}`);
+          if (btnSave) btnSave.click();
+        }
+      }
+    });
+  }
+
   if (btnBrowse) {
     btnBrowse.onclick = async () => {
       btnBrowse.disabled = true;
@@ -824,45 +843,57 @@ async function initStorageControls() {
 
       let backendSuccess = false;
       const edge = await checkEdgeServer();
+      const targetUrl = (edge && edge !== '') ? `${edge}/api/settings/browse-folder` : `/api/settings/browse-folder`;
 
-      if (edge) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 120000);
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
 
-          const res = await fetch(`${edge}/api/settings/browse-folder`, {
-            method: 'POST',
-            mode: 'cors',
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
+        const res = await fetch(targetUrl, {
+          method: 'POST',
+          mode: 'cors',
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
 
-          const data = await res.json();
-          if (data.ok && data.selected_path) {
-            if (inputFolder) inputFolder.value = data.selected_path;
-            showToast(`Selected folder: ${data.selected_path}`);
-            if (btnSave) btnSave.click();
-            backendSuccess = true;
-          } else if (data.cancelled) {
-            backendSuccess = true;
-          }
-        } catch (err) {
-          console.warn('Backend browse-folder error:', err);
+        const data = await res.json();
+        if (data.ok && data.selected_path) {
+          if (inputFolder) inputFolder.value = data.selected_path;
+          showToast(`Selected folder: ${data.selected_path}`);
+          if (btnSave) btnSave.click();
+          backendSuccess = true;
+        } else if (data.cancelled) {
+          backendSuccess = true;
         }
+      } catch (err) {
+        console.warn('Backend browse-folder notice:', err);
       }
 
       if (!backendSuccess) {
-        // When edge server is running on cloud or offline, open a clean prompt to choose/enter local folder
-        const cur = inputFolder ? inputFolder.value.trim() : 'C:\\VyznFootage';
-        const entered = window.prompt(
-          'Select Local Storage Folder:\nEnter the local directory path on your computer where clips and whole footage should be saved:',
-          cur || 'C:\\VyznFootage'
-        );
-        if (entered && entered.trim()) {
-          const cleaned = entered.trim();
-          if (inputFolder) inputFolder.value = cleaned;
-          showToast(`Storage path set to: ${cleaned}`);
-          if (btnSave) btnSave.click();
+        // Fallback for remote / mobile browsers where native desktop dialog cannot be popped over network:
+        if (inputDirPicker && typeof inputDirPicker.showPicker === 'function') {
+          try {
+            inputDirPicker.showPicker();
+            backendSuccess = true;
+          } catch (_) {
+            if (inputDirPicker) inputDirPicker.click();
+            backendSuccess = true;
+          }
+        } else if (inputDirPicker) {
+          inputDirPicker.click();
+          backendSuccess = true;
+        } else {
+          const cur = inputFolder ? inputFolder.value.trim() : 'C:\\Vyzn testing data';
+          const entered = window.prompt(
+            'Select Storage Folder:\nEnter directory path for clips and continuous footage:',
+            cur || 'C:\\Vyzn testing data'
+          );
+          if (entered && entered.trim()) {
+            const cleaned = entered.trim();
+            if (inputFolder) inputFolder.value = cleaned;
+            showToast(`Storage path set to: ${cleaned}`);
+            if (btnSave) btnSave.click();
+          }
         }
       }
 

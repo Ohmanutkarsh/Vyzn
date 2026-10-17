@@ -317,7 +317,7 @@ class ClipStateMachine:
         # Snap cut points outward to keyframe boundaries while enforcing >= 10s rule
         clip_start_pts = self._snap_cut_point(self.first_active_window_start - self.pre_roll_seconds, is_start=True)
         if (self.first_active_window_start - clip_start_pts) < self.pre_roll_seconds:
-            clip_start_pts = self.first_active_window_start - self.pre_roll_seconds
+            clip_start_pts = max(0.0, self.first_active_window_start - self.pre_roll_seconds)
 
         ideal_end_pts = self.last_active_window_end + self.post_roll_seconds
         clip_end_pts = self._snap_cut_point(ideal_end_pts, is_start=False)
@@ -559,8 +559,14 @@ class ClipStateMachine:
         ]
         has_confirmed_target = has_confirmed_person or bool(vehicle_tracks) or bool(vehicle_dets)
 
+        tick_has_motion = any(getattr(m, "has_motion", False) or (getattr(m, "motion_score", 0.0) > 0.005) for m in self.current_tick_metas)
         if has_confirmed_target:
-            peak_score = max(peak_score, 35.0)
+            # If in IDLE and there is zero motion, do not artificially force score >= 30.
+            # This prevents stationary presence without motion from prematurely opening a clip!
+            if self.state == ClipState.IDLE and not tick_has_motion and peak_score < 30.0:
+                pass
+            else:
+                peak_score = max(peak_score, 35.0)
         elif not has_confirmed_target:
             # In simple terms: if the camera only sees background motion (like a spinning fan or hair moving)
             # with NO confirmed person or vehicle, cap the score at 20 (strictly below the active threshold of 30).

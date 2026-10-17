@@ -851,6 +851,30 @@ class EdgePipeline:
             post_url = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips_{h}.json"
             requests.post(post_url, headers=headers, data=json.dumps(clips), timeout=5.0)
             logger.info(f"Auto-synced {len(clips)} clips to Supabase cloud for {owner_email}")
+
+            # Upload media files for latest clips
+            for c in clips[:5]:
+                cid = c.get("id")
+                cam_id = c.get("camera_id") or "cam_81559"
+                thumb_path = c.get("thumbPath")
+                file_path = c.get("filePath")
+                if thumb_path and os.path.exists(thumb_path):
+                    try:
+                        requests.post(f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/poster.jpg", headers={**headers, "Content-Type": "image/jpeg"}, data=open(thumb_path, "rb").read(), timeout=6.0)
+                    except Exception:
+                        pass
+                    prev_p = Path(thumb_path).parent / "preview.mp4"
+                    if prev_p.exists():
+                        try:
+                            requests.post(f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/preview.mp4", headers={**headers, "Content-Type": "video/mp4"}, data=prev_p.read_bytes(), timeout=10.0)
+                        except Exception:
+                            pass
+                if file_path and os.path.exists(file_path):
+                    try:
+                        if os.path.getsize(file_path) < 35 * 1024 * 1024:
+                            requests.post(f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/clip.mp4", headers={**headers, "Content-Type": "video/mp4"}, data=open(file_path, "rb").read(), timeout=30.0)
+                    except Exception:
+                        pass
         except Exception as e:
             logger.warning(f"Failed to auto-sync clips to cloud: {e}")
 

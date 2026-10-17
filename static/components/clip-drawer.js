@@ -586,9 +586,10 @@ function renderDrawerContent(clip) {
   const preTriggerSec = Math.max(0, triggerOffsetSec - 3.0);
 
   video.onerror = () => {
-    console.warn('Video playback issue for clip:', clip.id);
-    const previewUrl = clip.previewUrl || (clip.urls && clip.urls.preview);
-    if (previewUrl && video.src !== previewUrl) {
+    console.warn('Video playback issue for clip, attempting fallback to preview:', clip.id);
+    const previewUrl = clip.previewUrl || (clip.urls && clip.urls.preview) || `/api/clips/${encodeURIComponent(clip.id)}/preview.mp4`;
+    if (previewUrl && video.src !== previewUrl && !video.dataset.hasFallenBack) {
+      video.dataset.hasFallenBack = 'true';
       video.src = previewUrl;
       try { video.load(); } catch (_) {}
     }

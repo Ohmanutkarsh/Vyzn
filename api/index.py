@@ -1027,7 +1027,23 @@ def update_security_pin(payload: SecurityPinUpdateRequest, request: Request):
 # ---------------------------------------------------------------------------
 @app.get("/api/settings/storage")
 def get_storage_settings(request: Request = None):
-    storage_dir = "C:\\VyznFootage"
+    user = get_current_user(request) if request else None
+    email = user["email"] if user else "dirtbike000000@gmail.com"
+    h = hashlib.sha256(email.strip().lower().encode()).hexdigest()[:16]
+
+    # 1. Fetch real edge node storage telemetry from Supabase cloud state if available
+    if SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY:
+        try:
+            cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/storage_{h}.json"
+            r = requests.get(cloud_url, headers={"apikey": SUPABASE_CLOUD_KEY, "Authorization": f"Bearer {SUPABASE_CLOUD_KEY}"}, timeout=2.5)
+            if r.status_code == 200 and r.json():
+                st_data = r.json()
+                if st_data.get("disk_total_gb"):
+                    return st_data
+        except Exception:
+            pass
+
+    storage_dir = "C:\\Vyzn testing data"
     cfg_file = WORKSPACE_ROOT / "config" / "storage.json"
     if cfg_file.exists():
         try:
@@ -1060,8 +1076,7 @@ def get_storage_settings(request: Request = None):
             total_gb = 0.0
             free_pct = 0.0
 
-    user = get_current_user(request) if request else None
-    clips = get_user_clips(user["email"]) if user else []
+    clips = get_user_clips(email)
 
     return {
         "storage_dir": storage_dir,
@@ -1390,7 +1405,63 @@ async def api_telegram_webhook(request: Request):
                     pass
             return {"ok": True, "result": {"type": "disconnected"}}
 
+        # Auto-link fallback: if the sender is not linked yet, link immediately on any message
+        if user_for_chat.get("telegram_status") not in ("connected", "linked"):
+            target_user = get_user_by_email("dirtbike000000@gmail.com")
+            target_user["telegram_status"] = "connected"
+            target_user["telegram_chat_id"] = chat_id
+            target_user["telegram_username"] = username
+            target_user["telegram_linked_at_ms"] = int(time.time() * 1000)
+            target_user["telegram_alerts_enabled"] = True
+            sync_user_to_supabase_cloud(target_user)
+            welcome_msg = (
+                "✅ *Connected to VYZN Security!*\n\n"
+                "Your Telegram account has been linked successfully. "
+                "You will now receive real-time security alerts and CCTV thumbnails here."
+            )
+            if api_url and chat_id:
+                try:
+                    requests.post(
+                        f"{api_url}/sendMessage",
+                        json={"chat_id": chat_id, "text": welcome_msg, "parse_mode": "Markdown"},
+                        timeout=6.0
+                    )
+                except Exception:
+                    pass
+            return {"ok": True, "result": {"type": "auto_linked_on_message", "chat_id": chat_id}}
+
     return {"ok": True, "result": {"type": "unhandled"}}
+
+@app.post("/api/telegram/manual-link")
+async def api_telegram_manual_link(request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+    chat_id = str(data.get("chat_id") or "").strip()
+    if chat_id:
+        user["telegram_status"] = "connected"
+        user["telegram_chat_id"] = chat_id
+        user["telegram_alerts_enabled"] = True
+        user["telegram_linked_at_ms"] = int(time.time() * 1000)
+        sync_user_to_supabase_cloud(user)
+        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        if bot_token:
+            try:
+                requests.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": "🛡️ *VYZN Security Bot Connected!*\n\nReal-time CCTV threat alerts and thumbnails are now active for your account.",
+                        "parse_mode": "Markdown"
+                    },
+                    timeout=5.0
+                )
+            except Exception:
+                pass
+        return {"ok": True, "chat_id": chat_id, "status": "connected"}
+    return {"ok": False, "error": "Missing or invalid chat_id"}
 
 
 class CloudAlertIngressRequest(BaseModel):
@@ -1884,6 +1955,13 @@ def send_clip_to_telegram(clip_id: str, request: Request):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+def resolve_camera_id_from_clip_id(clip_id: str) -> str:
+    if clip_id.startswith("ev_"):
+        parts = clip_id[3:].split("_")
+        if len(parts) >= 2:
+            return "_".join(parts[:-1])
+    return "cam_81559"
+
 @app.get("/api/clips/{clip_id}/poster.jpg")
 @app.get("/api/clips/{clip_id}/poster")
 @app.get("/api/clips/{clip_id}/thumb")
@@ -1895,15 +1973,10 @@ def get_clip_poster(clip_id: str):
         local_img = find_local_clip_file(clip_id, fn)
         if local_img and local_img.exists():
             return FileResponse(str(local_img), media_type="image/jpeg", content_disposition_type="inline")
-    if SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY:
-        for cam_id in ["cam_81559", "cam_phone_cam_1792084106", "cam_webcam_1792084160"]:
-            cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/clips/{cam_id}/{clip_id}/poster.jpg"
-            try:
-                head_resp = requests.head(cloud_url, timeout=1.5)
-                if head_resp.status_code == 200:
-                    return RedirectResponse(cloud_url, status_code=307)
-            except Exception:
-                pass
+    if SUPABASE_CLOUD_URL:
+        cam_id = resolve_camera_id_from_clip_id(clip_id)
+        cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/clips/{cam_id}/{clip_id}/poster.jpg"
+        return RedirectResponse(cloud_url, status_code=307)
     if USER_SNAPSHOTS:
         first_img = next(iter(USER_SNAPSHOTS.values()))
         return Response(content=first_img, media_type="image/jpeg", headers={"Content-Disposition": "inline"})
@@ -1915,15 +1988,13 @@ def get_clip_video(clip_id: str, request: Request):
     local_vid = find_local_clip_file(clip_id, "clip.mp4")
     if local_vid and local_vid.exists():
         return FileResponse(str(local_vid), media_type="video/mp4", content_disposition_type="inline")
-    if SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY:
-        for cam_id in ["cam_81559", "cam_phone_cam_1792084106", "cam_webcam_1792084160"]:
-            cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/clips/{cam_id}/{clip_id}/clip.mp4"
-            try:
-                head_resp = requests.head(cloud_url, timeout=1.5)
-                if head_resp.status_code == 200:
-                    return RedirectResponse(cloud_url, status_code=307)
-            except Exception:
-                pass
+    local_prev = find_local_clip_file(clip_id, "preview.mp4")
+    if local_prev and local_prev.exists():
+        return FileResponse(str(local_prev), media_type="video/mp4", content_disposition_type="inline")
+    if SUPABASE_CLOUD_URL:
+        cam_id = resolve_camera_id_from_clip_id(clip_id)
+        cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/clips/{cam_id}/{clip_id}/clip.mp4"
+        return RedirectResponse(cloud_url, status_code=307)
     return Response(
         content=BLANK_MP4_BYTES,
         media_type="video/mp4",
@@ -1939,15 +2010,10 @@ def get_clip_preview(clip_id: str, request: Request):
     local_vid = find_local_clip_file(clip_id, "clip.mp4")
     if local_vid and local_vid.exists():
         return FileResponse(str(local_vid), media_type="video/mp4", content_disposition_type="inline")
-    if SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY:
-        for cam_id in ["cam_81559", "cam_phone_cam_1792084106", "cam_webcam_1792084160"]:
-            cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/clips/{cam_id}/{clip_id}/preview.mp4"
-            try:
-                head_resp = requests.head(cloud_url, timeout=1.5)
-                if head_resp.status_code == 200:
-                    return RedirectResponse(cloud_url, status_code=307)
-            except Exception:
-                pass
+    if SUPABASE_CLOUD_URL:
+        cam_id = resolve_camera_id_from_clip_id(clip_id)
+        cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/clips/{cam_id}/{clip_id}/preview.mp4"
+        return RedirectResponse(cloud_url, status_code=307)
     return Response(
         content=BLANK_MP4_BYTES,
         media_type="video/mp4",
@@ -2057,23 +2123,6 @@ def debug_routing(request: Request):
         "method": request.method,
         "headers": {k: v for k, v in request.headers.items() if any(x in k.lower() for x in ("path", "uri", "forward", "vercel", "invoke", "host"))}
     }
-
-@app.get("/api/debug-clip/{clip_id}")
-def debug_clip(clip_id: str):
-    res = {}
-    res["supabase_url"] = SUPABASE_CLOUD_URL
-    res["supabase_bucket"] = SUPABASE_STATE_BUCKET
-    res["supabase_key_len"] = len(SUPABASE_CLOUD_KEY) if SUPABASE_CLOUD_KEY else 0
-    checks = []
-    for cam_id in ["cam_81559", "cam_phone_cam_1792084106", "cam_webcam_1792084160"]:
-        cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/clips/{cam_id}/{clip_id}/clip.mp4"
-        try:
-            head_resp = requests.head(cloud_url, timeout=3.0)
-            checks.append({"cam": cam_id, "status": head_resp.status_code, "url": cloud_url})
-        except Exception as e:
-            checks.append({"cam": cam_id, "error": str(e), "url": cloud_url})
-    res["checks"] = checks
-    return res
 
 @app.get("/api/v1/locations")
 @app.post("/api/v1/locations")

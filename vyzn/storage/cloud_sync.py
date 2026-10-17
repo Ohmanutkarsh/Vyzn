@@ -129,6 +129,35 @@ class CloudSyncWorker(threading.Thread):
                 post_url = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips_{h}.json"
                 requests.post(post_url, headers=headers, data=json.dumps(user_clips), timeout=4.0)
 
+            # Calculate real edge disk usage
+            data_dir = getattr(self.settings, "data_dir", None) or Path("C:/Vyzn testing data")
+            try:
+                import shutil
+                usage = shutil.disk_usage(str(data_dir))
+                disk_used_gb = round(usage.used / (1024 ** 3), 2)
+                disk_total_gb = round(usage.total / (1024 ** 3), 2)
+                disk_free_pct = round((usage.free / float(usage.total)) * 100.0, 1)
+            except Exception:
+                disk_used_gb, disk_total_gb, disk_free_pct = 0.0, 0.0, 0.0
+
+            storage_info = {
+                "storage_dir": str(data_dir),
+                "disk_used_gb": disk_used_gb,
+                "disk_total_gb": disk_total_gb,
+                "disk_free_pct": disk_free_pct,
+                "is_writable": True,
+                "clips_count": len(clips),
+                "raw_retention_hours": 72,
+                "updated_at_ms": int(time.time() * 1000)
+            }
+            for em in emails:
+                h = hashlib.sha256(em.strip().lower().encode()).hexdigest()[:16]
+                post_storage_url = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/storage_{h}.json"
+                try:
+                    requests.post(post_storage_url, headers=headers, data=json.dumps(storage_info), timeout=4.0)
+                except Exception:
+                    pass
+
             # Upload preview.mp4, poster.jpg, and clip.mp4 for recent clips to Supabase Storage
             for c in clips[:10]:
                 cid = c.get("id")
@@ -140,7 +169,7 @@ class CloudSyncWorker(threading.Thread):
                 if thumb_path and os.path.exists(thumb_path):
                     target_poster = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/poster.jpg"
                     try:
-                        requests.post(target_poster, headers={**headers, "Content-Type": "image/jpeg"}, data=open(thumb_path, "rb").read(), timeout=4.0)
+                        requests.post(target_poster, headers={**headers, "Content-Type": "image/jpeg"}, data=open(thumb_path, "rb").read(), timeout=6.0)
                     except Exception:
                         pass
 
@@ -150,19 +179,19 @@ class CloudSyncWorker(threading.Thread):
                     if prev_cand.exists():
                         target_prev = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/preview.mp4"
                         try:
-                            requests.post(target_prev, headers={**headers, "Content-Type": "video/mp4"}, data=prev_cand.read_bytes(), timeout=5.0)
+                            requests.post(target_prev, headers={**headers, "Content-Type": "video/mp4"}, data=prev_cand.read_bytes(), timeout=10.0)
                         except Exception:
                             pass
 
-                # Clip video upload (if under 30MB)
+                # Clip video upload (if under 35MB)
                 if file_path and os.path.exists(file_path):
                     try:
                         fsize = os.path.getsize(file_path)
                         if fsize < 35 * 1024 * 1024:
                             target_vid = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/clip.mp4"
-                            requests.post(target_vid, headers={**headers, "Content-Type": "video/mp4"}, data=open(file_path, "rb").read(), timeout=10.0)
-                    except Exception:
-                        pass
+                            requests.post(target_vid, headers={**headers, "Content-Type": "video/mp4"}, data=open(file_path, "rb").read(), timeout=30.0)
+                    except Exception as e:
+                        logger.debug(f"Video upload notice for {cid}: {e}")
 
             # Sync remote Telegram linking from Supabase vyzn_users into local DB
             try:
