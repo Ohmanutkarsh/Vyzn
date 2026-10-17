@@ -2058,6 +2058,23 @@ def debug_routing(request: Request):
         "headers": {k: v for k, v in request.headers.items() if any(x in k.lower() for x in ("path", "uri", "forward", "vercel", "invoke", "host"))}
     }
 
+@app.get("/api/debug-clip/{clip_id}")
+def debug_clip(clip_id: str):
+    res = {}
+    res["supabase_url"] = SUPABASE_CLOUD_URL
+    res["supabase_bucket"] = SUPABASE_STATE_BUCKET
+    res["supabase_key_len"] = len(SUPABASE_CLOUD_KEY) if SUPABASE_CLOUD_KEY else 0
+    checks = []
+    for cam_id in ["cam_81559", "cam_phone_cam_1792084106", "cam_webcam_1792084160"]:
+        cloud_url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/public/{SUPABASE_STATE_BUCKET}/clips/{cam_id}/{clip_id}/clip.mp4"
+        try:
+            head_resp = requests.head(cloud_url, timeout=3.0)
+            checks.append({"cam": cam_id, "status": head_resp.status_code, "url": cloud_url})
+        except Exception as e:
+            checks.append({"cam": cam_id, "error": str(e), "url": cloud_url})
+    res["checks"] = checks
+    return res
+
 @app.get("/api/v1/locations")
 @app.post("/api/v1/locations")
 def handle_locations(request: Request):
