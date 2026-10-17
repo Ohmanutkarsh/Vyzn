@@ -116,6 +116,7 @@ class CloudSyncWorker(threading.Thread):
             clips_res = self.db.query_clips()
             clips = clips_res.get("clips", [])
             headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json", "x-upsert": "true"}
+
             # Group by owner_email or default
             emails = set(c.get("owner_email") or "dirtbike000000@gmail.com" for c in clips)
             if not emails:
@@ -125,6 +126,59 @@ class CloudSyncWorker(threading.Thread):
                 user_clips = [c for c in clips if (c.get("owner_email") or "dirtbike000000@gmail.com") == em]
                 post_url = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips_{h}.json"
                 requests.post(post_url, headers=headers, data=json.dumps(user_clips), timeout=4.0)
+
+            # Upload preview.mp4, poster.jpg, and clip.mp4 for recent clips to Supabase Storage
+            for c in clips[:10]:
+                cid = c.get("id")
+                cam_id = c.get("camera_id") or "cam_81559"
+                thumb_path = c.get("thumbPath")
+                file_path = c.get("filePath")
+
+                # Poster / Thumb upload
+                if thumb_path and os.path.exists(thumb_path):
+                    target_poster = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/poster.jpg"
+                    try:
+                        requests.post(target_poster, headers={**headers, "Content-Type": "image/jpeg"}, data=open(thumb_path, "rb").read(), timeout=4.0)
+                    except Exception:
+                        pass
+
+                # Preview upload
+                if thumb_path:
+                    prev_cand = Path(thumb_path).parent / "preview.mp4"
+                    if prev_cand.exists():
+                        target_prev = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/preview.mp4"
+                        try:
+                            requests.post(target_prev, headers={**headers, "Content-Type": "video/mp4"}, data=prev_cand.read_bytes(), timeout=5.0)
+                        except Exception:
+                            pass
+
+                # Clip video upload (if under 30MB)
+                if file_path and os.path.exists(file_path):
+                    try:
+                        fsize = os.path.getsize(file_path)
+                        if fsize < 35 * 1024 * 1024:
+                            target_vid = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips/{cam_id}/{cid}/clip.mp4"
+                            requests.post(target_vid, headers={**headers, "Content-Type": "video/mp4"}, data=open(file_path, "rb").read(), timeout=10.0)
+                    except Exception:
+                        pass
+
+            # Sync remote Telegram linking from Supabase vyzn_users into local DB
+            try:
+                users_url = f"{url.rstrip('/')}/rest/v1/vyzn_users?select=*"
+                u_resp = requests.get(users_url, headers={"apikey": key, "Authorization": f"Bearer {key}"}, timeout=4.0)
+                if u_resp.status_code == 200:
+                    for u in u_resp.json():
+                        chat_id = u.get("telegram_chat_id")
+                        status = u.get("telegram_status")
+                        em = u.get("email")
+                        if chat_id and status in ("connected", "linked") and em:
+                            local_user = self.db.get_user_by_email(em)
+                            if local_user:
+                                self.db.update_user_telegram(local_user["id"], str(chat_id), str(chat_id), u.get("telegram_username"))
+                            if hasattr(self, "settings") and self.settings:
+                                self.settings.telegram_chat_id = str(chat_id)
+            except Exception:
+                pass
         except Exception as e:
             logger.debug(f"Supabase background sync notice: {e}")
 

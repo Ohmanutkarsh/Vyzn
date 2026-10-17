@@ -181,6 +181,7 @@ class EdgePipeline:
         # In simple terms: store the latest real-time 3-second score for each camera
         # so the Wall View can color-code camera borders and sort active cameras first!
         self.latest_camera_scores: Dict[str, Tuple[float, int]] = {}
+        self._last_yolo_time: Dict[str, float] = {}
 
     def _get_or_create_state_machine(self, camera_id: str) -> ClipStateMachine:
         if camera_id not in self.state_machines:
@@ -441,8 +442,11 @@ class EdgePipeline:
 
             alive_tracks = prior_alive_tracks
 
-            # Only run heavy AI if there is motion OR an object was recently in view
-            should_run_ai = has_motion or (sm.state != ClipState.IDLE) or (len(alive_tracks) > 0)
+            # Only run heavy AI if there is motion OR an object was recently in view OR periodically per 3s tick window
+            periodic_ai = (frame_time - self._last_yolo_time.get(camera_id, 0.0) >= 2.0)
+            should_run_ai = has_motion or (sm.state != ClipState.IDLE) or (len(alive_tracks) > 0) or periodic_ai
+            if should_run_ai:
+                self._last_yolo_time[camera_id] = frame_time
 
             # ==========================================================================
             # STEP C: YOLOv8 AI OBJECT DETECTION & MOVEMENT TRACKING

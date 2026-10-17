@@ -22,7 +22,7 @@ class MOG2MotionGate:
         self,
         history: int = 500,
         var_threshold: float = 25.0,
-        min_motion_ratio: float = 0.010,  # 1.0% frame change default threshold
+        min_motion_ratio: float = 0.005,  # 0.5% frame change default threshold
         learning_rate: float = 0.003,     # 0.003 fixed background adaptation rate
         min_contour_area_ratio: float = 0.0015,  # 0.15% ROI contour filter (auto-tunable)
         warmup_frames: int = 0,           # Configurable warmup suppression window

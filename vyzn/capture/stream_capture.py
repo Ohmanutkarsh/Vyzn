@@ -333,6 +333,26 @@ class RTSPCaptureThread(threading.Thread):
             else:
                 os.environ.pop("OPENCV_FFMPEG_CAPTURE_OPTIONS", None)
 
+            # Fast TCP socket pre-check for network streams to avoid 90-second OpenCV hang
+            if url_str.startswith("http://") or url_str.startswith("https://") or url_str.startswith("rtsp://"):
+                try:
+                    parsed = urllib.parse.urlparse(url_str)
+                    host = parsed.hostname
+                    port = parsed.port or (554 if parsed.scheme == "rtsp" else (8080 if ":8080" in url_str else 80))
+                    if host and host not in ("localhost", "127.0.0.1"):
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(1.5)
+                        sock.connect((host, port))
+                        sock.close()
+                except Exception as net_err:
+                    self.status = "error"
+                    self.is_connected = False
+                    self.last_error = f"Network camera unreachable: {net_err}. Check phone Wi-Fi/IP."
+                    time.sleep(min(max_backoff, backoff_sec))
+                    backoff_sec = min(max_backoff, backoff_sec * 2)
+                    self.reconnect_count += 1
+                    continue
+
             cap = None
             try:
                 if url_str.isdigit():

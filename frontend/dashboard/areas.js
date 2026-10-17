@@ -198,34 +198,56 @@ function renderPicker(container, cameras) {
 
 async function renderEditor(container, cameraId) {
   try {
-    const res = await fetch(`/api/cameras/${cameraId}/areas`);
-    if (!res.ok) throw new Error('Failed to load watch areas for camera');
-    const data = await res.json();
-    currentCamera = data;
-    watchAreas = (data.areas || []).map(a => ({
-      ...a,
-      polygon: a.polygon || []
-    }));
+    let serverAreas = [];
+    try {
+      const res = await fetch(`/api/cameras/${cameraId}/areas`);
+      if (res.ok) {
+        const data = await res.json();
+        currentCamera = data;
+        serverAreas = (data.areas || []).map(a => ({
+          ...a,
+          polygon: a.polygon || []
+        }));
+      }
+    } catch (_) {}
 
-    // In simple terms: if no watch areas exist yet, auto-seed default Area 1 in center of view
-    // so the dashboard opens with Area 1 pre-selected and ready, matching the reference layout!
-    if (watchAreas.length === 0) {
-      const defaultArea = {
-        id: `area_${cameraId}_1`,
-        camera_id: cameraId,
-        name: 'Area 1',
-        polygon: [
-          [0.325, 0.47],
-          [0.475, 0.47],
-          [0.475, 0.60],
-          [0.325, 0.60]
-        ],
-        response: 'alert',
-        min_stay_seconds: 0,
-        schedule: 'always',
-        version: 1
-      };
-      watchAreas = [defaultArea];
+    if (serverAreas.length > 0) {
+      watchAreas = serverAreas;
+      try {
+        localStorage.setItem(`vyzn_areas_${cameraId}`, JSON.stringify(watchAreas));
+      } catch (_) {}
+    } else {
+      // Check localStorage for previously saved area
+      let cached = null;
+      try {
+        const str = localStorage.getItem(`vyzn_areas_${cameraId}`);
+        if (str) cached = JSON.parse(str);
+      } catch (_) {}
+
+      if (Array.isArray(cached) && cached.length > 0) {
+        watchAreas = cached.map(a => ({
+          ...a,
+          polygon: a.polygon || []
+        }));
+      } else {
+        // Only if neither server nor localStorage has areas, auto-seed default Area 1
+        const defaultArea = {
+          id: `area_${cameraId}_1`,
+          camera_id: cameraId,
+          name: 'Area 1',
+          polygon: [
+            [0.325, 0.47],
+            [0.475, 0.47],
+            [0.475, 0.60],
+            [0.325, 0.60]
+          ],
+          response: 'alert',
+          min_stay_seconds: 0,
+          schedule: 'always',
+          version: 1
+        };
+        watchAreas = [defaultArea];
+      }
     }
 
     selectedAreaIndex = watchAreas.length > 0 ? 0 : null;
@@ -1435,6 +1457,9 @@ async function saveWatchAreas() {
 
     const data = await res.json();
     watchAreas = data.areas || watchAreas;
+    try {
+      localStorage.setItem(`vyzn_areas_${currentCameraId}`, JSON.stringify(watchAreas));
+    } catch (_) {}
     isDirty = false;
 
     showToast(t('areas.saved_toast', 'Areas saved. Applies to new footage.'));

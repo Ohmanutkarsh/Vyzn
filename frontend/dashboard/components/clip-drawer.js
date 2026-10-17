@@ -436,22 +436,28 @@ function togglePlay() {
   }
 }
 
+let rafProgressId = null;
 function updatePlayerProgress() {
-  const video = document.getElementById('drawer-video-player');
-  const fill = document.getElementById('player-scrubber-fill');
-  const thumb = document.getElementById('player-scrubber-thumb');
-  const readout = document.getElementById('drawer-time-readout');
+  if (rafProgressId) return;
+  rafProgressId = requestAnimationFrame(() => {
+    rafProgressId = null;
+    const video = document.getElementById('drawer-video-player');
+    const fill = document.getElementById('player-scrubber-fill');
+    const thumb = document.getElementById('player-scrubber-thumb');
+    const readout = document.getElementById('drawer-time-readout');
+    if (!video || !fill || !thumb || !readout) return;
 
-  const cur = video.currentTime || 0;
-  const dur = video.duration || 1;
-  const pct = Math.min(100, Math.max(0, (cur / dur) * 100));
+    const cur = video.currentTime || 0;
+    const dur = video.duration || 1;
+    const pct = Math.min(100, Math.max(0, (cur / dur) * 100));
 
-  fill.style.width = `${pct}%`;
-  thumb.style.left = `${pct}%`;
+    fill.style.width = `${pct}%`;
+    thumb.style.left = `${pct}%`;
 
-  const curStr = formatSeconds(cur);
-  const durStr = formatSeconds(dur);
-  readout.textContent = `${curStr} / ${durStr}`;
+    const curStr = formatSeconds(cur);
+    const durStr = formatSeconds(dur);
+    readout.textContent = `${curStr} / ${durStr}`;
+  });
 }
 
 function formatSeconds(sec) {
@@ -585,15 +591,17 @@ function renderDrawerContent(clip) {
     if (marker) marker.style.left = `${triggerPct}%`;
   };
 
-  // Safe initial seek after media is ready to prevent mobile pipeline stalls
-  const seekToTrigger = () => {
-    try {
-      if (video.readyState >= 1 && preTriggerSec > 0 && preTriggerSec < (video.duration || 15)) {
+  // Smooth trigger seek on user play without stalling initial media buffer
+  let initialSeekDone = false;
+  const doInitialSeek = () => {
+    if (!initialSeekDone && preTriggerSec > 1.5 && preTriggerSec < (video.duration || 15)) {
+      initialSeekDone = true;
+      try {
         video.currentTime = preTriggerSec;
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
   };
-  video.addEventListener('loadeddata', seekToTrigger, { once: true });
+  video.addEventListener('play', doInitialSeek, { once: true });
 
   // Top Summary & Title
   const summaryTitleEl = document.getElementById('drawer-summary-title');
