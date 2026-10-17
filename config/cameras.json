@@ -45,6 +45,8 @@
     "privacy_zones": [],
     "watch_areas": [
       {
+        "id": "area_phone_1",
+        "camera_id": "cam_phone_cam_1792084106",
         "name": "Area 1",
         "polygon": [
           [
@@ -63,7 +65,11 @@
             0.1,
             0.8
           ]
-        ]
+        ],
+        "response": "alert",
+        "min_stay_seconds": 0,
+        "schedule": "always",
+        "version": 1
       }
     ],
     "osd_exclude_polygon": null,

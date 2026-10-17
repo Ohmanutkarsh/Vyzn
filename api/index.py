@@ -1578,12 +1578,25 @@ def save_camera_areas(
     else:
         areas_list = []
 
+    normalized_areas = []
+    for a in (areas_list or []):
+        normalized_areas.append({
+            "id": a.get("id") or f"area_{secrets.token_hex(4)}",
+            "camera_id": a.get("camera_id") or camera_id,
+            "name": a.get("name", "Area 1"),
+            "polygon": a.get("polygon", []),
+            "response": a.get("response", "alert"),
+            "min_stay_seconds": int(a.get("min_stay_seconds", 0)),
+            "schedule": a.get("schedule", "always"),
+            "version": int(a.get("version", 1))
+        })
+
     user_cams = get_user_cameras(email)
     found = False
     for c in user_cams:
         if c.get("id") == camera_id or c.get("camera_id") == camera_id:
-            c["areas"] = areas_list
-            c["area_count"] = len(areas_list)
+            c["areas"] = normalized_areas
+            c["area_count"] = len(normalized_areas)
             found = True
             break
     if not found:
@@ -1593,8 +1606,8 @@ def save_camera_areas(
             "name": camera_id,
             "status": "online",
             "rtsp_url": "0",
-            "areas": areas_list,
-            "area_count": len(areas_list),
+            "areas": normalized_areas,
+            "area_count": len(normalized_areas),
             "owner_email": email
         })
     set_user_cameras(email, user_cams)
@@ -1607,15 +1620,15 @@ def save_camera_areas(
                 disk_cams = json.load(f)
             for dc in disk_cams:
                 if dc.get("camera_id") == camera_id or dc.get("id") == camera_id:
-                    dc["watch_areas"] = areas_list
-                    dc["restricted_zones"] = [{"name": a.get("name", "Area"), "points": a.get("polygon", [])} for a in areas_list if a.get("response") != "ignore"]
+                    dc["watch_areas"] = normalized_areas
+                    dc["restricted_zones"] = [{"name": a.get("name", "Area"), "points": a.get("polygon", [])} for a in normalized_areas if a.get("response") != "ignore"]
                     break
             with open(cam_json_path, "w", encoding="utf-8") as f:
                 json.dump(disk_cams, f, indent=2)
         except Exception:
             pass
 
-    return {"ok": True, "camera_id": camera_id, "areas": areas_list}
+    return {"ok": True, "camera_id": camera_id, "areas": normalized_areas}
 
 USER_SNAPSHOTS: Dict[str, bytes] = {}
 

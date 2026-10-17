@@ -5,6 +5,7 @@ Configuration management for VYZN edge node.
 from __future__ import annotations
 import os
 from pathlib import Path
+import uuid
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
@@ -18,8 +19,8 @@ class ZonePolygon(BaseModel):
 
 class WatchAreaConfig(BaseModel):
     # In simple terms: configuration for a user-drawn watch area polygon
-    id: str
-    camera_id: str
+    id: str = Field(default_factory=lambda: f"area_{uuid.uuid4().hex[:8]}")
+    camera_id: str = ""
     name: str = "Area 1"
     polygon: List[List[float]] = Field(default_factory=list)  # Normalized [[x, y], ...]
     # response can be 'alert' (send notifications), 'review' (save clip silently), or 'ignore' (exclude/mask motion)
