@@ -408,7 +408,7 @@ class TelegramAlertProvider(AlertProvider):
                 public_base = f"https://{public_base}"
             clip_url = f"{public_base.rstrip('/')}/clips/{clip_id}"
         elif "localhost" in base_url or "127.0.0.1" in base_url:
-            clip_url = f"https://vyzn-ai.vercel.app/clips/{clip_id}"
+            clip_url = f"https://vyzn-security.vercel.app/clips/{clip_id}"
         else:
             clip_url = f"{base_url.rstrip('/')}/clips/{clip_id}"
 
