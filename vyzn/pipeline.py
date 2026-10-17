@@ -118,7 +118,9 @@ class EdgePipeline:
         self.cloud_sync = CloudSyncWorker(
             db=self.db,
             sync_interval_sec=20,
-            min_score=self.settings.alert_score_threshold
+            min_score=self.settings.alert_score_threshold,
+            pipeline=self,
+            settings=self.settings
         )
         self.telemetry = TelemetryHeartbeatDaemon(
             settings=self.settings,

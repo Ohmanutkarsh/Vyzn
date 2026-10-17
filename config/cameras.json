@@ -100,9 +100,35 @@
       "end_hour": 21,
       "end_minute": 0
     },
-    "restricted_zones": [],
+    "restricted_zones": [
+      {
+        "name": "Area 1",
+        "points": [
+          [0.1, 0.1],
+          [0.9, 0.1],
+          [0.9, 0.9],
+          [0.1, 0.9]
+        ]
+      }
+    ],
     "privacy_zones": [],
-    "watch_areas": [],
+    "watch_areas": [
+      {
+        "id": "area_cam_81559_1",
+        "camera_id": "cam_81559",
+        "name": "Area 1",
+        "polygon": [
+          [0.1, 0.1],
+          [0.9, 0.1],
+          [0.9, 0.9],
+          [0.1, 0.9]
+        ],
+        "response": "alert",
+        "min_stay_seconds": 0,
+        "schedule": "always",
+        "version": 1
+      }
+    ],
     "osd_exclude_polygon": null,
     "start_motion_threshold": null,
     "continue_motion_threshold": null,

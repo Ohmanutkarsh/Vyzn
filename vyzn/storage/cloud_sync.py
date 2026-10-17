@@ -29,11 +29,15 @@ class CloudSyncWorker(threading.Thread):
         access_key_id: Optional[str] = None,
         secret_access_key: Optional[str] = None,
         sync_interval_sec: int = 15,
-        min_score: int = 50  # Lowered from 70 to 50 to capture early intrusion evidence before hardware can be severed
+        min_score: int = 50,  # Lowered from 70 to 50 to capture early intrusion evidence before hardware can be severed
+        pipeline: Any = None,
+        settings: Any = None
     ):
 
         super().__init__(name="Cloud-Sync-Worker", daemon=True)
         self.db = db
+        self.pipeline = pipeline
+        self.settings = settings or getattr(pipeline, "settings", None)
         self.endpoint_url = endpoint_url
         self.bucket_name = bucket_name
         self.access_key_id = access_key_id
@@ -177,6 +181,9 @@ class CloudSyncWorker(threading.Thread):
                                 self.db.update_user_telegram(local_user["id"], str(chat_id), str(chat_id), u.get("telegram_username"))
                             if hasattr(self, "settings") and self.settings:
                                 self.settings.telegram_chat_id = str(chat_id)
+                            if hasattr(self, "pipeline") and self.pipeline:
+                                if hasattr(self.pipeline, "dispatcher") and hasattr(self.pipeline.dispatcher, "provider"):
+                                    self.pipeline.dispatcher.provider.chat_id = str(chat_id)
             except Exception:
                 pass
         except Exception as e:
