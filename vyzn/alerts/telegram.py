@@ -282,15 +282,13 @@ def resolve_authorized_chat_for_event(
 
     if owner_email and hasattr(db, "get_user_by_email"):
         user = db.get_user_by_email(owner_email)
-        if user:
-            if user.get("telegram_status") not in ("linked", "connected"):
-                logger.info(f"[AUTH ROUTING] User {owner_email} Telegram not linked")
-                return None
+        if user and user.get("telegram_status") in ("linked", "connected"):
             if not user.get("telegram_alerts_enabled", 1):
                 logger.info(f"[AUTH ROUTING] Alerts muted for user {owner_email}")
                 return None
             chat_id = user.get("telegram_chat_id")
-            return str(chat_id) if chat_id else None
+            if chat_id:
+                return str(chat_id)
 
     # Check Supabase cloud record if local SQLite has not synced yet
     if owner_email:
@@ -299,11 +297,17 @@ def resolve_authorized_chat_for_event(
             if is_supabase_configured():
                 base_url = get_supabase_url()
                 headers = get_supabase_headers()
-                r = requests.get(f"{base_url}/rest/v1/vyzn_users?email=eq.{owner_email.lower().strip()}&select=telegram_status,telegram_chat_id,telegram_alerts_enabled", headers=headers, timeout=3.0)
+                r = requests.get(f"{base_url}/rest/v1/vyzn_users?email=eq.{owner_email.lower().strip()}&select=id,telegram_status,telegram_chat_id,telegram_username,telegram_alerts_enabled", headers=headers, timeout=3.0)
                 if r.status_code == 200 and r.json():
                     u_data = r.json()[0]
                     if u_data.get("telegram_status") in ("linked", "connected") and u_data.get("telegram_alerts_enabled", True) and u_data.get("telegram_chat_id"):
-                        return str(u_data["telegram_chat_id"])
+                        cid = str(u_data["telegram_chat_id"])
+                        # Sync to local DB
+                        if db and hasattr(db, "get_user_by_email") and hasattr(db, "update_user_telegram"):
+                            lu = db.get_user_by_email(owner_email)
+                            if lu:
+                                db.update_user_telegram(lu["id"], cid, cid, u_data.get("telegram_username"))
+                        return cid
         except Exception:
             pass
 
@@ -457,9 +461,9 @@ class TelegramAlertProvider(AlertProvider):
                     owner_email = cam.get("owner_email")
             if owner_email and hasattr(self.db, "get_user_by_email"):
                 user = self.db.get_user_by_email(owner_email)
-                if user:
-                    if user.get("telegram_status") not in ("linked", "connected") or not user.get("telegram_alerts_enabled", 1):
-                        logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for user {owner_email}")
+                if user and user.get("telegram_status") in ("linked", "connected"):
+                    if not user.get("telegram_alerts_enabled", 1):
+                        logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted for user {owner_email}")
                         return False
                     target_chat_id = user.get("telegram_chat_id")
 

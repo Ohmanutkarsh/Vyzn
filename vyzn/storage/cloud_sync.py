@@ -87,24 +87,22 @@ class CloudSyncWorker(threading.Thread):
         candidates = self.db.query_events(min_score=self.min_score, limit=50)
         un_synced = [e for e in candidates if e.synced == 0 and e.status != "deleted"]
 
-        if not un_synced:
-            return
+        if un_synced:
+            logger.info(f"Cloud sync worker found {len(un_synced)} pending high-confidence events to upload.")
+            s3 = self._get_s3_client()
 
-        logger.info(f"Cloud sync worker found {len(un_synced)} pending high-confidence events to upload.")
-        s3 = self._get_s3_client()
+            for event in un_synced:
+                success = self._upload_event(event, s3)
+                if success:
+                    self.db.mark_event_synced(event.event_group_id)
+                    self.db.log_audit(
+                        "CLOUD_SYNCED",
+                        event.event_group_id,
+                        f"Uploaded to bucket: {self.bucket_name or 'simulated-r2'}"
+                    )
+                    logger.info(f"Synced incident {event.event_group_id} to Cloudflare R2 / S3.")
 
-        for event in un_synced:
-            success = self._upload_event(event, s3)
-            if success:
-                self.db.mark_event_synced(event.event_group_id)
-                self.db.log_audit(
-                    "CLOUD_SYNCED",
-                    event.event_group_id,
-                    f"Uploaded to bucket: {self.bucket_name or 'simulated-r2'}"
-                )
-                logger.info(f"Synced incident {event.event_group_id} to Cloudflare R2 / S3.")
-
-        # Sync clips state directly to Supabase cloud storage for remote phone access
+        # Always sync user/telegram state and clips state to Supabase cloud
         self._sync_to_supabase_cloud()
 
     def _sync_to_supabase_cloud(self):

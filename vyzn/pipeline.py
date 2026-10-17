@@ -576,15 +576,19 @@ class EdgePipeline:
             # If the score hits 70+ (ALERT), do NOT wait for the clip to finish recording!
             # Send an instant screenshot alert to the user's Telegram bot immediately.
             # ==========================================================================
-            if sm.current_event_id and sm.is_recording:
-                root_id = sm.parent_event_id or sm.current_event_id
-                if should_alert_live and root_id not in self.dispatched_alert_events:
+            live_score = int(round(live_breakdown.get("final_score", 0)))
+            is_high_threat = should_alert_live or (live_score >= 70)
+            if is_high_threat:
+                evt_id = sm.current_event_id or f"ev_{camera_id}_{int(frame_time)}"
+                root_id = sm.parent_event_id or evt_id
+                if root_id not in self.dispatched_alert_events:
+                    frames_to_send = list(sm.active_frames) if sm.active_frames else [frame]
                     self._dispatch_immediate_alert(
                         camera_id=camera_id,
-                        event_id=sm.current_event_id,
-                        score=live_breakdown.get("final_score", 70),
+                        event_id=evt_id,
+                        score=live_score if live_score >= 70 else 70,
                         candidate=candidate,
-                        frames=list(sm.active_frames)
+                        frames=frames_to_send
                     )
 
             # Keep active_event_ids mirror updated for legacy callers
@@ -880,30 +884,21 @@ class EdgePipeline:
         The final finalized clip will replace this once the event completes.
         """
         try:
-            # Write a provisional clip from what we have so far
-            if len(frames) >= 4:
-                write_result = self.clip_writer.write_clip_from_frames(
-                    camera_id=camera_id,
-                    event_group_id=event_id + "_live",
-                    frames=frames[-min(len(frames), 80):],  # Use last 20s max
-                    fps=4.0
-                )
-                clip_path = write_result.clip_path
-                thumb_path = write_result.poster_path or write_result.thumb_path
-            else:
-                clip_path, thumb_path = None, None
-
-            if not thumb_path and len(frames) > 0:
+            # Generate instant JPEG snapshot in 5ms without blocking on FFmpeg video encoding
+            thumb_path = None
+            if len(frames) > 0:
                 try:
                     import cv2
                     from pathlib import Path
                     preview_dir = Path(".cache/previews")
                     preview_dir.mkdir(parents=True, exist_ok=True)
                     live_thumb = preview_dir / f"live_{event_id}.jpg"
-                    cv2.imwrite(str(live_thumb), frames[-1])
+                    cv2.imwrite(str(live_thumb), frames[-1], [cv2.IMWRITE_JPEG_QUALITY, 90])
                     thumb_path = str(live_thumb)
                 except Exception as e:
                     logger.debug(f"Failed to generate instant live thumb: {e}")
+
+            clip_path = None
 
             obj_type = candidate.object_type if candidate else "person"
             from vyzn.core.events import EventRecord

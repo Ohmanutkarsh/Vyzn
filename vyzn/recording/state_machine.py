@@ -312,25 +312,32 @@ class ClipStateMachine:
     def _close_active_clip(self, close_reason: str, continue_recording: bool = False) -> FinalizedClipSegment:
         """
         Closes clip and trims back dead footage:
-        Final clip = [first_active_window_start - 10s, last_active_window_end + 10s].
+        Final clip strictly contains [first_active_window_start - 10s, last_active_window_end + 10s].
         """
-        # Snap post-roll outward (>= 10s)
+        # Snap cut points outward to keyframe boundaries while enforcing >= 10s rule
+        clip_start_pts = self._snap_cut_point(self.first_active_window_start - self.pre_roll_seconds, is_start=True)
+        if (self.first_active_window_start - clip_start_pts) < self.pre_roll_seconds:
+            clip_start_pts = self.first_active_window_start - self.pre_roll_seconds
+
         ideal_end_pts = self.last_active_window_end + self.post_roll_seconds
         clip_end_pts = self._snap_cut_point(ideal_end_pts, is_start=False)
         if (clip_end_pts - self.last_active_window_end) < self.post_roll_seconds:
             clip_end_pts = self.last_active_window_end + self.post_roll_seconds
 
-        # Trim frames past clip_end_pts so no clip ends with dead footage
+        # Trim frames strictly to [clip_start_pts, clip_end_pts] so no clip has bloated dead footage
         trimmed_frames = []
         trimmed_metas = []
         for f, m in zip(self.active_frames, self.active_metas):
-            if m.pts <= clip_end_pts + 0.1:
+            if (clip_start_pts - 0.2) <= m.pts <= (clip_end_pts + 0.2):
                 trimmed_frames.append(f)
                 trimmed_metas.append(m)
 
         if not trimmed_frames and self.active_frames:
             trimmed_frames = list(self.active_frames)
             trimmed_metas = list(self.active_metas)
+
+        # Update state machine boundary markers to match trimmed clip
+        self.clip_start_pts = clip_start_pts
 
         # Peak frame index
         peak_idx = 0
@@ -362,17 +369,17 @@ class ClipStateMachine:
         if self.current_part_index > 0 and active_dur < self.score_interval_seconds:
             is_discarded = True
 
-        # Trim ticks past clip_end_pts so no clip ends with dead ticks
-        trimmed_ticks = [t for t in self.active_ticks if t.tick_start_pts <= clip_end_pts]
+        # Trim ticks past clip_end_pts and before clip_start_pts
+        trimmed_ticks = [t for t in self.active_ticks if t.tick_start_pts <= clip_end_pts and t.tick_end_pts >= clip_start_pts]
         if not trimmed_ticks and self.active_ticks:
             trimmed_ticks = list(self.active_ticks)
 
         segment = FinalizedClipSegment(
-            event_group_id=self.current_event_id or f"ev_{self.camera_id}_{int(self.clip_start_pts)}",
+            event_group_id=self.current_event_id or f"ev_{self.camera_id}_{int(clip_start_pts)}",
             camera_id=self.camera_id,
             parent_event_id=self.parent_event_id,
             part_index=self.current_part_index,
-            start_pts=self.clip_start_pts,
+            start_pts=clip_start_pts,
             end_pts=clip_end_pts,
             trigger_pts=self.trigger_pts,
             trigger_reason=self.trigger_reason,

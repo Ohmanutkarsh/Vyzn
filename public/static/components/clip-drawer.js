@@ -52,7 +52,7 @@ export function initClipDrawer({ onClipUpdated } = {}) {
         <div class="drawer-content" id="drawer-main-content">
           <!-- 16:9 Video Box -->
           <div class="drawer-player-box" id="drawer-player-box">
-            <video class="drawer-video-el" id="drawer-video-player" playsinline webkit-playsinline="true" x5-playsinline="true" preload="metadata" style="background: #000;"></video>
+            <video class="drawer-video-el" id="drawer-video-player" playsinline webkit-playsinline="true" x5-playsinline="true" preload="auto" style="background: #000;"></video>
             <canvas class="drawer-overlay-canvas" id="drawer-overlay-canvas" style="display: none;"></canvas>
           </div>
 
@@ -236,16 +236,27 @@ function bindDrawerEvents() {
     }
   });
 
-  // Scrubber touch/pointer/click drag for smooth mobile and desktop control
+  // Scrubber touch/pointer/click drag with hardware-accelerated fastSeek and RAF throttling
   let isDraggingScrubber = false;
+  let scrubberRaf = null;
   const seekFromPointer = (clientX) => {
     const rect = scrubberWrap.getBoundingClientRect();
     const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     if (video.duration) {
-      try {
-        video.currentTime = pos * video.duration;
-      } catch (_) {}
-      updatePlayerProgress();
+      const targetTime = pos * video.duration;
+      if (scrubberRaf) cancelAnimationFrame(scrubberRaf);
+      scrubberRaf = requestAnimationFrame(() => {
+        try {
+          if (typeof video.fastSeek === 'function') {
+            video.fastSeek(targetTime);
+          } else {
+            video.currentTime = targetTime;
+          }
+        } catch (_) {
+          try { video.currentTime = targetTime; } catch (__) {}
+        }
+        updatePlayerProgress();
+      });
     }
   };
 

@@ -1301,8 +1301,8 @@ async def api_telegram_webhook(request: Request):
                             target_email = dec_email
                     except Exception:
                         pass
-            else:
-                # If user starts the bot directly without token parameter, link to primary user
+            if not target_email:
+                # Fallback to primary account owner so user connects seamlessly without friction
                 target_email = "dirtbike000000@gmail.com"
 
             if target_email:

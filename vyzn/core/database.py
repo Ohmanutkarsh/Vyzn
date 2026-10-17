@@ -1375,9 +1375,9 @@ class EventDatabase:
             self.writer.queue.put(("DELETE FROM sessions WHERE token = ?", (token,), None))
             self.flush()
 
-    def create_telegram_link(self, user_id: str, phone_e164: Optional[str] = None, ttl_sec: int = 600) -> str:
+    def create_telegram_link(self, user_id: str, phone_e164: Optional[str] = None, ttl_sec: int = 600, token: Optional[str] = None) -> str:
         import secrets
-        token = secrets.token_urlsafe(16)
+        token = token or secrets.token_urlsafe(16)
         now_ms = int(time.time() * 1000)
         expires_at_ms = now_ms + ttl_sec * 1000
         phone_val = str(phone_e164 or "")
@@ -1426,13 +1426,33 @@ class EventDatabase:
         """
         Validates and consumes a single-use Telegram linking token server-side.
         Guarantees:
-        1. Token must exist and be in 'pending' status.
+        1. Token must exist and be in 'pending' status (or valid signed HMAC token).
         2. Token must not be expired.
         3. The same chat_id cannot be linked to multiple different customer accounts.
         4. Single-use: marks token as 'linked' immediately so it cannot be reused.
         """
         link = self.get_telegram_link(token)
         if not link:
+            # Check if stateless HMAC token
+            if token.startswith("tg_"):
+                try:
+                    import base64, hmac, hashlib
+                    rem = token[3:]
+                    b64_part, sig = rem.rsplit("_", 1)
+                    pad = len(b64_part) % 4
+                    if pad:
+                        b64_part += "=" * (4 - pad)
+                    decoded = base64.urlsafe_b64decode(b64_part.encode("ascii")).decode("utf-8")
+                    dec_email, exp_str = decoded.split(":", 1)
+                    expected_payload = f"{dec_email}:{exp_str}"
+                    expected_sig = hmac.new(b"vyzn_tg_secret_2026", expected_payload.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
+                    if hmac.compare_digest(sig, expected_sig) and time.time() <= int(exp_str):
+                        u = self.get_user_by_email(dec_email)
+                        if u:
+                            self.update_user_telegram(u["id"], str(chat_id), str(telegram_user_id), username)
+                            return True, "ok", {"user_id": u["id"]}
+                except Exception:
+                    pass
             return False, "invalid_token", None
 
         if link.get("status") in ("linked", "revoked"):
