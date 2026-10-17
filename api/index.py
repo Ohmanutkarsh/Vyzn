@@ -1405,15 +1405,23 @@ async def api_telegram_webhook(request: Request):
                     pass
             return {"ok": True, "result": {"type": "disconnected"}}
 
-        # Auto-link fallback: if the sender is not linked yet, link immediately on any message
-        if user_for_chat.get("telegram_status") not in ("connected", "linked"):
+        # Auto-link fallback: if the sender is not linked yet, or this chat_id differs from existing, link immediately on any message
+        if user_for_chat.get("telegram_status") not in ("connected", "linked") or str(user_for_chat.get("telegram_chat_id")) != str(chat_id):
             target_user = get_user_by_email("dirtbike000000@gmail.com")
             target_user["telegram_status"] = "connected"
-            target_user["telegram_chat_id"] = chat_id
+            target_user["telegram_chat_id"] = str(chat_id)
             target_user["telegram_username"] = username
             target_user["telegram_linked_at_ms"] = int(time.time() * 1000)
             target_user["telegram_alerts_enabled"] = True
             sync_user_to_supabase_cloud(target_user)
+
+            CURRENT_USER["telegram_status"] = "connected"
+            CURRENT_USER["telegram_chat_id"] = str(chat_id)
+            CURRENT_USER["telegram_username"] = username
+            CURRENT_USER["telegram_linked_at_ms"] = int(time.time() * 1000)
+            CURRENT_USER["telegram_alerts_enabled"] = True
+            sync_user_to_supabase_cloud(CURRENT_USER)
+
             welcome_msg = (
                 "✅ *Connected to VYZN Security!*\n\n"
                 "Your Telegram account has been linked successfully. "
@@ -1430,7 +1438,21 @@ async def api_telegram_webhook(request: Request):
                     pass
             return {"ok": True, "result": {"type": "auto_linked_on_message", "chat_id": chat_id}}
 
-    return {"ok": True, "result": {"type": "unhandled"}}
+        # If already linked and user says something, acknowledge so they know the bot is alive
+        if api_url and chat_id:
+            try:
+                requests.post(
+                    f"{api_url}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": "🛡️ *VYZN Security Bot Active*\n\nYour account is linked and monitoring is active. Security alerts and motion clips will be sent here automatically as soon as threats are detected.",
+                        "parse_mode": "Markdown"
+                    },
+                    timeout=6.0
+                )
+            except Exception:
+                pass
+        return {"ok": True, "result": {"type": "active_chat_ack", "chat_id": chat_id}}
 
 @app.post("/api/telegram/manual-link")
 async def api_telegram_manual_link(request: Request):
@@ -1931,7 +1953,16 @@ def send_clip_to_telegram(clip_id: str, request: Request):
     user = get_current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
-    chat_id = user.get("telegram_chat_id") or os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
+    chat_id = user.get("telegram_chat_id")
+    if not chat_id:
+        email = (user.get("email") or "dirtbike000000@gmail.com").strip().lower()
+        supa = fetch_user_from_supabase_cloud(email)
+        if supa and supa.get("telegram_chat_id"):
+            chat_id = supa.get("telegram_chat_id")
+            user["telegram_chat_id"] = chat_id
+            user["telegram_status"] = "connected"
+    if not chat_id:
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
     if not chat_id:
         for u in USERS_STORE.values():
             if u.get("telegram_chat_id"):
@@ -1939,7 +1970,7 @@ def send_clip_to_telegram(clip_id: str, request: Request):
                 break
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_TELEGRAM_BOT_TOKEN
     if not bot_token or not chat_id:
-        return {"ok": True, "message": "Telegram not linked or token missing", "simulated": True}
+        return {"ok": False, "message": "Telegram not connected. Please message @Vyzn_security_bot first.", "delivered": False}
     clips = get_user_clips(user["email"])
     clip = next((c for c in clips if str(c.get("id")) == clip_id or str(c.get("clip_number")) == clip_id), None)
     cam_name = clip.get("camera_name", "Camera") if clip else "Camera"
@@ -1951,9 +1982,13 @@ def send_clip_to_telegram(clip_id: str, request: Request):
             json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
             timeout=6.0
         )
-        return {"ok": r.status_code == 200, "delivered": True}
+        if r.status_code == 200:
+            return {"ok": True, "delivered": True}
+        else:
+            err_desc = r.json().get("description") if "application/json" in r.headers.get("content-type", "") else r.text
+            return {"ok": False, "error": f"Telegram API error: {err_desc}", "delivered": False}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "delivered": False}
 
 def resolve_camera_id_from_clip_id(clip_id: str) -> str:
     if clip_id.startswith("ev_"):
