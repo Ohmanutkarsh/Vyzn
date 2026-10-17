@@ -717,13 +717,15 @@ def get_clip_video_file(clip_id: str):
 
     fp = clip.get("filePath")
     if fp and os.path.exists(fp):
-        return FileResponse(fp, media_type="video/mp4", filename=f"clip-{clip.get('number', 1):03d}.mp4")
+        return FileResponse(fp, media_type="video/mp4", content_disposition_type="inline")
 
     raise HTTPException(status_code=404, detail="Video file not found on disk")
 
 
 @app.get("/api/clips/{clip_id}/thumb")
 @app.get("/api/clips/{clip_id}/thumb.jpg")
+@app.get("/api/clips/{clip_id}/thumbnail")
+@app.get("/api/clips/{clip_id}/thumbnail.jpg")
 def get_clip_thumbnail_file(clip_id: str):
     """Serves clip thumbnail image."""
     db = get_db()
@@ -733,11 +735,11 @@ def get_clip_thumbnail_file(clip_id: str):
 
     tp = clip.get("thumbPath")
     if tp and os.path.exists(tp):
-        return FileResponse(tp, media_type="image/jpeg", filename=f"thumb-{clip.get('number', 1):03d}.jpg")
+        return FileResponse(tp, media_type="image/jpeg", content_disposition_type="inline")
 
     placeholder = Path(__file__).resolve().parent.parent.parent / "frontend" / "dashboard" / "img" / "placeholder.jpg"
     if placeholder.exists():
-        return FileResponse(str(placeholder), media_type="image/jpeg")
+        return FileResponse(str(placeholder), media_type="image/jpeg", content_disposition_type="inline")
     raise HTTPException(status_code=404, detail="Thumbnail not found")
 
 
@@ -755,11 +757,11 @@ def get_clip_poster_file(clip_id: str):
         parent_dir = Path(fp).parent
         poster = parent_dir / "poster.jpg"
         if poster.exists():
-            return FileResponse(str(poster), media_type="image/jpeg", filename=f"poster-{clip.get('number', 1):03d}.jpg")
+            return FileResponse(str(poster), media_type="image/jpeg", content_disposition_type="inline")
 
     tp = clip.get("thumbPath")
     if tp and os.path.exists(tp):
-        return FileResponse(tp, media_type="image/jpeg")
+        return FileResponse(tp, media_type="image/jpeg", content_disposition_type="inline")
     raise HTTPException(status_code=404, detail="Poster not found")
 
 
@@ -777,9 +779,9 @@ def get_clip_preview_file(clip_id: str):
         parent_dir = Path(fp).parent
         prev = parent_dir / "preview.mp4"
         if prev.exists():
-            return FileResponse(str(prev), media_type="video/mp4", filename=f"preview-{clip.get('number', 1):03d}.mp4")
+            return FileResponse(str(prev), media_type="video/mp4", content_disposition_type="inline")
         if os.path.exists(fp):
-            return FileResponse(fp, media_type="video/mp4")
+            return FileResponse(fp, media_type="video/mp4", content_disposition_type="inline")
     raise HTTPException(status_code=404, detail="Preview video not found")
 
 
@@ -2067,7 +2069,13 @@ def list_cameras(
         # Strict user isolation: show only cameras owned by this specific user
         cams = [c for c in cams if getattr(c, "owner_email", None) == user_email]
     elif not user:
-        cams = [c for c in cams if not getattr(c, "owner_email", None)]
+        unowned = [c for c in cams if not getattr(c, "owner_email", None)]
+        if unowned:
+            cams = unowned
+        elif len(set(getattr(c, "owner_email", None) for c in cams if getattr(c, "owner_email", None))) <= 1:
+            pass
+        else:
+            cams = unowned
 
     # Auto-start capture stream for any configured camera not yet running
     if _pipeline_instance and hasattr(_pipeline_instance, "capture_threads"):

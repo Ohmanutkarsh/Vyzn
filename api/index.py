@@ -18,7 +18,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -270,6 +270,93 @@ def _load_placeholder_jpeg_bytes() -> bytes:
 
 PLACEHOLDER_JPEG_BYTES = _load_placeholder_jpeg_bytes()
 PLACEHOLDER_JPEG_B64 = base64.b64encode(PLACEHOLDER_JPEG_BYTES).decode("ascii")
+
+_EMBEDDED_FASTSTART_MP4_B64 = (
+    "AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAOFbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAA"
+    "AAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAgAAArB0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAA"
+    "AAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAUAAAADwAAAAAAAk"
+    "ZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAIobWRpYQAAACBtZGhkAAAAAAAAAAAAAAAA"
+    "AAAyAAAAMgBVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAAB"
+    "021pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAA"
+    "AQAAAZNzdGJsAAAAt3N0c2QAAAAAAAAAAQAAAKdhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAUAA"
+    "8ABIAAAASAAAAAAAAAABFUxhdmM2MS4xOS4xMDAgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALWF2Y0MB"
+    "QsAN/+EAFmdCwA3aBQfsBEAAAAMAQAAADIPFCqgBAARozg/IAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0"
+    "AAAAAAAAIpgAACKYAAAAGHN0dHMAAAAAAAAAAQAAABkAAAIAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAAcc3Rz"
+    "YwAAAAAAAAABAAAAAQAAABkAAAABAAAAeHN0c3oAAAAAAAAAAAAAABkAAANLAAAACwAAAAsAAAALAAAA"
+    "CwAAAAsAAAALAAAACwAAAAsAAAALAAAACwAAAAsAAAALAAAACwAAAAsAAAALAAAACwAAAAsAAAALAAAA"
+    "CwAAAAsAAAALAAAACwAAAAsAAAALAAAAFHN0Y28AAAAAAAAAAQAAA7UAAABhdWR0YQAAAFltZXRhAAAA"
+    "AAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAACxpbHN0AAAAJKl0b28AAAAcZGF0YQAA"
+    "AAEAAAAATGF2ZjYxLjcuMTAwAAAACGZyZWUAAARbbWRhdAAAAlQGBf//UNxF6b3m2Ui3lizYINkj7u94"
+    "MjY0IC0gY29yZSAxNjQgcjMxOTIgYzI0ZTA2YyAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5"
+    "bGVmdCAyMDAzLTIwMjQgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25z"
+    "OiBjYWJhYz0wIHJlZj0xIGRlYmxvY2s9MDowOjAgYW5hbHlzZT0wOjAgbWU9ZGlhIHN1Ym1lPTAgcHN5"
+    "PTEgcHN5X3JkPTEuMDA6MC4wMCBtaXhlZF9yZWY9MCBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVs"
+    "bGlzPTAgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9v"
+    "ZmZzZXQ9MCB0aHJlYWRzPTcgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAg"
+    "ZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAg"
+    "YmZyYW1lcz0wIHdlaWdodHA9MCBrZXlpbnQ9MjUwIGtleWludF9taW49MjUgc2NlbmVjdXQ9MCBpbnRy"
+    "YV9yZWZyZXNoPTAgcmM9Y3JmIG1idHJlZT0wIGNyZj0yMy4wIHFjb21wPTAuNjAgcXBtaW49MCBxcG1h"
+    "eD02OSBxcHN0ZXA9NCBpcF9yYXRpbz0xLjQwIGFxPTAAgAAAAO9liIQ6JigACQLJycnJycnJycnJycnJ"
+    "ycnJycnJ111111111111111111111111111111111111111111111111111111111111111111111111"
+    "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+    "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+    "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+    "11111111111111111111111111111111111111111111111111111111111111111111111111111111"
+    "111111111111111111111111111111111111111111111111111111114AAAAAdBmiAqgCWwAAAAB0Ga"
+    "QC6AJbAAAAAHQZpgLoAlsAAAAAdBmoAugCWwAAAAB0GaoC6AJbAAAAAHQZrALoAlsAAAAAdBmuAugCWwAA"
+    "AAB0GbAC6AJbAAAAAHQZsgLoAlsAAAAAdBm0AugCWwAAAAB0GbYC6AJbAAAAAHQZuALoAlsAAAAAdBm6Au"
+    "gCWwAAAAB0GbwC6AJbAAAAAHQZvgLoAlsAAAAAdBmgAugCWwAAAAB0GaIC6AJbAAAAAHQZpALoAlsAAAAA"
+    "dBmmAugCWwAAAAB0GagC6AJbAAAAAHQZqgLoAlsAAAAAdBmsAugCWwAAAAB0Ga4C6AJbAAAAAHQZsALoAl"
+    "sA=="
+)
+
+def _load_blank_mp4_bytes() -> bytes:
+    p = WORKSPACE_ROOT / "data" / "blank_faststart.mp4"
+    if p.exists():
+        try:
+            return p.read_bytes()
+        except Exception:
+            pass
+    try:
+        return base64.b64decode(_EMBEDDED_FASTSTART_MP4_B64)
+    except Exception:
+        return b""
+
+BLANK_MP4_BYTES = _load_blank_mp4_bytes()
+
+def find_local_clip_file(clip_id: str, filename: str = "clip.mp4") -> Optional[Path]:
+    roots = []
+    cfg_file = WORKSPACE_ROOT / "config" / "storage.json"
+    if cfg_file.exists():
+        try:
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                if d.get("storage_dir"):
+                    roots.append(Path(d["storage_dir"]))
+        except Exception:
+            pass
+    roots.append(WORKSPACE_ROOT / "data" / "clips")
+    roots.append(Path("C:/Vyzn testing data"))
+
+    for root in roots:
+        if not root.exists():
+            continue
+        matches = list(root.glob(f"clips/*/*/{clip_id}/{filename}"))
+        if matches and matches[0].exists():
+            return matches[0]
+        if filename in ("clip.mp4", "video.mp4"):
+            matches = list(root.glob(f"clips/*/*/{clip_id}/clip_001.mp4"))
+            if matches and matches[0].exists():
+                return matches[0]
+        matches = list(root.glob(f".cache/previews/*/*/{clip_id}/{filename}"))
+        if matches and matches[0].exists():
+            return matches[0]
+        matches = list(root.glob(f"**/{clip_id}/{filename}"))
+        if matches and matches[0].exists():
+            return matches[0]
+    return None
+
 
 def fetch_cameras_from_cloud(email: str) -> Optional[List[Dict[str, Any]]]:
     if not (SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY):
@@ -1723,17 +1810,47 @@ def send_clip_to_telegram(clip_id: str, request: Request):
         return {"ok": False, "error": str(e)}
 
 @app.get("/api/clips/{clip_id}/poster.jpg")
+@app.get("/api/clips/{clip_id}/poster")
 @app.get("/api/clips/{clip_id}/thumb")
+@app.get("/api/clips/{clip_id}/thumb.jpg")
+@app.get("/api/clips/{clip_id}/thumbnail")
+@app.get("/api/clips/{clip_id}/thumbnail.jpg")
 def get_clip_poster(clip_id: str):
+    for fn in ["poster.jpg", "thumb.jpg", "keyframe_1.jpg", "keyframe_0.jpg"]:
+        local_img = find_local_clip_file(clip_id, fn)
+        if local_img and local_img.exists():
+            return FileResponse(str(local_img), media_type="image/jpeg", content_disposition_type="inline")
     if USER_SNAPSHOTS:
         first_img = next(iter(USER_SNAPSHOTS.values()))
-        return Response(content=first_img, media_type="image/jpeg")
-    return stream_camera_visual(clip_id)
+        return Response(content=first_img, media_type="image/jpeg", headers={"Content-Disposition": "inline"})
+    return Response(content=PLACEHOLDER_JPEG_BYTES, media_type="image/jpeg", headers={"Content-Disposition": "inline"})
 
 @app.get("/api/clips/{clip_id}/video")
+@app.get("/api/clips/{clip_id}/clip.mp4")
+def get_clip_video(clip_id: str, request: Request):
+    local_vid = find_local_clip_file(clip_id, "clip.mp4")
+    if local_vid and local_vid.exists():
+        return FileResponse(str(local_vid), media_type="video/mp4", content_disposition_type="inline")
+    return Response(
+        content=BLANK_MP4_BYTES,
+        media_type="video/mp4",
+        headers={"Accept-Ranges": "bytes", "Content-Disposition": "inline"}
+    )
+
 @app.get("/api/clips/{clip_id}/preview")
-def get_clip_video(clip_id: str):
-    return Response(content=b"", media_type="video/mp4")
+@app.get("/api/clips/{clip_id}/preview.mp4")
+def get_clip_preview(clip_id: str, request: Request):
+    local_prev = find_local_clip_file(clip_id, "preview.mp4")
+    if local_prev and local_prev.exists():
+        return FileResponse(str(local_prev), media_type="video/mp4", content_disposition_type="inline")
+    local_vid = find_local_clip_file(clip_id, "clip.mp4")
+    if local_vid and local_vid.exists():
+        return FileResponse(str(local_vid), media_type="video/mp4", content_disposition_type="inline")
+    return Response(
+        content=BLANK_MP4_BYTES,
+        media_type="video/mp4",
+        headers={"Accept-Ranges": "bytes", "Content-Disposition": "inline"}
+    )
 
 @app.get("/api/events")
 def list_events(request: Request):

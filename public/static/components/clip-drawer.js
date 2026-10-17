@@ -52,7 +52,7 @@ export function initClipDrawer({ onClipUpdated } = {}) {
         <div class="drawer-content" id="drawer-main-content">
           <!-- 16:9 Video Box -->
           <div class="drawer-player-box" id="drawer-player-box">
-            <video class="drawer-video-el" id="drawer-video-player" playsinline preload="auto" style="background: #000;"></video>
+            <video class="drawer-video-el" id="drawer-video-player" playsinline webkit-playsinline="true" x5-playsinline="true" preload="metadata" style="background: #000;"></video>
             <canvas class="drawer-overlay-canvas" id="drawer-overlay-canvas" style="display: none;"></canvas>
           </div>
 
@@ -236,13 +236,39 @@ function bindDrawerEvents() {
     }
   });
 
-  // Scrubber click/drag
-  scrubberWrap.addEventListener('click', (e) => {
+  // Scrubber touch/pointer/click drag for smooth mobile and desktop control
+  let isDraggingScrubber = false;
+  const seekFromPointer = (clientX) => {
     const rect = scrubberWrap.getBoundingClientRect();
-    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const pos = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     if (video.duration) {
-      video.currentTime = pos * video.duration;
+      try {
+        video.currentTime = pos * video.duration;
+      } catch (_) {}
+      updatePlayerProgress();
     }
+  };
+
+  scrubberWrap.addEventListener('pointerdown', (e) => {
+    isDraggingScrubber = true;
+    try { scrubberWrap.setPointerCapture(e.pointerId); } catch (_) {}
+    seekFromPointer(e.clientX);
+  });
+  scrubberWrap.addEventListener('pointermove', (e) => {
+    if (isDraggingScrubber) {
+      seekFromPointer(e.clientX);
+    }
+  });
+  const stopScrubberDrag = (e) => {
+    if (isDraggingScrubber) {
+      isDraggingScrubber = false;
+      try { scrubberWrap.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+  };
+  scrubberWrap.addEventListener('pointerup', stopScrubberDrag);
+  scrubberWrap.addEventListener('pointercancel', stopScrubberDrag);
+  scrubberWrap.addEventListener('click', (e) => {
+    seekFromPointer(e.clientX);
   });
 
   // Toggle overlay
@@ -394,8 +420,17 @@ function handleDrawerKeydown(e) {
 
 function togglePlay() {
   const video = document.getElementById('drawer-video-player');
+  if (!video) return;
   if (video.paused) {
-    video.play().catch(() => {});
+    const p = video.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch((err) => {
+        if (err.name === 'NotAllowedError') {
+          video.muted = true;
+          video.play().catch(() => {});
+        }
+      });
+    }
   } else {
     video.pause();
   }
@@ -533,14 +568,32 @@ function renderDrawerContent(clip) {
   const triggerOffsetSec = Math.max(0, (triggerMs - startMs) / 1000.0);
   const preTriggerSec = Math.max(0, triggerOffsetSec - 3.0);
 
+  video.onerror = () => {
+    console.warn('Video playback issue for clip:', clip.id);
+    const previewUrl = clip.previewUrl || (clip.urls && clip.urls.preview);
+    if (previewUrl && video.src !== previewUrl) {
+      video.src = previewUrl;
+      try { video.load(); } catch (_) {}
+    }
+  };
+
   video.onloadedmetadata = () => {
-    video.currentTime = Math.min(preTriggerSec, (video.duration || 15) - 0.5);
     // Position trigger marker on scrubber track
     const marker = document.getElementById('player-trigger-marker');
     const actualDur = video.duration || durSec;
     const triggerPct = Math.min(100, Math.max(0, (triggerOffsetSec / actualDur) * 100));
-    marker.style.left = `${triggerPct}%`;
+    if (marker) marker.style.left = `${triggerPct}%`;
   };
+
+  // Safe initial seek after media is ready to prevent mobile pipeline stalls
+  const seekToTrigger = () => {
+    try {
+      if (video.readyState >= 1 && preTriggerSec > 0 && preTriggerSec < (video.duration || 15)) {
+        video.currentTime = preTriggerSec;
+      }
+    } catch (_) {}
+  };
+  video.addEventListener('loadeddata', seekToTrigger, { once: true });
 
   // Top Summary & Title
   const summaryTitleEl = document.getElementById('drawer-summary-title');

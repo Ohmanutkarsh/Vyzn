@@ -320,7 +320,7 @@ class RTSPCaptureThread(threading.Thread):
 
     def run(self):
         backoff_sec = 1.0
-        max_backoff = 30.0
+        max_backoff = 5.0
 
         while self.running:
             url_str = normalize_camera_stream_url(str(self.config.rtsp_url).strip())
@@ -350,8 +350,10 @@ class RTSPCaptureThread(threading.Thread):
                         if not cap.isOpened():
                             cap = cv2.VideoCapture(dev_idx, cv2.CAP_MSMF if os.name == "nt" else cv2.CAP_ANY)
                 elif url_str.startswith("http://") or url_str.startswith("https://"):
-                    # Phone camera / IP Webcam / MJPEG stream
-                    cap = cv2.VideoCapture(url_str)
+                    # Phone camera / IP Webcam / MJPEG stream - force CAP_FFMPEG for robust HTTP MJPEG streaming
+                    cap = cv2.VideoCapture(url_str, cv2.CAP_FFMPEG)
+                    if not cap.isOpened():
+                        cap = cv2.VideoCapture(url_str)
                 elif url_str.endswith(".mp4") or os.path.exists(url_str):
                     cap = cv2.VideoCapture(url_str)
                 else:

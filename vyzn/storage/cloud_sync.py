@@ -100,6 +100,34 @@ class CloudSyncWorker(threading.Thread):
                 )
                 logger.info(f"Synced incident {event.event_group_id} to Cloudflare R2 / S3.")
 
+        # Sync clips state directly to Supabase cloud storage for remote phone access
+        self._sync_to_supabase_cloud()
+
+    def _sync_to_supabase_cloud(self):
+        try:
+            import json, hashlib, requests
+            from pathlib import Path
+            from dotenv import load_dotenv
+            load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+            url = os.environ.get("VYZN_SUPABASE_URL") or "https://dosvefzyiccqupgwxgfw.supabase.co"
+            key = os.environ.get("VYZN_SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("VYZN_SUPABASE_ANON_KEY")
+            if not (url and key):
+                return
+            clips_res = self.db.query_clips()
+            clips = clips_res.get("clips", [])
+            headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json", "x-upsert": "true"}
+            # Group by owner_email or default
+            emails = set(c.get("owner_email") or "dirtbike000000@gmail.com" for c in clips)
+            if not emails:
+                emails = {"dirtbike000000@gmail.com"}
+            for em in emails:
+                h = hashlib.sha256(em.strip().lower().encode()).hexdigest()[:16]
+                user_clips = [c for c in clips if (c.get("owner_email") or "dirtbike000000@gmail.com") == em]
+                post_url = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips_{h}.json"
+                requests.post(post_url, headers=headers, data=json.dumps(user_clips), timeout=4.0)
+        except Exception as e:
+            logger.debug(f"Supabase background sync notice: {e}")
+
     def _upload_event(self, event: EventRecord, s3_client: Any) -> bool:
         """Uploads clip and thumbnail to S3-compatible bucket."""
         clip_key = f"incidents/{event.camera_id}/{event.event_group_id}/clip.mp4"

@@ -357,12 +357,16 @@ class ClipWriter:
         except Exception as e:
             logger.warning(f"Error encoding preview.mp4: {e}")
 
+        # Ensure dimensions are strictly even for H.264 / yuv420p encoder compatibility
+        even_w = w - (w % 2)
+        even_h = h - (h % 2)
+
         # Build FFmpeg command with fragmented MP4 flags and +faststart
         cmd = [
             ffmpeg_exe, "-y",
             "-f", "rawvideo",
             "-vcodec", "rawvideo",
-            "-s", f"{w}x{h}",
+            "-s", f"{even_w}x{even_h}",
             "-pix_fmt", "bgr24",
             "-r", str(fps),
             "-i", "-",  # Read from stdin
@@ -384,8 +388,8 @@ class ClipWriter:
                 stderr=subprocess.DEVNULL
             )
             for f in decoded_frames:
-                if f.shape[:2] != (h, w):
-                    f = cv2.resize(f, (w, h))
+                if f.shape[:2] != (even_h, even_w):
+                    f = cv2.resize(f, (even_w, even_h))
                 proc.stdin.write(f.tobytes())
 
             proc.stdin.close()
@@ -454,3 +458,24 @@ class ClipWriter:
                 f = cv2.resize(f, (w, h))
             out.write(f)
         out.release()
+
+        # Transcode cv2 mp4v to mobile-compatible H.264 if FFmpeg is available
+        try:
+            ffmpeg_exe = FFmpegUtil.get_executable()
+            tmp_transcode = output_path.with_suffix(".h264.mp4")
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-i", str(output_path),
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "26",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart",
+                str(tmp_transcode)
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10.0)
+            if res.returncode == 0 and tmp_transcode.exists() and tmp_transcode.stat().st_size > 0:
+                output_path.unlink(missing_ok=True)
+                tmp_transcode.rename(output_path)
+        except Exception:
+            pass

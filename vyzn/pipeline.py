@@ -821,6 +821,29 @@ class EdgePipeline:
         else:
             logger.info(f"[CLIP ARCHIVED] Event {segment.event_group_id} saved to archive (Tier: {tier}).")
 
+        # Auto-sync finalized clip record to Supabase cloud storage for remote phone access
+        owner = getattr(cam_config, "owner_email", None) or "dirtbike000000@gmail.com"
+        threading.Thread(target=self._sync_clips_to_cloud_worker, args=(owner,), daemon=True).start()
+
+    def _sync_clips_to_cloud_worker(self, owner_email: str):
+        try:
+            import hashlib, requests
+            from dotenv import load_dotenv
+            load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+            url = os.environ.get("VYZN_SUPABASE_URL") or "https://dosvefzyiccqupgwxgfw.supabase.co"
+            key = os.environ.get("VYZN_SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("VYZN_SUPABASE_ANON_KEY")
+            if not (url and key):
+                return
+            h = hashlib.sha256(owner_email.strip().lower().encode()).hexdigest()[:16]
+            clips_res = self.db.query_clips()
+            clips = clips_res.get("clips", [])
+            headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json", "x-upsert": "true"}
+            post_url = f"{url.rstrip('/')}/storage/v1/object/vyzn-cloud-state/clips_{h}.json"
+            requests.post(post_url, headers=headers, data=json.dumps(clips), timeout=5.0)
+            logger.info(f"Auto-synced {len(clips)} clips to Supabase cloud for {owner_email}")
+        except Exception as e:
+            logger.warning(f"Failed to auto-sync clips to cloud: {e}")
+
     def _finalize_event(self, camera_id: str):
         """Forces immediate finalization of active event on camera_id (backward-compatibility)."""
         sm = self.state_machines.get(camera_id)
