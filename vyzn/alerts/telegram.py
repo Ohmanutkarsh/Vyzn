@@ -25,6 +25,19 @@ from vyzn.api.mobile_viewer import build_viewer_url
 
 logger = logging.getLogger("vyzn.alerts.telegram")
 
+INVALID_MOCK_CHATS = {
+    "none", "null", "12345678", "123456789", "98765432", "987654321", "simulation_chat", ""
+}
+
+def is_valid_telegram_chat_id(cid: Any) -> bool:
+    if not cid:
+        return False
+    s = str(cid).strip().lower()
+    if s in INVALID_MOCK_CHATS:
+        return False
+    digits = s.lstrip("-")
+    return digits.isdigit() and len(digits) >= 8
+
 
 # ==============================================================================
 # HELPER 1: PHONE NUMBER CLEANER
@@ -287,7 +300,7 @@ def resolve_authorized_chat_for_event(
                 logger.info(f"[AUTH ROUTING] Alerts muted for user {owner_email}")
                 return None
             chat_id = user.get("telegram_chat_id")
-            if chat_id and str(chat_id).strip() not in ("None", "987654321", "12345678", "simulation_chat", ""):
+            if is_valid_telegram_chat_id(chat_id):
                 return str(chat_id).strip()
 
     # Check Supabase cloud record if local SQLite has not synced yet
@@ -303,7 +316,7 @@ def resolve_authorized_chat_for_event(
                     u_data = r.json()[0]
                     if u_data.get("telegram_status") in ("linked", "connected") and u_data.get("telegram_chat_id"):
                         cid = str(u_data["telegram_chat_id"]).strip()
-                        if cid and cid not in ("None", "987654321", "12345678", "simulation_chat"):
+                        if is_valid_telegram_chat_id(cid):
                             # Sync to local DB
                             if db and hasattr(db, "get_user_by_email") and hasattr(db, "update_user_telegram"):
                                 lu = db.get_user_by_email(check_email)
@@ -320,7 +333,7 @@ def resolve_authorized_chat_for_event(
             for u in users:
                 if u.get("telegram_status") in ("linked", "connected") and u.get("telegram_alerts_enabled", 1) and u.get("telegram_chat_id"):
                     cid = str(u["telegram_chat_id"]).strip()
-                    if cid and cid not in ("None", "987654321", "12345678", "simulation_chat"):
+                    if is_valid_telegram_chat_id(cid):
                         return cid
         except Exception:
             pass
@@ -328,12 +341,12 @@ def resolve_authorized_chat_for_event(
     # Fallback to configured settings or environment chat ID
     if settings and getattr(settings, "telegram_chat_id", None):
         cid = str(settings.telegram_chat_id).strip()
-        if cid and cid not in ("None", "987654321", "12345678", "simulation_chat"):
+        if is_valid_telegram_chat_id(cid):
             return cid
     env_chat = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
     if env_chat:
         cid = str(env_chat).strip()
-        if cid and cid not in ("None", "987654321", "12345678", "simulation_chat"):
+        if is_valid_telegram_chat_id(cid):
             return cid
 
     # Verified primary owner default
@@ -485,11 +498,11 @@ class TelegramAlertProvider(AlertProvider):
             if u and (u.get("telegram_status") not in ("linked", "connected") or not u.get("telegram_alerts_enabled", 1)):
                 logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for chat {target_chat_id}")
                 return False
-        if not target_chat_id or str(target_chat_id).strip() in ("None", "987654321", "12345678", "simulation_chat", ""):
+        if not is_valid_telegram_chat_id(target_chat_id):
             env_chat = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
-            if env_chat and env_chat.strip() not in ("None", "987654321", "12345678", "simulation_chat", ""):
-                target_chat_id = env_chat.strip()
-            elif self.settings and getattr(self.settings, "telegram_chat_id", None):
+            if is_valid_telegram_chat_id(env_chat):
+                target_chat_id = str(env_chat).strip()
+            elif self.settings and is_valid_telegram_chat_id(getattr(self.settings, "telegram_chat_id", None)):
                 target_chat_id = str(self.settings.telegram_chat_id).strip()
             else:
                 target_chat_id = "6856103038"

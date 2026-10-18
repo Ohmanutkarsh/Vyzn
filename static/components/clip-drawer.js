@@ -609,17 +609,7 @@ function renderDrawerContent(clip) {
     if (marker) marker.style.left = `${triggerPct}%`;
   };
 
-  // Smooth trigger seek on user play without stalling initial media buffer
-  let initialSeekDone = false;
-  const doInitialSeek = () => {
-    if (!initialSeekDone && preTriggerSec > 1.5 && preTriggerSec < (video.duration || 15)) {
-      initialSeekDone = true;
-      try {
-        video.currentTime = preTriggerSec;
-      } catch (_) {}
-    }
-  };
-  video.addEventListener('play', doInitialSeek, { once: true });
+  // Keep initial playback at 0.0s so the 10-second pre-roll context plays naturally
 
   // Top Summary & Title
   const summaryTitleEl = document.getElementById('drawer-summary-title');

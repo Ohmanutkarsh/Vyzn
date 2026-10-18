@@ -267,8 +267,11 @@ def sync_users_from_supabase_to_local_db(db: Any) -> int:
                 tg_status = "linked"
                 tg_chat = "6856103038"
 
-            if tg_status in ("linked", "connected") and tg_chat and tg_chat not in ("None", "987654321"):
-                db.update_user_telegram(local_user["id"], tg_chat, tg_chat, u.get("telegram_username"))
+            invalid_mock_chats = {"none", "null", "12345678", "123456789", "98765432", "987654321", "simulation_chat", ""}
+            is_valid_chat = tg_chat and str(tg_chat).strip().lower() not in invalid_mock_chats and len(str(tg_chat).strip().lstrip("-")) >= 8 and str(tg_chat).strip().lstrip("-").isdigit()
+
+            if tg_status in ("linked", "connected") and is_valid_chat:
+                db.update_user_telegram(local_user["id"], str(tg_chat).strip(), str(tg_chat).strip(), u.get("telegram_username"))
                 if "telegram_alerts_enabled" in u:
                     db.set_user_telegram_alerts(local_user["id"], bool(u.get("telegram_alerts_enabled", 1)))
                 synced_count += 1

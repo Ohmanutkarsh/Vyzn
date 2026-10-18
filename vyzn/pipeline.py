@@ -655,7 +655,9 @@ class EdgePipeline:
             if is_high_threat:
                 evt_id = sm.current_event_id or f"ev_{camera_id}_{int(frame_time)}"
                 root_id = sm.parent_event_id or evt_id
-                if root_id not in self.dispatched_alert_events:
+                if root_id not in self.dispatched_alert_events and evt_id not in self.dispatched_alert_events:
+                    self.dispatched_alert_events.add(root_id)
+                    self.dispatched_alert_events.add(evt_id)
                     frames_to_send = list(sm.active_frames) if sm.active_frames else [frame]
                     self._dispatch_immediate_alert(
                         camera_id=camera_id,
@@ -902,8 +904,12 @@ class EdgePipeline:
         root_event_id = segment.parent_event_id or segment.event_group_id
         if tier == "alert" and root_event_id not in self.dispatched_alert_events:
             self.dispatched_alert_events.add(root_event_id)
-            self.dispatcher.dispatch(record, clip_path, thumb_path)
-            logger.info(f"[ALERT DISPATCHED] Event {segment.event_group_id} alerted to Telegram.")
+            threading.Thread(
+                target=self._run_dispatch_worker,
+                args=(record, clip_path, thumb_path, camera_id, segment.event_group_id, score, len(frames)),
+                daemon=True
+            ).start()
+            logger.info(f"[ALERT DISPATCHED] Event {segment.event_group_id} queued for background Telegram dispatch.")
         else:
             logger.info(f"[CLIP ARCHIVED] Event {segment.event_group_id} saved to archive (Tier: {tier}).")
 
@@ -963,6 +969,15 @@ class EdgePipeline:
                 cam_cfg = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
                 self._handle_finalized_segment(seg, cam_cfg)
 
+    def _run_dispatch_worker(self, record, clip_path, thumb_path, camera_id, event_id, score, frame_count):
+        try:
+            ok = self.dispatcher.dispatch(record, clip_path, thumb_path)
+            logger.info(
+                f"[ALERT WORKER] Dispatched alert for {camera_id} event {event_id} (Score: {score}, ok={ok})"
+            )
+        except Exception as e:
+            logger.error(f"[ALERT WORKER] Dispatch failed for {camera_id}: {e}")
+
     # ==============================================================================
     # STEP 7: IMMEDIATE LIVE TELEGRAM ALERT DISPATCH
     # ------------------------------------------------------------------------------
@@ -980,8 +995,7 @@ class EdgePipeline:
     ):
         """
         Dispatches a Telegram/WhatsApp alert immediately when score threshold is crossed.
-        Uses the frames collected so far (pre-roll + current motion frames).
-        The final finalized clip will replace this once the event completes.
+        Uses a background daemon thread so capture and AI inference loops are never blocked.
         """
         try:
             # Generate instant JPEG snapshot in 5ms without blocking on FFmpeg video encoding
@@ -1029,12 +1043,14 @@ class EdgePipeline:
                 metadata_json=json.dumps({"live_alert": True, "pre_roll_sec": 10.0}),
                 owner_email=owner_email
             )
-            dispatched = self.dispatcher.dispatch(provisional_record, clip_path, thumb_path)
-            if dispatched:
-                self.dispatched_alert_events.add(event_id)
+            threading.Thread(
+                target=self._run_dispatch_worker,
+                args=(provisional_record, clip_path, thumb_path, camera_id, event_id, score, len(frames)),
+                daemon=True
+            ).start()
             logger.info(
-                f"[IMMEDIATE ALERT] Dispatched live alert for {camera_id} "
-                f"event {event_id} with score {score} ({len(frames)} frames, ok={dispatched})"
+                f"[IMMEDIATE ALERT] Queued live alert for {camera_id} "
+                f"event {event_id} with score {score} ({len(frames)} frames)"
             )
         except Exception as e:
             logger.error(f"Immediate alert dispatch failed for {camera_id}: {e}")
