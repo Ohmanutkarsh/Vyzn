@@ -655,19 +655,25 @@ def sync_user_to_supabase_cloud(user: Dict[str, Any]):
         "Prefer": "resolution=merge-duplicates,return=representation"
     }
     email = user.get("email", "").strip().lower()
+    if not email:
+        return
     now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    # Strictly only include columns that exist in the Supabase vyzn_users schema:
+    # ['id', 'email', 'phone_e164', 'email_verified', 'phone_verified', 'telegram_status', 'telegram_chat_id', 'last_sign_in_at', 'created_at', 'updated_at']
     payload = {
-        "id": user.get("id"),
         "email": email,
-        "phone_e164": user.get("phone_e164"),
-        "phone_verified": bool(user.get("phone_verified")),
         "email_verified": True,
         "telegram_status": user.get("telegram_status", "not_linked"),
         "telegram_chat_id": str(user.get("telegram_chat_id")) if user.get("telegram_chat_id") else None,
-        "telegram_alerts_enabled": bool(user.get("telegram_alerts_enabled", True)),
-        "last_sign_in_at": now_iso,
         "updated_at": now_iso
     }
+    if user.get("id"):
+        payload["id"] = user.get("id")
+    if user.get("phone_e164"):
+        payload["phone_e164"] = user.get("phone_e164")
+    if "phone_verified" in user:
+        payload["phone_verified"] = bool(user.get("phone_verified"))
+
     try:
         check_url = f"{url}/rest/v1/vyzn_users?email=eq.{email}&select=id"
         check_resp = requests.get(check_url, headers=headers, timeout=4.0)
@@ -1208,18 +1214,31 @@ def api_telegram_test(request: Request):
 @app.get("/api/v1/alerts/telegram")
 def api_telegram_status(request: Request):
     user = get_current_user(request) or CURRENT_USER
-    if not user.get("telegram_chat_id"):
-        email = (user.get("email") or "dirtbike000000@gmail.com").strip().lower()
-        supa = fetch_user_from_supabase_cloud(email)
-        if supa and supa.get("telegram_chat_id"):
-            user.update(supa)
-    is_connected = user.get("telegram_status") in ("connected", "linked") and bool(user.get("telegram_chat_id"))
+    chat_id = user.get("telegram_chat_id")
+    if not chat_id or str(chat_id) in ("None", "987654321"):
+        # Check current user's email, plus linked primary accounts in Supabase
+        emails_to_check = [
+            (user.get("email") or "").strip().lower(),
+            "dirtbike000000@gmail.com",
+            "tapise.utkarsh@gmail.com"
+        ]
+        for em in [e for e in emails_to_check if e]:
+            supa = fetch_user_from_supabase_cloud(em)
+            if supa and supa.get("telegram_chat_id") and str(supa.get("telegram_chat_id")) not in ("None", "987654321"):
+                user["telegram_chat_id"] = str(supa["telegram_chat_id"])
+                user["telegram_status"] = "connected"
+                if supa.get("telegram_username"):
+                    user["telegram_username"] = supa["telegram_username"]
+                chat_id = user["telegram_chat_id"]
+                break
+
+    is_connected = user.get("telegram_status") in ("connected", "linked") and bool(chat_id) and str(chat_id) not in ("None", "987654321")
     alerts_enabled = bool(user.get("telegram_alerts_enabled", True))
     return {
         "status": "connected" if is_connected else "disconnected",
         "connected": is_connected,
-        "chat_id": user.get("telegram_chat_id"),
-        "telegram_chat_id": user.get("telegram_chat_id"),
+        "chat_id": chat_id if is_connected else None,
+        "telegram_chat_id": chat_id if is_connected else None,
         "username": user.get("telegram_username"),
         "telegram_username": user.get("telegram_username"),
         "alerts_enabled": alerts_enabled,
@@ -1316,49 +1335,59 @@ async def api_telegram_webhook(request: Request):
                             target_email = dec_email
                     except Exception:
                         pass
-            if not target_email:
-                # Fallback to primary account owner so user connects seamlessly without friction
-                target_email = "dirtbike000000@gmail.com"
 
-            if target_email:
-                target_user = get_user_by_email(target_email)
-                target_user["telegram_status"] = "connected"
-                target_user["telegram_chat_id"] = chat_id
-                target_user["telegram_username"] = username
-                target_user["telegram_linked_at_ms"] = int(time.time() * 1000)
-                target_user["telegram_alerts_enabled"] = True
-                sync_user_to_supabase_cloud(target_user)
+            # Check if this chat_id was ALREADY linked to either account in Supabase
+            supa_p = fetch_user_from_supabase_cloud("dirtbike000000@gmail.com") or {}
+            supa_u = fetch_user_from_supabase_cloud("tapise.utkarsh@gmail.com") or {}
+            already_linked = (
+                (str(supa_p.get("telegram_chat_id")) == str(chat_id) and supa_p.get("telegram_status") in ("connected", "linked")) or
+                (str(supa_u.get("telegram_chat_id")) == str(chat_id) and supa_u.get("telegram_status") in ("connected", "linked"))
+            )
 
-                CURRENT_USER["telegram_status"] = "connected"
-                CURRENT_USER["telegram_chat_id"] = chat_id
-                CURRENT_USER["telegram_username"] = username
-                CURRENT_USER["telegram_linked_at_ms"] = int(time.time() * 1000)
-                CURRENT_USER["telegram_alerts_enabled"] = True
-                sync_user_to_supabase_cloud(CURRENT_USER)
+            # Persist real chat_id to all associated user accounts in Supabase
+            link_emails = ["dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"]
+            if target_email and target_email not in link_emails:
+                link_emails.append(target_email)
 
-                welcome_msg = (
+            for em in link_emails:
+                u = get_user_by_email(em)
+                u["telegram_status"] = "connected"
+                u["telegram_chat_id"] = str(chat_id)
+                u["telegram_username"] = username
+                u["telegram_linked_at_ms"] = int(time.time() * 1000)
+                u["telegram_alerts_enabled"] = True
+                sync_user_to_supabase_cloud(u)
+
+            CURRENT_USER["telegram_status"] = "connected"
+            CURRENT_USER["telegram_chat_id"] = str(chat_id)
+            CURRENT_USER["telegram_username"] = username
+            CURRENT_USER["telegram_linked_at_ms"] = int(time.time() * 1000)
+            CURRENT_USER["telegram_alerts_enabled"] = True
+            sync_user_to_supabase_cloud(CURRENT_USER)
+
+            if already_linked:
+                reply_msg = (
+                    "✅ *Already Connected to VYZN Security!*\n\n"
+                    "Your Telegram account is already linked and active. "
+                    "Real-time CCTV security alerts and photo thumbnails are being delivered directly here."
+                )
+            else:
+                reply_msg = (
                     "✅ *Connected to VYZN Security!*\n\n"
                     "Your Telegram account has been linked successfully. "
                     "You will now receive real-time security alerts and CCTV thumbnails here."
                 )
-                if api_url and chat_id:
-                    try:
-                        requests.post(
-                            f"{api_url}/sendMessage",
-                            json={"chat_id": chat_id, "text": welcome_msg, "parse_mode": "Markdown"},
-                            timeout=6.0
-                        )
-                    except Exception:
-                        pass
-                return {"ok": True, "result": {"type": "telegram_linked_success", "chat_id": chat_id}}
-            else:
-                err_msg = "⏳ This connection link is invalid or expired. Please generate a new link in VYZN Settings."
-                if api_url and chat_id:
-                    try:
-                        requests.post(f"{api_url}/sendMessage", json={"chat_id": chat_id, "text": err_msg}, timeout=6.0)
-                    except Exception:
-                        pass
-                return {"ok": True, "result": {"type": "invalid_or_expired_token"}}
+
+            if api_url and chat_id:
+                try:
+                    requests.post(
+                        f"{api_url}/sendMessage",
+                        json={"chat_id": chat_id, "text": reply_msg, "parse_mode": "Markdown"},
+                        timeout=6.0
+                    )
+                except Exception:
+                    pass
+            return {"ok": True, "result": {"type": "already_connected" if already_linked else "telegram_linked_success", "chat_id": chat_id}}
 
         if text.startswith("/help"):
             help_txt = (
@@ -1393,10 +1422,15 @@ async def api_telegram_webhook(request: Request):
             return {"ok": True, "result": {"type": "status", "connected": is_conn}}
 
         if text in ("/disconnect", "/stop"):
-            user_for_chat["telegram_status"] = "not_linked"
-            user_for_chat["telegram_chat_id"] = None
-            user_for_chat["telegram_username"] = None
-            sync_user_to_supabase_cloud(user_for_chat)
+            for em in ["dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"]:
+                u = get_user_by_email(em)
+                u["telegram_status"] = "not_linked"
+                u["telegram_chat_id"] = None
+                u["telegram_username"] = None
+                sync_user_to_supabase_cloud(u)
+            CURRENT_USER["telegram_status"] = "not_linked"
+            CURRENT_USER["telegram_chat_id"] = None
+            CURRENT_USER["telegram_username"] = None
             disc_txt = "🔌 *Disconnected from VYZN Security*\n\nYour Telegram account has been unlinked. You will no longer receive CCTV notifications."
             if api_url and chat_id:
                 try:
@@ -1406,14 +1440,23 @@ async def api_telegram_webhook(request: Request):
             return {"ok": True, "result": {"type": "disconnected"}}
 
         # Auto-link fallback: if the sender is not linked yet, or this chat_id differs from existing, link immediately on any message
-        if user_for_chat.get("telegram_status") not in ("connected", "linked") or str(user_for_chat.get("telegram_chat_id")) != str(chat_id):
-            target_user = get_user_by_email("dirtbike000000@gmail.com")
-            target_user["telegram_status"] = "connected"
-            target_user["telegram_chat_id"] = str(chat_id)
-            target_user["telegram_username"] = username
-            target_user["telegram_linked_at_ms"] = int(time.time() * 1000)
-            target_user["telegram_alerts_enabled"] = True
-            sync_user_to_supabase_cloud(target_user)
+        supa_p = fetch_user_from_supabase_cloud("dirtbike000000@gmail.com") or {}
+        supa_u = fetch_user_from_supabase_cloud("tapise.utkarsh@gmail.com") or {}
+        already_linked = (
+            (str(supa_p.get("telegram_chat_id")) == str(chat_id) and supa_p.get("telegram_status") in ("connected", "linked")) or
+            (str(supa_u.get("telegram_chat_id")) == str(chat_id) and supa_u.get("telegram_status") in ("connected", "linked")) or
+            (str(user_for_chat.get("telegram_chat_id")) == str(chat_id) and user_for_chat.get("telegram_status") in ("connected", "linked"))
+        )
+
+        if not already_linked:
+            for em in ["dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"]:
+                u = get_user_by_email(em)
+                u["telegram_status"] = "connected"
+                u["telegram_chat_id"] = str(chat_id)
+                u["telegram_username"] = username
+                u["telegram_linked_at_ms"] = int(time.time() * 1000)
+                u["telegram_alerts_enabled"] = True
+                sync_user_to_supabase_cloud(u)
 
             CURRENT_USER["telegram_status"] = "connected"
             CURRENT_USER["telegram_chat_id"] = str(chat_id)
@@ -1445,7 +1488,7 @@ async def api_telegram_webhook(request: Request):
                     f"{api_url}/sendMessage",
                     json={
                         "chat_id": chat_id,
-                        "text": "🛡️ *VYZN Security Bot Active*\n\nYour account is linked and monitoring is active. Security alerts and motion clips will be sent here automatically as soon as threats are detected.",
+                        "text": "✅ *Already Connected to VYZN Security!*\n\nYour account is linked and monitoring is active. Security alerts and motion clips will be sent here automatically as soon as threats are detected.",
                         "parse_mode": "Markdown"
                     },
                     timeout=6.0
@@ -1463,6 +1506,13 @@ async def api_telegram_manual_link(request: Request):
         data = {}
     chat_id = str(data.get("chat_id") or "").strip()
     if chat_id:
+        for em in ["dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"]:
+            u = get_user_by_email(em)
+            u["telegram_status"] = "connected"
+            u["telegram_chat_id"] = chat_id
+            u["telegram_alerts_enabled"] = True
+            u["telegram_linked_at_ms"] = int(time.time() * 1000)
+            sync_user_to_supabase_cloud(u)
         user["telegram_status"] = "connected"
         user["telegram_chat_id"] = chat_id
         user["telegram_alerts_enabled"] = True

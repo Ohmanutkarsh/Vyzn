@@ -528,6 +528,8 @@ async function refreshTelegramStatus() {
       }
       if (disconnectedView) disconnectedView.style.display = 'none';
       if (connectedView) connectedView.style.display = 'block';
+      const drawer = document.getElementById('tg-connect-drawer');
+      if (drawer) drawer.style.display = 'none';
 
       if (usernameEl) {
         const u = data.telegram_username ? `@${data.telegram_username}` : `Chat ID: ${data.telegram_chat_id || 'Active'}`;

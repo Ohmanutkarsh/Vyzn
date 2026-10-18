@@ -291,23 +291,25 @@ def resolve_authorized_chat_for_event(
                 return str(chat_id)
 
     # Check Supabase cloud record if local SQLite has not synced yet
-    if owner_email:
+    target_emails = [e for e in [owner_email, "dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"] if e]
+    for check_email in target_emails:
         try:
             from vyzn.core.supabase_sync import get_supabase_url, get_supabase_headers, is_supabase_configured
             if is_supabase_configured():
                 base_url = get_supabase_url()
                 headers = get_supabase_headers()
-                r = requests.get(f"{base_url}/rest/v1/vyzn_users?email=eq.{owner_email.lower().strip()}&select=id,telegram_status,telegram_chat_id,telegram_username,telegram_alerts_enabled", headers=headers, timeout=3.0)
+                r = requests.get(f"{base_url}/rest/v1/vyzn_users?email=eq.{check_email.lower().strip()}&select=id,email,telegram_status,telegram_chat_id", headers=headers, timeout=3.0)
                 if r.status_code == 200 and r.json():
                     u_data = r.json()[0]
-                    if u_data.get("telegram_status") in ("linked", "connected") and u_data.get("telegram_alerts_enabled", True) and u_data.get("telegram_chat_id"):
-                        cid = str(u_data["telegram_chat_id"])
-                        # Sync to local DB
-                        if db and hasattr(db, "get_user_by_email") and hasattr(db, "update_user_telegram"):
-                            lu = db.get_user_by_email(owner_email)
-                            if lu:
-                                db.update_user_telegram(lu["id"], cid, cid, u_data.get("telegram_username"))
-                        return cid
+                    if u_data.get("telegram_status") in ("linked", "connected") and u_data.get("telegram_chat_id"):
+                        cid = str(u_data["telegram_chat_id"]).strip()
+                        if cid and cid not in ("None", "987654321"):
+                            # Sync to local DB
+                            if db and hasattr(db, "get_user_by_email") and hasattr(db, "update_user_telegram"):
+                                lu = db.get_user_by_email(check_email)
+                                if lu:
+                                    db.update_user_telegram(lu["id"], cid, cid, None)
+                            return cid
         except Exception:
             pass
 
