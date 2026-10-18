@@ -819,24 +819,6 @@ async function initStorageControls() {
   const btnBrowse = document.getElementById('btn-browse-folder');
   const inputDirPicker = document.getElementById('input-folder-picker');
 
-  if (inputDirPicker) {
-    inputDirPicker.addEventListener('change', () => {
-      if (inputDirPicker.files && inputDirPicker.files.length > 0) {
-        const file = inputDirPicker.files[0];
-        let folderPath = '';
-        if (file.webkitRelativePath) {
-          folderPath = file.webkitRelativePath.split('/')[0];
-        } else if (file.name) {
-          folderPath = file.name;
-        }
-        if (folderPath && inputFolder) {
-          inputFolder.value = folderPath;
-          showToast(`Selected storage folder: ${folderPath}`);
-          if (btnSave) btnSave.click();
-        }
-      }
-    });
-  }
 
   if (btnBrowse) {
     btnBrowse.onclick = async () => {

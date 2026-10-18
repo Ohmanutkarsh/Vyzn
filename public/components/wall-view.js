@@ -249,10 +249,14 @@ function renderWallGrid() {
     <main class="wall-grid-area" id="wall-grid-area" style="grid-template-columns: repeat(${cols}, 1fr); grid-template-rows: repeat(${rows}, 1fr);">
       ${pageCameras.map((cam, idx) => {
         const cid = cam.id || cam.camera_id;
+        let thumbUrl = cam.snapshot_url || cam.snapshotUrl || `/api/cameras/${encodeURIComponent(cid)}/snapshot.jpg`;
+        if (typeof window !== 'undefined' && window.__vyzn_edge_url && thumbUrl.startsWith('/api/')) {
+          thumbUrl = `${window.__vyzn_edge_url}${thumbUrl}`;
+        }
         const keyNumber = idx + 1 <= 9 ? idx + 1 : null;
         return `
           <div class="wall-tile border-neutral" id="tile-${escapeHtml(cid)}" data-cam-id="${escapeHtml(cid)}" data-key-num="${keyNumber || ''}">
-            <img class="wall-tile-img" id="img-${escapeHtml(cid)}" src="${escapeHtml(cam.snapshot_url || '')}" alt="${escapeHtml(cam.name)}" />
+            <img class="wall-tile-img" id="img-${escapeHtml(cid)}" src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(cam.name)}" />
             
             <!-- Information Overlay (Auto-hides on idle) -->
             <div class="tile-overlay">
