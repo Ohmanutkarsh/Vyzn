@@ -93,12 +93,16 @@ class DetectionCandidate:
     motion_ratio: float
     track_duration_sec: float
     bounding_box: List[float]           # [x1, y1, x2, y2] normalized 0.0-1.0
-    is_after_hours: bool
-    is_in_restricted_zone: bool
+    is_after_hours: bool = False
+    is_in_restricted_zone: bool = False
     is_night_ir: bool = False
     zone_name: str = "general"
     matched_area_id: Optional[str] = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    area_response: str = "none"         # 'alert' | 'review' | 'ignore' | 'none'
+    is_in_alert_area: bool = False
+    is_in_review_area: bool = False
+    is_in_ignore_area: bool = False
 
 
 @dataclass

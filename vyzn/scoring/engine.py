@@ -234,6 +234,10 @@ class ScoringEngine:
         is_after_hours = bool(getattr(candidate, "is_after_hours", False))
         is_restricted = bool(getattr(candidate, "is_in_restricted_zone", False))
         is_watch_area = bool(getattr(candidate, "is_watch_area", False))
+        area_resp = str(getattr(candidate, "area_response", "") or "").lower().strip()
+        is_alert_area = bool(getattr(candidate, "is_in_alert_area", False)) or (area_resp == "alert")
+        is_review_area = bool(getattr(candidate, "is_in_review_area", False)) or (area_resp == "review")
+        is_ignore_area = bool(getattr(candidate, "is_in_ignore_area", False)) or (area_resp == "ignore")
 
         # Additional layer hints
         if getattr(candidate, "track_hits", None) is not None:
@@ -319,25 +323,28 @@ class ScoringEngine:
         # Threat floors (applied only to confirmed events, or unexplained motion in restricted after hours)
         floors_cfg = l_cfg.get("layer4_threat_floors", {})
         threat_floor = 0
-        is_active_restricted = is_restricted and (is_after_hours or not staff_expected)
-        if is_confirmed or (is_active_restricted and obj_type in ["person", "vehicle"] and track_hits >= 3 and c_mean >= 0.40):
-            if obj_type == "person":
-                if is_after_hours or is_active_restricted:
-                    base_floor = float(floors_cfg.get("person_after_hours_or_restricted", 70))
-                    if self.alert_threshold != 70:
-                        threat_floor = float(self.alert_threshold)
-                    else:
-                        threat_floor = base_floor
-            elif obj_type == "vehicle":
-                if is_after_hours and is_restricted:
-                    threat_floor = float(floors_cfg.get("vehicle_restricted_after_hours", 70))
-                elif is_after_hours:
-                    threat_floor = float(floors_cfg.get("vehicle_after_hours", 55))
-            elif obj_type == "animal":
-                if is_after_hours:
-                    threat_floor = float(floors_cfg.get("animal_layer0", 30))
-        elif obj_type == "unclassified" and is_restricted and is_after_hours and track_dur >= 3.0:
-            threat_floor = float(floors_cfg.get("unexplained_motion_restricted_after_hours", 30))
+        if not is_ignore_area:
+            is_active_restricted = (is_restricted or is_alert_area) and (is_after_hours or not staff_expected)
+            if is_confirmed or (is_active_restricted and obj_type in ["person", "vehicle"] and track_hits >= 3 and c_mean >= 0.40):
+                if obj_type == "person":
+                    if is_after_hours or is_active_restricted:
+                        base_floor = float(floors_cfg.get("person_after_hours_or_restricted", 70))
+                        if self.alert_threshold != 70:
+                            threat_floor = float(self.alert_threshold)
+                        else:
+                            threat_floor = base_floor
+                    elif is_alert_area:
+                        threat_floor = float(floors_cfg.get("person_alert_area_daytime", 55))
+                elif obj_type == "vehicle":
+                    if is_after_hours and (is_restricted or is_alert_area):
+                        threat_floor = float(floors_cfg.get("vehicle_restricted_after_hours", 70))
+                    elif is_after_hours:
+                        threat_floor = float(floors_cfg.get("vehicle_after_hours", 55))
+                elif obj_type == "animal":
+                    if is_after_hours:
+                        threat_floor = float(floors_cfg.get("animal_layer0", 30))
+            elif obj_type == "unclassified" and (is_restricted or is_alert_area) and is_after_hours and track_dur >= 3.0:
+                threat_floor = float(floors_cfg.get("unexplained_motion_restricted_after_hours", 30))
 
         # ==============================================================================
         # STEP 4 (LAYER 1): MOTION EXTENT (0 to 10 points)
@@ -421,21 +428,30 @@ class ScoringEngine:
 
         # ==============================================================================
         # STEP 9 (LAYER 6): ZONE PROXIMITY (RESTRICTED OR WATCH AREAS)
+        # ==============================================================================
+        # STEP 9 (LAYER 6): ZONE PROXIMITY & AREA RESPONSE
         # ------------------------------------------------------------------------------
-        # If the society admin drew a polygon zone on the camera view:
-        # - Entering a "Restricted Zone" (e.g. Back Wall / Generator Room) adds +15 points.
-        # - Entering a "Watch Area" (e.g. Main Lobby Gate) adds +6 points.
+        # If the user drew a polygon zone on the camera view:
+        # - Alert Area: Score increases a bit (+18 to +23 points).
+        # - Review Area: Score is according (+7 points).
+        # - Ignore Area: Score is reduced significantly (-40 points).
         # ==============================================================================
         l6_cfg = l_cfg.get("layer6_zone", {})
-        restr_weight = l6_cfg.get("restricted_weight", 15.0)
-        watch_weight = l6_cfg.get("watch_weight", 6.0)
+        restr_weight = float(l6_cfg.get("restricted_weight", 18.0))
+        watch_weight = float(l6_cfg.get("watch_weight", 7.0))
+        ignore_penalty = float(l6_cfg.get("ignore_penalty", -40.0))
         zone_pts = 0.0
-        if is_restricted:
+
+        if is_ignore_area:
+            zone_pts = ignore_penalty
+        elif is_alert_area or is_restricted:
             zone_pts = restr_weight
-        elif is_watch_area:
+            if is_after_hours:
+                zone_pts += 5.0
+        elif is_review_area or is_watch_area:
             zone_pts = watch_weight
 
-        if staff_expected and not is_after_hours:
+        if staff_expected and not is_after_hours and not is_ignore_area:
             l6 = 0.0
         else:
             l6 = zone_pts
@@ -572,18 +588,27 @@ class ScoringEngine:
         s_live = max(0.0, min(100.0, s3 + d4))
 
         # ── Caps & Floors Order ─────────────────────────────────────────────
-        # In simple terms: background movement (like fans, leaves, hair, or curtains) has no confirmed person
-        # or vehicle, so it is strictly capped at 20 points (strictly below the 30 active threshold).
-        # This prevents false alarms and stops clips from recording forever.
-        s_final = s_live
-        if not is_confirmed:
-            s_final = min(s_final, 20.0)
-        if obj_type == "unclassified" and not (is_restricted and is_after_hours and track_dur >= 3.0 and r9 >= 0.85):
-            s_final = min(s_final, 20.0)
+        # In simple terms:
+        # - Ignore Area: Score is reduced significantly (capped at <= 15, below the 30 active recording threshold).
+        # - Alert Area: Score increases a bit (+8 boost, threat floor elevated to 70 after hours / 55 daytime).
+        # - Review Area: Scored according to standard rules without artificial inflation.
+        # - Unconfirmed glitches / background noise: Strictly capped at 20.
+        if is_ignore_area:
+            threat_floor = 0.0
+            s_final = max(0.0, min(15.0, s_live - 35.0))
+        else:
+            s_final = s_live
+            if is_alert_area and is_confirmed:
+                s_final = min(100.0, s_final + 8.0)
 
-        # In simple terms: apply threat floor for confirmed targets or unexplained sustained motion inside restricted zone after hours
-        if threat_floor > 0 and (is_confirmed or (obj_type == "unclassified" and is_restricted and is_after_hours and track_dur >= 3.0 and r9 >= 0.85)):
-            s_final = max(s_final, float(threat_floor))
+            if not is_confirmed:
+                s_final = min(s_final, 20.0)
+            if obj_type == "unclassified" and not (is_restricted and is_after_hours and track_dur >= 3.0 and r9 >= 0.85):
+                s_final = min(s_final, 20.0)
+
+            # In simple terms: apply threat floor for confirmed targets or unexplained sustained motion inside restricted zone after hours
+            if threat_floor > 0 and (is_confirmed or (obj_type == "unclassified" and (is_restricted or is_alert_area) and is_after_hours and track_dur >= 3.0 and r9 >= 0.85)):
+                s_final = max(s_final, float(threat_floor))
 
         # Round to nearest whole number and ensure it stays between 0 and 100
         final_score = max(0, min(100, round_half_up(s_final)))
@@ -600,7 +625,10 @@ class ScoringEngine:
         alert_thresh = self.alert_threshold if self.alert_threshold is not None else tiers_cfg.get("alert_threshold", 70)
         review_min = tiers_cfg.get("review_min_score", 30)
 
-        if final_score >= alert_thresh:
+        if is_ignore_area:
+            tier = "low"
+            should_alert = False
+        elif final_score >= alert_thresh:
             tier = "alert"
             should_alert = True
         elif final_score >= review_min:
@@ -639,11 +667,16 @@ class ScoringEngine:
             "final_score": final_score,
             "tier": tier,
             "severity_label": severity_info["label"],
+            # Area response flags
+            "is_in_alert_area": is_alert_area,
+            "is_in_review_area": is_review_area,
+            "is_in_ignore_area": is_ignore_area,
+            "area_response": area_resp,
             # Backwards compatibility fields
             "threat_floor": threat_floor,
             "subtotal": round(raw3, 2),
             "raw_score_before_confirmation": round(raw3, 2),
-            "gate_l0_passed": is_after_hours or is_restricted,
+            "gate_l0_passed": is_after_hours or is_restricted or is_alert_area,
             "should_alert": should_alert,
             "is_valid_detection": is_confirmed or (obj_type in ["person", "vehicle", "animal", "carried_item"] and conf >= 0.25),
             "severity_tier": severity_info["tier"],

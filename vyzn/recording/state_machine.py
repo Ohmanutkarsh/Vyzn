@@ -347,7 +347,13 @@ class ClipStateMachine:
 
         # Scoring & tiering
         final_score = max(0, min(100, int(round(self.highest_score))))
-        if final_score >= 70:
+        is_ignore_area = bool(self.peak_breakdown.get("is_in_ignore_area", False)) or (str(self.peak_breakdown.get("area_response", "")).lower() == "ignore")
+        if is_ignore_area:
+            final_score = min(final_score, 15)
+            tier = "low"
+            is_alert = False
+            sev = "Low"
+        elif final_score >= 70:
             tier = "alert"
             is_alert = True
             sev = "High" if final_score < 85 else "Critical"
@@ -559,14 +565,27 @@ class ClipStateMachine:
         ]
         has_confirmed_target = has_confirmed_person or bool(vehicle_tracks) or bool(vehicle_dets)
 
+        # Area response handling
+        is_ignore = bool(best_bd.get("is_in_ignore_area", False)) or (str(best_bd.get("area_response", "")).lower() == "ignore")
+        is_alert = bool(best_bd.get("is_in_alert_area", False)) or (str(best_bd.get("area_response", "")).lower() == "alert")
+
         tick_has_motion = any(getattr(m, "has_motion", False) or (getattr(m, "motion_score", 0.0) > 0.005) for m in self.current_tick_metas)
-        if has_confirmed_target:
-            # If in IDLE and there is zero motion, do not artificially force score >= 30.
-            # This prevents stationary presence without motion from prematurely opening a clip!
-            if self.state == ClipState.IDLE and not tick_has_motion and peak_score < 30.0:
-                pass
+        if is_ignore:
+            # User rule: if target is in ignore area, score must get reduced significantly (capped at <= 15)
+            # Never trigger the 35 active recording floor or alerts for ignore areas!
+            peak_score = min(peak_score, 15.0)
+        elif has_confirmed_target:
+            if is_alert:
+                # User rule: if person in alert area, clip score should increase a bit (floor 70 after hours, 55 daytime)
+                alert_floor = 70.0 if best_bd.get("l0_is_after_hours") else 55.0
+                peak_score = max(peak_score, alert_floor)
             else:
-                peak_score = max(peak_score, 35.0)
+                # If in IDLE and there is zero motion, do not artificially force score >= 30.
+                # This prevents stationary presence without motion from prematurely opening a clip!
+                if self.state == ClipState.IDLE and not tick_has_motion and peak_score < 30.0:
+                    pass
+                else:
+                    peak_score = max(peak_score, 35.0)
         elif not has_confirmed_target:
             # In simple terms: if the camera only sees background motion (like a spinning fan or hair moving)
             # with NO confirmed person or vehicle, cap the score at 20 (strictly below the active threshold of 30).
@@ -669,6 +688,10 @@ class ClipStateMachine:
         Buffers into rolling memory and aggregates frames into 3-second ticks.
         """
         self.last_frame_pts = pts
+        # If the evaluated breakdown indicates the candidate is inside an ignore area, suppress in_roi
+        if live_score_breakdown and (live_score_breakdown.get("is_in_ignore_area") or str(live_score_breakdown.get("area_response", "")).lower() == "ignore"):
+            in_roi = False
+
         # Check if motion or detections occurred inside our watch area
         has_motion = motion_score >= 0.005 and in_roi
         target_dets = [d for d in detections if self._is_target_detection(d)]

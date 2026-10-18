@@ -169,7 +169,9 @@ class EdgePipeline:
         for cam in self.settings.cameras:
             areas = getattr(cam, "watch_areas", None)
             if areas:
-                self.motion_gate.set_camera_areas(cam.camera_id, [a.polygon for a in areas if a.polygon])
+                active_polys = [a.polygon for a in areas if a.polygon and getattr(a, "response", "alert") != "ignore"]
+                if active_polys:
+                    self.motion_gate.set_camera_areas(cam.camera_id, active_polys)
             elif getattr(cam, "restricted_zones", None):
                 self.motion_gate.set_camera_areas(cam.camera_id, [z.points for z in cam.restricted_zones if z.points])
             if getattr(cam, "osd_exclude_polygon", None):
@@ -469,49 +471,106 @@ class EdgePipeline:
                 alive_tracks = []
 
             # ==========================================================================
-            # STEP D: WATCH AREA / RESTRICTED ZONE BOUNDARY CHECK
+            # STEP D: WATCH AREA / RESTRICTED ZONE BOUNDARY CHECK & CLASSIFICATION
             # --------------------------------------------------------------------------
-            # Checks if the tracked person's feet are standing inside the user's watch area.
+            # Checks if detections and tracked persons fall inside:
+            # - Alert Area (or Restricted Zone): score increases a bit (+18 to +23 pts, floor 70/55)
+            # - Review Area: scored according to standard rules (+7 pts)
+            # - Ignore Area: score reduced significantly (<= 15 pts, tier="low", alerts suppressed)
             # ==========================================================================
-            in_roi = True
-            has_configured_areas = bool(cam_config and getattr(cam_config, "watch_areas", None))
-            if has_configured_areas:
-                tracks_in_roi = []
-                for trk in alive_tracks:
-                    # In simple terms: if an object is inside an 'ignore' area, do not treat it as an alertable target
-                    inside_ignore = False
-                    for area in cam_config.watch_areas:
-                        if getattr(area, "response", "alert") == "ignore" and area.polygon:
-                            if is_foot_in_polygon(trk.box, area.polygon):
-                                inside_ignore = True
-                                break
-                    if inside_ignore:
-                        continue
+            def _get_box_area_info(box):
+                if not box or len(box) < 4:
+                    return "none", False, False, False, None, "general"
 
-                    active_areas = [a for a in cam_config.watch_areas if getattr(a, "response", "alert") != "ignore" and a.polygon]
-                    if not active_areas:
-                        # Only ignore areas configured: everything outside ignore areas is watched
-                        tracks_in_roi.append(trk)
-                    else:
-                        for area in active_areas:
-                            if area.schedule == "outside_shop_hours" and not after_hours:
-                                continue
-                            if is_foot_in_polygon(trk.box, area.polygon):
-                                tracks_in_roi.append(trk)
-                                break
-                in_roi = has_motion or (len(tracks_in_roi) > 0)
-                alive_tracks = tracks_in_roi
+                # 1. Check restricted zones (always alert priority)
+                if cam_config and getattr(cam_config, "restricted_zones", None):
+                    for rz in cam_config.restricted_zones:
+                        if check_box_intersects_zone(box, rz):
+                            return "alert", True, False, False, getattr(rz, "name", "restricted"), getattr(rz, "name", "restricted")
+
+                # 2. Check watch areas
+                if cam_config and getattr(cam_config, "watch_areas", None):
+                    for area in cam_config.watch_areas:
+                        if not area.polygon or len(area.polygon) < 3:
+                            continue
+                        if getattr(area, "schedule", "always") == "outside_shop_hours" and not after_hours:
+                            continue
+                        if is_foot_in_polygon(box, area.polygon) or check_box_intersects_zone(box, ZonePolygon(points=area.polygon)):
+                            resp = getattr(area, "response", "alert").lower().strip()
+                            if resp == "ignore":
+                                return "ignore", False, False, True, getattr(area, "id", None), getattr(area, "name", "ignore")
+                            elif resp == "alert":
+                                return "alert", True, False, False, getattr(area, "id", None), getattr(area, "name", "alert")
+                            elif resp == "review":
+                                return "review", False, True, False, getattr(area, "id", None), getattr(area, "name", "review")
+
+                return "none", False, False, False, None, "general"
+
+            # Classify all active tracks
+            track_area_infos = []
+            for trk in alive_tracks:
+                t_resp, t_is_alert, t_is_rev, t_is_ign, t_aid, t_aname = _get_box_area_info(trk.box)
+                track_area_infos.append((trk, t_resp, t_is_alert, t_is_rev, t_is_ign, t_aid, t_aname))
+
+            # Classify all detections
+            det_area_infos = []
+            for det in detections:
+                d_box = getattr(det, "box", [0.0, 0.0, 0.0, 0.0])
+                d_resp, d_is_alert, d_is_rev, d_is_ign, d_aid, d_aname = _get_box_area_info(d_box)
+                det_area_infos.append((det, d_resp, d_is_alert, d_is_rev, d_is_ign, d_aid, d_aname))
+
+            # Priority map: alert (3) > review (2) > none (1) > ignore (0)
+            priority_map = {"alert": 3, "review": 2, "none": 1, "ignore": 0}
+
+            top_track = None
+            top_det = None
+            cand_area_resp = "none"
+            cand_is_alert = False
+            cand_is_review = False
+            cand_is_ignore = False
+            cand_area_id = None
+            cand_zone_name = "general"
+
+            if track_area_infos:
+                track_area_infos.sort(
+                    key=lambda item: (priority_map.get(item[1], 1), getattr(item[0], "hits", 1), getattr(item[0], "confidence", 0.0)),
+                    reverse=True
+                )
+                top_track, cand_area_resp, cand_is_alert, cand_is_review, cand_is_ignore, cand_area_id, cand_zone_name = track_area_infos[0]
+            elif det_area_infos:
+                det_area_infos.sort(
+                    key=lambda item: (priority_map.get(item[1], 1), getattr(item[0], "confidence", 0.0)),
+                    reverse=True
+                )
+                top_det, cand_area_resp, cand_is_alert, cand_is_review, cand_is_ignore, cand_area_id, cand_zone_name = det_area_infos[0]
+
+            has_real_target = (top_track is not None) or (top_det is not None)
+
+            # Determine in_roi
+            has_configured_watch_areas = bool(cam_config and getattr(cam_config, "watch_areas", None))
+            has_active_areas = bool(cam_config and any(getattr(a, "response", "alert") != "ignore" and a.polygon for a in getattr(cam_config, "watch_areas", [])))
+            has_ignore_areas = bool(cam_config and any(getattr(a, "response", "alert") == "ignore" and a.polygon for a in getattr(cam_config, "watch_areas", [])))
+
+            if cand_is_ignore:
+                # Top candidate is in ignore area -> suppress ROI so state machine does not record fake clips
+                in_roi = False
+            elif has_active_areas:
+                # Active areas are configured -> in_roi only if candidate is in an active area or motion occurred inside active area
+                in_roi = (cand_is_alert or cand_is_review) or (has_motion and not self.motion_gate.had_motion_dropped_outside(camera_id))
+            elif has_ignore_areas:
+                # Only ignore areas configured: everything outside ignore areas is monitored
+                in_roi = not cand_is_ignore
+            else:
+                in_roi = True
+
+            # Filter alive_tracks for state machine: drop tracks that are purely inside ignore areas
+            alive_tracks = [item[0] for item in track_area_infos if not item[4]]
 
             # ==========================================================================
             # STEP E: REAL-TIME RISK SCORING (13 LAYERS)
             # --------------------------------------------------------------------------
             # Collects all stats for this frame and asks the ScoringEngine for a 0-100 score.
             # ==========================================================================
-            # In simple terms: find the main detected object or track in this frame
-            top_track = alive_tracks[0] if alive_tracks else None
-            top_det = detections[0] if detections else None
-            has_real_target = (top_track is not None) or (top_det is not None)
-
             cand_obj = getattr(top_track, "label", getattr(top_det, "label", "unclassified"))
             cand_conf = getattr(top_track, "confidence", getattr(top_det, "confidence", 0.0))
             cand_box = getattr(top_track, "box", getattr(top_det, "box", [0.0, 0.0, 0.0, 0.0]))
@@ -522,14 +581,7 @@ class EdgePipeline:
             cand_switches = getattr(top_track, "id_switch_count", 0) if top_track else 0
             cand_h_ratio = getattr(top_track, "bbox_height_ratio", cand_box[3] - cand_box[1]) if top_track else (cand_box[3] - cand_box[1])
 
-            # In simple terms: only check restricted zone intrusion if an actual object was detected.
-            # Pure background motion (fans, leaves) without any object must never trigger an intruder alert.
-            in_restricted = False
-            if has_real_target and cam_config and getattr(cam_config, "restricted_zones", None):
-                for rz in cam_config.restricted_zones:
-                    if check_box_intersects_zone(cand_box, rz):
-                        in_restricted = True
-                        break
+            in_restricted = cand_is_alert and (cand_zone_name != "general")
 
             bias = self.calibrator.get_camera_bias(camera_id) if hasattr(self, "calibrator") and self.calibrator else 0
             candidate = DetectionCandidate(
@@ -541,7 +593,14 @@ class EdgePipeline:
                 bounding_box=cand_box,
                 is_after_hours=after_hours,
                 is_in_restricted_zone=in_restricted,
-                is_night_ir=bool(getattr(cam_config, "is_night_ir", False))
+                is_watch_area=(cand_is_alert or cand_is_review),
+                is_night_ir=bool(getattr(cam_config, "is_night_ir", False)),
+                area_response=cand_area_resp,
+                is_in_alert_area=cand_is_alert,
+                is_in_review_area=cand_is_review,
+                is_in_ignore_area=cand_is_ignore,
+                matched_area_id=cand_area_id,
+                zone_name=cand_zone_name
             )
             candidate.track_hits = cand_hits
             candidate.c_mean = cand_c_mean
@@ -982,8 +1041,8 @@ class EdgePipeline:
                     updates["restricted_zones"] = list(zones)
                 if watch_areas is not None:
                     updates["watch_areas"] = list(watch_areas)
-                    # Sync restricted_zones for backward compatibility
-                    updates["restricted_zones"] = [ZonePolygon(name=a.name, points=a.polygon) for a in watch_areas]
+                    # Sync restricted_zones for backward compatibility (excluding ignore areas)
+                    updates["restricted_zones"] = [ZonePolygon(name=a.name, points=a.polygon) for a in watch_areas if getattr(a, "response", "alert") != "ignore"]
 
                 copy_fn = getattr(cam, "model_copy", getattr(cam, "copy", None))
                 if copy_fn:
@@ -1005,7 +1064,11 @@ class EdgePipeline:
 
                 # Update motion gate
                 if getattr(new_cam, "watch_areas", None):
-                    self.motion_gate.set_camera_areas(camera_id, [a.polygon for a in new_cam.watch_areas if a.polygon])
+                    active_polys = [a.polygon for a in new_cam.watch_areas if a.polygon and getattr(a, "response", "alert") != "ignore"]
+                    if active_polys:
+                        self.motion_gate.set_camera_areas(camera_id, active_polys)
+                    else:
+                        self.motion_gate.set_camera_areas(camera_id, None)
                 elif getattr(new_cam, "restricted_zones", None):
                     self.motion_gate.set_camera_areas(camera_id, [z.points for z in new_cam.restricted_zones if z.points])
                 else:
