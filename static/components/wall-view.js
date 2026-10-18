@@ -25,6 +25,7 @@ let autoSpotlightTimer = null;
 let cameraScoresHistory = {}; // { camId: { lastScore: 0, lastActiveTime: 0 } }
 let lastFrameTimes = {}; // { camId: timestamp }
 let offlineRetryCounters = {}; // { camId: { attempts: 0, nextRetryTime: 0 } }
+let wallPollingTimer = null;
 
 let didEnterNativeFullscreen = false;
 
@@ -88,6 +89,7 @@ export async function openWallView(cameras = []) {
   updateSortedCameras();
   renderWallGrid();
   connectMultiplexedWebSocket();
+  startWallSnapshotPolling();
   startRotationTimer();
   resetIdleTimer();
 }
@@ -105,6 +107,10 @@ export function closeWallView() {
   releaseWakeLock();
 
   // Stop timers
+  if (wallPollingTimer) {
+    clearInterval(wallPollingTimer);
+    wallPollingTimer = null;
+  }
   if (idleTimer) clearTimeout(idleTimer);
   if (rotationTimer) clearInterval(rotationTimer);
   if (autoSpotlightTimer) clearTimeout(autoSpotlightTimer);
@@ -420,6 +426,48 @@ function disconnectMultiplexedWebSocket() {
     } catch (e) {}
     ws = null;
   }
+}
+
+/**
+ * Polling fallback for live JPEG snapshots when WebSocket is reconnecting or on serverless hosting.
+ */
+function startWallSnapshotPolling() {
+  if (wallPollingTimer) return;
+  wallPollingTimer = setInterval(async () => {
+    if (!isWallOpen) {
+      clearInterval(wallPollingTimer);
+      wallPollingTimer = null;
+      return;
+    }
+    // Only poll snapshots if WebSocket is not actively streaming
+    if (ws && ws.readyState === WebSocket.OPEN) return;
+
+    const startIndex = currentPage * TILES_PER_PAGE;
+    const pageCameras = sortedCameras.slice(startIndex, startIndex + TILES_PER_PAGE);
+    for (const cam of pageCameras) {
+      const cid = cam.id || cam.camera_id;
+      const imgEl = document.getElementById(`img-${cid}`);
+      if (imgEl && spotlightCameraId !== cid) {
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const baseUrl = isLocal ? '' : (window.__vyzn_edge_url || '');
+        const snapUrl = `${baseUrl}/api/cameras/${encodeURIComponent(cid)}/snapshot.jpg?t=${Date.now()}`;
+
+        const tempImg = new Image();
+        tempImg.onload = () => {
+          if (imgEl && isWallOpen) {
+            imgEl.src = tempImg.src;
+            const dotEl = document.getElementById(`dot-${cid}`);
+            if (dotEl) dotEl.className = 'tile-dot';
+            const staleEl = document.getElementById(`stale-${cid}`);
+            if (staleEl) staleEl.style.display = 'none';
+            const offlineEl = document.getElementById(`offline-${cid}`);
+            if (offlineEl) offlineEl.style.display = 'none';
+          }
+        };
+        tempImg.src = snapUrl;
+      }
+    }
+  }, 2000);
 }
 
 /**

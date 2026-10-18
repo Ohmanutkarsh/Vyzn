@@ -6,8 +6,31 @@ let currentChoice = 'ip';
 let testedStreamUrl = '';
 let testedWidth = 1920;
 let testedHeight = 1080;
-let testedFps = 15.0;
+let testedFps = 20.0;
 let createdCameraId = '';
+
+function normalizeUrl(url) {
+  if (!url) return '0';
+  url = String(url).trim();
+  if (url === '0' || url.toLowerCase() === 'webcam') return '0';
+  if (!/^https?:\/\//i.test(url) && !/^rtsp:\/\//i.test(url) && !url.startsWith('sim://') && !url.startsWith('test://')) {
+    if (url.includes(':8080') || url.includes(':4747') || url.includes(':8081') || url.startsWith('192.168.') || url.startsWith('10.') || url.startsWith('172.')) {
+      if (url.includes(':554')) {
+        url = 'rtsp://' + url;
+      } else {
+        url = 'http://' + url;
+      }
+    } else {
+      url = 'rtsp://' + url;
+    }
+  }
+  if (url.includes(':8080') && !url.includes('/video') && !url.includes('/shot.jpg') && !url.includes('/videofeed')) {
+    url = url.replace(/\/+$/, '') + '/video';
+  } else if (url.includes(':4747') && !url.includes('/video') && !url.includes('/mjpegfeed')) {
+    url = url.replace(/\/+$/, '') + '/video';
+  }
+  return url;
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
   await initI18n();
@@ -289,7 +312,8 @@ function attachStep2Events() {
             );
             return;
           }
-          payload = { rtsp_url: phoneUrl, source_type: 'phone' };
+          const normPhoneUrl = normalizeUrl(phoneUrl);
+          payload = { rtsp_url: normPhoneUrl, source_type: 'phone' };
           runConnectionTest(payload);
         }
       } else {
@@ -302,6 +326,24 @@ function attachStep2Events() {
   const btnStep2Continue = document.getElementById('btn-step2-continue');
   if (btnStep2Continue) {
     btnStep2Continue.addEventListener('click', () => {
+      setWizardStep('step-3', 'Step 3 of 3');
+    });
+  }
+
+  // Add Camera Anyway (Skip Test button in error container)
+  const btnAddAnyway = document.getElementById('btn-add-anyway');
+  if (btnAddAnyway) {
+    btnAddAnyway.addEventListener('click', () => {
+      let rawUrl = testedStreamUrl;
+      if (!rawUrl) {
+        if (currentChoice === 'phone') {
+          rawUrl = document.getElementById('phone-stream-url')?.value.trim() || '';
+        } else if (currentChoice === 'ip') {
+          rawUrl = document.getElementById('ip-full-url')?.value.trim() || document.getElementById('ip-address')?.value.trim() || '';
+        }
+      }
+      testedStreamUrl = normalizeUrl(rawUrl || '0');
+      testedFps = 20.0;
       setWizardStep('step-3', 'Step 3 of 3');
     });
   }
@@ -364,13 +406,14 @@ function displayTestSuccess(params) {
   const thumbImg = document.getElementById('test-preview-img');
   const previewVideo = document.getElementById('test-preview-video');
   const continueWrap = document.getElementById('test-continue-wrap');
+  const errorActions = document.getElementById('test-error-actions');
   const resultContainer = document.getElementById('test-result-container');
 
   resultBox.className = 'test-result-box success';
   msgEl.textContent = params.message || 'We can see the picture.';
   testedWidth = params.width || 1280;
   testedHeight = params.height || 720;
-  testedFps = params.fps || 15.0;
+  testedFps = params.fps || 20.0;
   factsEl.textContent = `${testedWidth}×${testedHeight} · ${testedFps} fps`;
 
   if (params.stream) {
@@ -401,13 +444,14 @@ function displayTestSuccess(params) {
   }
 
   if (params.rtsp_url !== undefined) {
-    testedStreamUrl = params.rtsp_url;
+    testedStreamUrl = normalizeUrl(params.rtsp_url);
   }
+  if (errorActions) errorActions.style.display = 'none';
   continueWrap.style.display = 'block';
   if (resultContainer) resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function displayTestError(msg, detail) {
+function displayTestError(msg, detail, targetUrl) {
   const resultBox = document.getElementById('test-result-box');
   const msgEl = document.getElementById('test-result-message');
   const factsEl = document.getElementById('test-result-facts');
@@ -415,6 +459,7 @@ function displayTestError(msg, detail) {
   const previewVideo = document.getElementById('test-preview-video');
   const thumbImg = document.getElementById('test-preview-img');
   const continueWrap = document.getElementById('test-continue-wrap');
+  const errorActions = document.getElementById('test-error-actions');
   const resultContainer = document.getElementById('test-result-container');
 
   resultBox.className = 'test-result-box error';
@@ -430,6 +475,12 @@ function displayTestError(msg, detail) {
   if (thumbImg) thumbImg.style.display = 'none';
   thumbWrap.style.display = 'none';
   continueWrap.style.display = 'none';
+  if (errorActions) errorActions.style.display = 'block';
+
+  if (targetUrl) {
+    testedStreamUrl = normalizeUrl(targetUrl);
+    testedFps = 20.0;
+  }
   if (resultContainer) resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -566,19 +617,11 @@ async function runConnectionTest(payload) {
         displayTestSuccess({
           width: edgeData.width || 1920,
           height: edgeData.height || 1080,
-          fps: edgeData.fps || 15.0,
+          fps: edgeData.fps || 20.0,
           preview_base64: edgeData.preview_base64,
           message: 'We can see the picture.',
           rtsp_url: rawUrl
         });
-        btnTest.disabled = false;
-        btnTest.textContent = 'Test connection';
-        return;
-      } else if (!edgeData.ok || edgeData.status === 'error') {
-        displayTestError(
-          edgeData.message || 'Connection test failed.',
-          `Camera at ${rawUrl} could not be reached. Check that device is powered on, IP is correct, and on premises Wi-Fi.`
-        );
         btnTest.disabled = false;
         btnTest.textContent = 'Test connection';
         return;
@@ -630,7 +673,7 @@ async function runConnectionTest(payload) {
       displayTestSuccess({
         width: w,
         height: h,
-        fps: 15.0,
+        fps: 20.0,
         preview_base64: b64,
         message: 'We can see the picture.',
         rtsp_url: rawUrl
@@ -639,48 +682,44 @@ async function runConnectionTest(payload) {
       btnTest.textContent = 'Test connection';
       return;
     } catch (err) {
-      displayTestError(
-        `Could not reach phone camera at ${rawUrl}`,
-        'Make sure: 1. Phone is on same Wi-Fi network. 2. You tapped "Start server" in IP Webcam app. 3. Address exactly matches what is shown on phone screen.'
-      );
-      btnTest.disabled = false;
-      btnTest.textContent = 'Test connection';
-      return;
+      // Continue to Strategy 3
     }
   }
 
-  // Strategy 3: Cloud backend proxy check
+  let serverErrMsg = '';
   try {
     const res = await fetch('/api/cameras/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const data = await res.json();
-    if (data.ok && data.status === 'online') {
+    const data = await res.json().catch(() => ({}));
+    if (data.ok && (data.status === 'online' || data.status === 'success') && data.preview_base64 && data.preview_base64.length > 500) {
       displayTestSuccess({
         width: data.width || 1920,
         height: data.height || 1080,
-        fps: data.fps || 15.0,
+        fps: data.fps || 20.0,
         preview_base64: data.preview_base64,
         message: data.message || 'We can see the picture.',
         rtsp_url: rawUrl
       });
-    } else {
-      displayTestError(
-        data.message || 'Connection test failed.',
-        'Check camera IP, port, credentials, and ensure the local VYZN Edge server (python run_edge.py) is running on your premises computer.'
-      );
+      btnTest.disabled = false;
+      btnTest.textContent = 'Test connection';
+      return;
+    } else if (data.message || data.detail) {
+      serverErrMsg = data.message || data.detail;
     }
   } catch (err) {
-    displayTestError(
-      'Connection test failed.',
-      'Check camera address and network. If using a local CCTV camera (192.168.x.x), start the VYZN Edge server on your PC.'
-    );
-  } finally {
-    btnTest.disabled = false;
-    btnTest.textContent = 'Test connection';
+    // Strategy 3 failed
   }
+
+  displayTestError(
+    serverErrMsg || `Couldn't reach camera at ${rawUrl}`,
+    'Check that camera or phone is turned on and on the same Wi-Fi network. For IP Webcam on Android/iOS, make sure "Start server" is tapped at the bottom of the app and that the IP address matches your phone display. You can also save the camera and start the stream anytime.',
+    rawUrl
+  );
+  btnTest.disabled = false;
+  btnTest.textContent = 'Test connection';
 }
 
 function attachStep3Events() {
@@ -714,11 +753,19 @@ function attachStep3Events() {
       btnSave.disabled = true;
       btnSave.textContent = 'Saving…';
 
+      // Cleanly release browser webcam tracks so hardware webcam 0 is unlocked
+      if (activeWebcamStream) {
+        try {
+          activeWebcamStream.getTracks().forEach(t => t.stop());
+        } catch (e) {}
+        activeWebcamStream = null;
+      }
+
       try {
         const payloadData = {
           name: camName,
           rtsp_url: testedStreamUrl || '0',
-          target_fps: testedFps
+          target_fps: testedFps || 20.0
         };
 
         // 1. Save to cloud server
@@ -739,7 +786,7 @@ function attachStep3Events() {
         const data = await res.json();
         createdCameraId = data.id || data.camera_id;
 
-        // 2. Also register to local edge server if running
+        // 2. Also register to local edge server if running with identical camera ID
         try {
           await fetch('http://127.0.0.1:8000/api/cameras', {
             method: 'POST',
@@ -747,7 +794,7 @@ function attachStep3Events() {
               'Content-Type': 'application/json',
               'X-Security-Pin': pin
             },
-            body: JSON.stringify(payloadData)
+            body: JSON.stringify({ ...payloadData, id: createdCameraId, camera_id: createdCameraId })
           });
         } catch (e) {
           // Local edge not running or already synced

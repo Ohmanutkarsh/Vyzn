@@ -923,16 +923,6 @@ function renderIncidentFeed() {
       await toggleStarEvent(ev.event_group_id);
     });
 
-    // Forensic button
-    const forensicBtn = card.querySelector(".btn-card-forensic");
-    if (forensicBtn) {
-      forensicBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        window.location.href = `/api/v1/events/${ev.event_group_id}/forensic-pack`;
-        showToast(`📦 Downloading Section 65B Forensic Evidence Pack for ${ev.event_group_id}...`);
-      });
-    }
-
     // False Alarm button
     const falseBtn = card.querySelector(".btn-card-false");
     falseBtn.addEventListener("click", async (e) => {
@@ -1588,14 +1578,7 @@ dom.btnReplayFalseAlarm.addEventListener("click", async () => {
   }
 });
 
-if (dom.btnReplayForensic) {
-  dom.btnReplayForensic.addEventListener("click", () => {
-    if (state.activeReplayEvent) {
-      window.location.href = `/api/v1/events/${state.activeReplayEvent.event_group_id}/forensic-pack`;
-      showToast(`📦 Exporting Courtroom Forensic Evidence Pack for ${state.activeReplayEvent.event_group_id}...`);
-    }
-  });
-}
+
 
 // ===========================================================================
 // 10. Left Sidebar Quick Links & Stages
@@ -1928,9 +1911,6 @@ async function executeForensicSearch() {
             <span class="clip-chip">🎯 ${Math.round((ev.confidence || 0.85) * 100)}% conf</span>
           </div>
           <div style="display: flex; gap: 6px; margin-top: 8px;">
-            <button type="button" class="btn-card-action btn-forensic-pack" style="flex: 1; padding: 4px; font-size: 0.7rem; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4); color: #38bdf8; border-radius: 4px; cursor: pointer;">
-              📦 Evidence Pack
-            </button>
             <button type="button" class="btn-card-action btn-dispatch-tele" style="flex: 1; padding: 4px; font-size: 0.7rem; background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); color: #7dd3fc; border-radius: 4px; cursor: pointer;">
               ✈️ Telegram
             </button>
@@ -1942,15 +1922,6 @@ async function executeForensicSearch() {
         if (e.target.closest(".btn-card-action")) return;
         openReplayModal(ev);
       });
-
-      const packBtn = card.querySelector(".btn-forensic-pack");
-      if (packBtn) {
-        packBtn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          window.location.href = `/api/v1/events/${ev.event_group_id}/forensic-pack`;
-          showToast(`📦 Exporting BSA 2023 Forensic Evidence Pack for [${ev.event_group_id}]...`);
-        });
-      }
 
       const teleBtn = card.querySelector(".btn-dispatch-tele");
       if (teleBtn) {

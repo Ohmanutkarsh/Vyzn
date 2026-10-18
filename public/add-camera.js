@@ -686,15 +686,15 @@ async function runConnectionTest(payload) {
     }
   }
 
-  // Strategy 3: Cloud backend proxy check
+  let serverErrMsg = '';
   try {
     const res = await fetch('/api/cameras/test', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const data = await res.json();
-    if (data.ok && data.status === 'online') {
+    const data = await res.json().catch(() => ({}));
+    if (data.ok && (data.status === 'online' || data.status === 'success') && data.preview_base64 && data.preview_base64.length > 500) {
       displayTestSuccess({
         width: data.width || 1920,
         height: data.height || 1080,
@@ -706,14 +706,16 @@ async function runConnectionTest(payload) {
       btnTest.disabled = false;
       btnTest.textContent = 'Test connection';
       return;
+    } else if (data.message || data.detail) {
+      serverErrMsg = data.message || data.detail;
     }
   } catch (err) {
     // Strategy 3 failed
   }
 
   displayTestError(
-    `Couldn't reach camera at ${rawUrl}`,
-    'Check that camera or phone is turned on and on the same Wi-Fi network. For IP Webcam, make sure "Start server" is tapped. You can still click "Add Camera Anyway" below to save this camera.',
+    serverErrMsg || `Couldn't reach camera at ${rawUrl}`,
+    'Check that camera or phone is turned on and on the same Wi-Fi network. For IP Webcam on Android/iOS, make sure "Start server" is tapped at the bottom of the app and that the IP address matches your phone display. You can also save the camera and start the stream anytime.',
     rawUrl
   );
   btnTest.disabled = false;

@@ -590,12 +590,8 @@ def purge_all_clips_endpoint(
     Permanently purges all historical and test clips from disk and database.
     In simple terms: wipes past recordings when user wants a fresh clean slate.
     """
-    client_host = request.client.host if request.client else ""
-    is_local = client_host in ("127.0.0.1", "localhost", "::1", "testclient")
-    pin = request.headers.get("X-Security-Pin") or request.query_params.get("security_pin") or "202600"
-
-    if not is_local:
-        verify_security_action(request, user, provided_pin=pin)
+    pin = request.headers.get("X-Security-Pin") or request.query_params.get("security_pin") or ""
+    verify_security_action(request, user, provided_pin=pin)
 
     count = db.purge_all_clips()
     return {

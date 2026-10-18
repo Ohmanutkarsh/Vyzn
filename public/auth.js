@@ -575,44 +575,201 @@ function attachSignupFormHandlers(container) {
       }
 
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Creating account…';
+      submitBtn.textContent = 'Sending Gmail code…';
 
       try {
-        const res = await fetch('/api/auth/signup', {
+        const otpRes = await fetch('/api/auth/email/start', {
           method: 'POST',
-          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            full_name,
-            business_name,
-            business_type,
-            phone_e164,
-            email,
-            password
-          })
+          body: JSON.stringify({ email })
         });
-        const data = await res.json().catch(() => ({}));
-
-        if (res.ok && data.ok) {
-          sessionStorage.setItem('vyzn_login_email', email);
-          if (data.user) {
-            localStorage.setItem('vyzn_user', JSON.stringify(data.user));
-          }
-          window.location.replace(data.redirect || '/overview');
-        } else {
-          errorBox.textContent = data.detail || (res.status >= 500 ? 'Server error processing registration. Please try again.' : 'Could not create account. Please check your inputs.');
+        const otpData = await otpRes.json().catch(() => ({}));
+        if (!otpRes.ok || !otpData.ok) {
+          errorBox.textContent = otpData.detail || 'Failed to dispatch Gmail verification code. Please check your email address.';
           errorBox.style.display = 'flex';
           submitBtn.disabled = false;
           submitBtn.textContent = 'Create Account & Continue';
+          return;
         }
+
+        // Open 6-digit Gmail OTP verification modal
+        openSignupOtpModal({
+          email,
+          onVerify: async (otp_code) => {
+            const res = await fetch('/api/auth/signup', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                full_name,
+                business_name,
+                business_type,
+                phone_e164,
+                email,
+                password,
+                otp_code
+              })
+            });
+            const data = await res.json().catch(() => ({}));
+
+            if (res.ok && data.ok) {
+              sessionStorage.setItem('vyzn_login_email', email);
+              if (data.user) {
+                localStorage.setItem('vyzn_user', JSON.stringify(data.user));
+              }
+              window.location.replace(data.redirect || '/overview');
+              return { success: true };
+            } else {
+              return { success: false, error: data.detail || 'Incorrect verification code. Please check your Gmail.' };
+            }
+          },
+          onResend: async () => {
+            const r = await fetch('/api/auth/email/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email })
+            });
+            return r.ok;
+          }
+        });
       } catch (err) {
         errorBox.textContent = 'Network error connecting to server. Please check your connection.';
         errorBox.style.display = 'flex';
+      } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = 'Create Account & Continue';
       }
     });
   }
+}
+
+function openSignupOtpModal({ email, onVerify, onResend }) {
+  const existing = document.getElementById('signup-otp-modal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'signup-otp-modal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(4px);';
+
+  modal.innerHTML = `
+    <div style="background:var(--bg-surface, #0f172a);border:1px solid var(--border-default, #1e293b);border-radius:12px;padding:24px;width:100%;max-width:400px;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span style="font-size:24px;">📧</span>
+        <h3 style="margin:0;font-size:18px;font-weight:700;color:var(--fg-default, #f8fafc);">Verify your Gmail</h3>
+      </div>
+      <p style="margin:0 0 16px 0;font-size:13px;color:var(--fg-muted, #94a3b8);line-height:1.4;">
+        We sent a 6-digit verification code to <strong style="color:var(--fg-default, #f8fafc);">${escapeHtml(email)}</strong>. Enter it below to activate your account.
+      </p>
+
+      <div id="signup-otp-err" style="display:none;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:12px;"></div>
+
+      <div class="auth-form-group" style="margin-bottom:16px;">
+        <label class="auth-label">6-Digit Verification Code</label>
+        <input id="signup-otp-input" class="auth-input mono-input" type="text" inputmode="numeric" maxlength="6"
+               placeholder="123456" style="text-align:center;font-size:22px;letter-spacing:6px;font-weight:700;" autofocus required />
+      </div>
+
+      <button type="button" id="btn-signup-otp-verify" class="btn btn-primary btn-block" style="margin-bottom:12px;height:42px;font-size:14px;font-weight:600;">
+        Verify & Create Account
+      </button>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--fg-muted, #94a3b8);">
+        <button type="button" id="btn-signup-otp-resend" style="background:none;border:none;color:#38bdf8;cursor:pointer;padding:0;font-size:12px;">
+          Resend code
+        </button>
+        <button type="button" id="btn-signup-otp-cancel" style="background:none;border:none;color:var(--fg-muted, #94a3b8);cursor:pointer;padding:0;font-size:12px;">
+          Cancel
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const input = modal.querySelector('#signup-otp-input');
+  const errBox = modal.querySelector('#signup-otp-err');
+  const verifyBtn = modal.querySelector('#btn-signup-otp-verify');
+  const resendBtn = modal.querySelector('#btn-signup-otp-resend');
+  const cancelBtn = modal.querySelector('#btn-signup-otp-cancel');
+
+  cancelBtn.addEventListener('click', () => modal.remove());
+
+  let countdown = 30;
+  let timer = setInterval(() => {
+    countdown--;
+    if (countdown > 0) {
+      resendBtn.disabled = true;
+      resendBtn.textContent = `Resend in ${countdown}s`;
+    } else {
+      clearInterval(timer);
+      resendBtn.disabled = false;
+      resendBtn.textContent = 'Resend code';
+    }
+  }, 1000);
+
+  resendBtn.addEventListener('click', async () => {
+    resendBtn.disabled = true;
+    resendBtn.textContent = 'Sending…';
+    const ok = await onResend();
+    if (ok) {
+      errBox.style.display = 'none';
+      countdown = 30;
+      timer = setInterval(() => {
+        countdown--;
+        if (countdown > 0) {
+          resendBtn.disabled = true;
+          resendBtn.textContent = `Resend in ${countdown}s`;
+        } else {
+          clearInterval(timer);
+          resendBtn.disabled = false;
+          resendBtn.textContent = 'Resend code';
+        }
+      }, 1000);
+    } else {
+      errBox.textContent = 'Failed to resend code. Please try again.';
+      errBox.style.display = 'block';
+      resendBtn.disabled = false;
+      resendBtn.textContent = 'Resend code';
+    }
+  });
+
+  const doVerify = async () => {
+    errBox.style.display = 'none';
+    const code = input.value.trim();
+    if (code.length < 6) {
+      errBox.textContent = 'Please enter the complete 6-digit code.';
+      errBox.style.display = 'block';
+      input.focus();
+      return;
+    }
+    verifyBtn.disabled = true;
+    verifyBtn.textContent = 'Verifying…';
+    try {
+      const result = await onVerify(code);
+      if (!result.success) {
+        errBox.textContent = result.error || 'Incorrect code. Please check your Gmail.';
+        errBox.style.display = 'block';
+        verifyBtn.disabled = false;
+        verifyBtn.textContent = 'Verify & Create Account';
+        input.focus();
+      }
+    } catch (e) {
+      errBox.textContent = 'Network error verifying code.';
+      errBox.style.display = 'block';
+      verifyBtn.disabled = false;
+      verifyBtn.textContent = 'Verify & Create Account';
+    }
+  };
+
+  verifyBtn.addEventListener('click', doVerify);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      doVerify();
+    }
+  });
+
+  input.focus();
 }
 
 function renderOtpView(container, savedEmail) {

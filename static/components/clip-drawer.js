@@ -135,7 +135,6 @@ export function initClipDrawer({ onClipUpdated } = {}) {
           </div>
           <div class="drawer-secondary-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
             <button type="button" class="btn btn-secondary" id="drawer-act-telegram">${t('clips.send_to_telegram', 'Send to my Telegram')}</button>
-            <button type="button" class="btn btn-secondary" id="drawer-act-evidence">${t('clips.evidence_pack', 'Evidence pack')}</button>
             <button type="button" class="btn btn-secondary" id="drawer-act-delete" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">🗑️ ${t('clips.delete_clip', 'Delete clip')}</button>
           </div>
         </div>
@@ -182,7 +181,6 @@ function bindDrawerEvents() {
   const actReviewed = document.getElementById('drawer-act-reviewed');
   const actNotIssue = document.getElementById('drawer-act-not-issue');
   const actTelegram = document.getElementById('drawer-act-telegram');
-  const actEvidence = document.getElementById('drawer-act-evidence');
 
   const popover = document.getElementById('feedback-popover');
   const popoverSkip = document.getElementById('btn-popover-skip');
@@ -341,12 +339,6 @@ function bindDrawerEvents() {
     }
   });
 
-  // Action: Download Evidence Pack
-  actEvidence.addEventListener('click', () => {
-    if (!activeClip) return;
-    window.location.href = `/api/clips/${encodeURIComponent(activeClip.id)}/evidence-pack`;
-  });
-
   // Action: Delete Clip with Security PIN Gate
   const actDelete = document.getElementById('drawer-act-delete');
   if (actDelete) {
@@ -364,8 +356,22 @@ function bindDrawerEvents() {
       actDelete.disabled = true;
       actDelete.textContent = 'Deleting…';
       try {
+        // Also trigger delete on local edge daemon if available
+        const edgeUrl = window.__vyzn_edge_url || 'http://127.0.0.1:8000';
+        fetch(`${edgeUrl}/api/clips/${encodeURIComponent(activeClip.id)}`, {
+          method: 'DELETE',
+          headers: { 'X-Security-Pin': pin }
+        }).catch(() => {});
+        if (activeClip.event_group_id && activeClip.event_group_id !== activeClip.id) {
+          fetch(`${edgeUrl}/api/clips/${encodeURIComponent(activeClip.event_group_id)}`, {
+            method: 'DELETE',
+            headers: { 'X-Security-Pin': pin }
+          }).catch(() => {});
+        }
+
         const resp = await fetch(`/api/clips/${encodeURIComponent(activeClip.id)}`, {
           method: 'DELETE',
+          credentials: 'include',
           headers: {
             'X-Security-Pin': pin
           }

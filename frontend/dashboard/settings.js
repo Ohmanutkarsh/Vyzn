@@ -1,4 +1,4 @@
-import { initShell } from './components/shell.js';
+import { initShell, promptSecurityPin } from './components/shell.js';
 import { escapeHtml } from './utils.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -843,64 +843,77 @@ async function initStorageControls() {
       btnBrowse.disabled = true;
       btnBrowse.textContent = '📁 Opening Explorer…';
 
-      let backendSuccess = false;
-      const edge = await checkEdgeServer();
-      const targetUrl = (edge && edge !== '') ? `${edge}/api/settings/browse-folder` : `/api/settings/browse-folder`;
-
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        // Strategy 1: Local Edge Node Native Windows Explorer Dialog
+        const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.port === '8000';
+        if (isLocalHost) {
+          try {
+            const res = await fetch('/api/settings/browse-folder', { method: 'POST' });
+            const data = await res.json();
+            if (data.ok && data.selected_path) {
+              if (inputFolder) inputFolder.value = data.selected_path;
+              showToast(`Selected folder: ${data.selected_path}`);
+              if (btnSave) btnSave.click();
+              return;
+            } else if (data.cancelled) {
+              return;
+            }
+          } catch (e) {
+            console.warn('Local browse-folder error:', e);
+          }
+        }
 
-        const res = await fetch(targetUrl, {
-          method: 'POST',
-          mode: 'cors',
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
+        // Strategy 2: File System Access API (Native Windows Explorer Directory Dialog)
+        if (typeof window.showDirectoryPicker === 'function') {
+          try {
+            const dirHandle = await window.showDirectoryPicker({ id: 'vyzn_storage', mode: 'readwrite' });
+            if (dirHandle && dirHandle.name) {
+              const currentDir = inputFolder ? inputFolder.value.trim() : '';
+              let selectedPath = `C:\\${dirHandle.name}`;
+              if (currentDir && (currentDir.includes('\\') || currentDir.includes('/'))) {
+                const sep = currentDir.includes('\\') ? '\\' : '/';
+                const parts = currentDir.split(sep);
+                parts[parts.length - 1] = dirHandle.name;
+                selectedPath = parts.join(sep);
+              }
+              if (inputFolder) inputFolder.value = selectedPath;
+              showToast(`Selected storage folder: ${selectedPath}`);
+              if (btnSave) btnSave.click();
+              return;
+            }
+          } catch (err) {
+            if (err.name === 'AbortError') {
+              // User closed or cancelled the picker
+              return;
+            }
+            console.warn('showDirectoryPicker notice:', err);
+          }
+        }
 
-        const data = await res.json();
-        if (data.ok && data.selected_path) {
-          if (inputFolder) inputFolder.value = data.selected_path;
-          showToast(`Selected folder: ${data.selected_path}`);
+        // Strategy 3: Native HTML input webkitdirectory picker
+        if (inputDirPicker) {
+          inputDirPicker.click();
+          return;
+        }
+
+        // Strategy 4: Fallback prompt dialog
+        const cur = inputFolder ? inputFolder.value.trim() : 'C:\\Vyzn testing data';
+        const entered = window.prompt(
+          'Select Storage Folder:\nEnter directory path for clips and continuous footage:',
+          cur || 'C:\\Vyzn testing data'
+        );
+        if (entered && entered.trim()) {
+          const cleaned = entered.trim();
+          if (inputFolder) inputFolder.value = cleaned;
+          showToast(`Storage path set to: ${cleaned}`);
           if (btnSave) btnSave.click();
-          backendSuccess = true;
-        } else if (data.cancelled) {
-          backendSuccess = true;
         }
       } catch (err) {
-        console.warn('Backend browse-folder notice:', err);
+        console.error('Folder picker error:', err);
+      } finally {
+        btnBrowse.disabled = false;
+        btnBrowse.textContent = '📁 Choose Folder';
       }
-
-      if (!backendSuccess) {
-        // Fallback for remote / mobile browsers where native desktop dialog cannot be popped over network:
-        if (inputDirPicker && typeof inputDirPicker.showPicker === 'function') {
-          try {
-            inputDirPicker.showPicker();
-            backendSuccess = true;
-          } catch (_) {
-            if (inputDirPicker) inputDirPicker.click();
-            backendSuccess = true;
-          }
-        } else if (inputDirPicker) {
-          inputDirPicker.click();
-          backendSuccess = true;
-        } else {
-          const cur = inputFolder ? inputFolder.value.trim() : 'C:\\Vyzn testing data';
-          const entered = window.prompt(
-            'Select Storage Folder:\nEnter directory path for clips and continuous footage:',
-            cur || 'C:\\Vyzn testing data'
-          );
-          if (entered && entered.trim()) {
-            const cleaned = entered.trim();
-            if (inputFolder) inputFolder.value = cleaned;
-            showToast(`Storage path set to: ${cleaned}`);
-            if (btnSave) btnSave.click();
-          }
-        }
-      }
-
-      btnBrowse.disabled = false;
-      btnBrowse.textContent = '📁 Choose Folder';
     };
   }
 
@@ -911,9 +924,10 @@ async function initStorageControls() {
         const relPath = file.webkitRelativePath || '';
         const folderName = relPath.split('/')[0] || relPath.split('\\')[0] || '';
         if (folderName) {
-          const currentDir = inputFolder.value.trim() || 'C:\\';
-          const baseParent = currentDir.includes('\\') ? currentDir.substring(0, currentDir.lastIndexOf('\\')) : 'C:';
-          inputFolder.value = `${baseParent}\\${folderName}`;
+          const currentDir = inputFolder.value.trim() || 'C:\\Vyzn testing data';
+          const sep = currentDir.includes('\\') ? '\\' : '/';
+          const baseParent = currentDir.includes(sep) ? currentDir.substring(0, currentDir.lastIndexOf(sep)) : 'C:';
+          inputFolder.value = `${baseParent}${sep}${folderName}`;
           showToast(`Selected folder: ${folderName}`);
           if (btnSave) btnSave.click();
         }
@@ -921,13 +935,18 @@ async function initStorageControls() {
     };
   }
 
-  // Purges all past clips cleanly from both edge disk/database and cloud
+  // Purges all past clips cleanly with Security PIN verification
   const btnPurgeAll = document.getElementById('btn-purge-all-clips');
   if (btnPurgeAll) {
     btnPurgeAll.onclick = async () => {
-      if (!confirm('Are you sure you want to delete ALL previous clips and footages? This cannot be undone.')) {
-        return;
-      }
+      const pin = await promptSecurityPin({
+        title: 'Delete All Previous Clips',
+        description: 'Permanently purge all historical clips, recordings, and media from disk and database. This cannot be undone.',
+        confirmText: 'Delete All Clips',
+        isDanger: true
+      });
+      if (!pin) return;
+
       btnPurgeAll.disabled = true;
       btnPurgeAll.textContent = 'Purging clips…';
       try {
@@ -936,7 +955,7 @@ async function initStorageControls() {
           try {
             await fetch(`${edge}/api/clips/purge-all`, {
               method: 'POST',
-              headers: { 'X-Security-Pin': '202600' },
+              headers: { 'X-Security-Pin': pin },
               mode: 'cors'
             });
           } catch (e) {
@@ -945,15 +964,15 @@ async function initStorageControls() {
         }
         const res = await fetch('/api/clips/purge-all', {
           method: 'POST',
-          headers: { 'X-Security-Pin': '202600' },
+          headers: { 'X-Security-Pin': pin },
           credentials: 'include'
         });
-        const data = await res.json();
-        if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok) {
           showToast(data.message || 'All previous clips purged successfully.');
           await refreshStorageInfo();
         } else {
-          showToast(data.detail || 'Failed to purge clips.', true);
+          showToast(data.detail || 'Failed to purge clips. Check Security PIN.', true);
         }
       } catch (err) {
         showToast('Error while purging clips.', true);

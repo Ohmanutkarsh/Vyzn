@@ -2024,6 +2024,12 @@ class EventDatabase:
             cursor = conn.cursor()
             if isinstance(clip_id_or_number, int) or (isinstance(clip_id_or_number, str) and clip_id_or_number.isdigit()):
                 cursor.execute("SELECT * FROM events WHERE clip_number = ? OR event_group_id = ?", (int(clip_id_or_number), str(clip_id_or_number)))
+            elif isinstance(clip_id_or_number, str) and clip_id_or_number.lower().startswith("clip-"):
+                num_str = clip_id_or_number.lower().replace("clip-", "").lstrip("0") or "0"
+                if num_str.isdigit():
+                    cursor.execute("SELECT * FROM events WHERE clip_number = ? OR event_group_id = ?", (int(num_str), str(clip_id_or_number)))
+                else:
+                    cursor.execute("SELECT * FROM events WHERE event_group_id = ?", (str(clip_id_or_number),))
             else:
                 cursor.execute("SELECT * FROM events WHERE event_group_id = ?", (str(clip_id_or_number),))
             r = cursor.fetchone()

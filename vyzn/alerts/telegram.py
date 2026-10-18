@@ -463,9 +463,9 @@ class TelegramAlertProvider(AlertProvider):
                     owner_email = cam.get("owner_email")
             if owner_email and hasattr(self.db, "get_user_by_email"):
                 user = self.db.get_user_by_email(owner_email)
-                if user and user.get("telegram_status") in ("linked", "connected"):
-                    if not user.get("telegram_alerts_enabled", 1):
-                        logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted for user {owner_email}")
+                if user:
+                    if user.get("telegram_status") not in ("linked", "connected") or not user.get("telegram_alerts_enabled", 1):
+                        logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for {owner_email}")
                         return False
                     target_chat_id = user.get("telegram_chat_id")
 
@@ -477,6 +477,7 @@ class TelegramAlertProvider(AlertProvider):
             u = self.db.get_user_by_telegram_chat_id(str(target_chat_id))
             if u and (u.get("telegram_status") not in ("linked", "connected") or not u.get("telegram_alerts_enabled", 1)):
                 logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for chat {target_chat_id}")
+                return False
         if not target_chat_id:
             env_chat = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
             if env_chat:
