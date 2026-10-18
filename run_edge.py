@@ -91,7 +91,7 @@ def build_synthetic_settings(num_cameras: int, data_dir: Path, demo_mode: bool =
         pass
     # Read the Telegram token and chat ID so alerts can be sent to your phone
     settings.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or "8921915999:AAEEdYYsUz_xwAo0b342w8TEw0NsjG362js"
-    settings.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID") or None
+    settings.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID") or "6856103038"
 
     # Step A: Check if the user already configured cameras through the website
     cfg_file = Path("./config/cameras.json")
@@ -221,6 +221,13 @@ def main():
         else:
             detector = MockDetector(fixed_confidence=None)
     pipeline = EdgePipeline(settings=settings, detector=detector, use_synthetic=True)
+
+    # Sync users and Telegram configuration from Supabase into active database
+    try:
+        from vyzn.core.supabase_sync import sync_users_from_supabase_to_local_db
+        sync_users_from_supabase_to_local_db(pipeline.db)
+    except Exception as e:
+        logger.warning(f"Could not sync users from Supabase on startup: {e}")
 
     # 5.4 Launch Web Dashboard (FastAPI + Uvicorn)
     server = None

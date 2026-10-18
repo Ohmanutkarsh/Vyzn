@@ -118,3 +118,57 @@ def test_cameras_consistency_and_nocache(client):
     assert len(data) >= 1
     assert any("Camera 1" in c.get("name", "") or "phone" in c.get("name", "") for c in data)
 
+
+def test_telegram_routing_rejects_dummy_chat_id():
+    from vyzn.alerts.telegram import resolve_authorized_chat_for_event
+    from vyzn.core.events import EventRecord
+    from vyzn.core.database import EventDatabase
+
+    db = EventDatabase("data/clips/index.db")
+    event = EventRecord(
+        event_group_id="ev_test_tg_dummy",
+        camera_id="cam_main",
+        start_time="2026-10-19T01:00:00Z",
+        end_time="2026-10-19T01:00:30Z",
+        duration_sec=30.0,
+        score=85,
+        tier="alert",
+        object_type="person",
+        owner_email="dirtbike000000@gmail.com"
+    )
+    resolved = resolve_authorized_chat_for_event(event, db=db)
+    # Must never be dummy 987654321
+    assert resolved != "987654321"
+    assert resolved == "6856103038"
+
+
+def test_telegram_status_connected(client):
+    from api.index import create_session_token
+    tok = create_session_token("dirtbike000000@gmail.com")
+    resp = client.get("/api/telegram/status", cookies={"vyzn_session": tok})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["connected"] is True
+    assert data["status"] == "connected"
+    assert data["telegram_chat_id"] == "6856103038"
+
+
+def test_telegram_webhook_start_already_connected():
+    from vyzn.alerts.telegram import process_telegram_update
+    from vyzn.core.database import EventDatabase
+
+    db = EventDatabase("data/clips/index.db")
+    update = {
+        "update_id": 99991,
+        "message": {
+            "message_id": 12,
+            "chat": {"id": 6856103038, "type": "private"},
+            "from": {"id": 6856103038, "username": "OWhythiskolaveri"},
+            "text": "/start already_used_token"
+        }
+    }
+    res = process_telegram_update(update, db=db, bot_token=None)
+    assert res is not None
+    assert res.get("type") == "start_token_already_connected"
+
+

@@ -312,3 +312,48 @@ def test_spec_f_single_low_tick_inside_burst_no_split():
     assert len(produced_clips) == 1
     assert produced_clips[0].highest_score == 65
     assert sm.state == ClipState.IDLE
+
+
+def test_preroll_strictly_10s_when_target_delayed():
+    """Verify that if recording triggers early (e.g. at T=0), but confirmed person appears at T=45,
+    the resulting clip starts strictly 10 seconds before the person (T=35.0), not 40+ seconds earlier."""
+    sm = ClipStateMachine(camera_id="cam_test_preroll")
+
+    # Initial low/motion activity starting clip at T=0
+    sm.process_tick(create_tick(0.0, 3.0, score=32, primary_obj="movement"))
+    assert sm.state == ClipState.ACTIVE
+    assert sm.first_target_pts is None
+
+    # T=3 to T=42: minor activity (no confirmed target)
+    pts = 3.0
+    while pts < 42.0:
+        sm.process_tick(create_tick(pts, pts + 3.0, score=31, primary_obj="movement"))
+        pts += 3.0
+
+    # T=45 to T=51: Confirmed person appears with high score
+    sm.process_tick(create_tick(45.0, 48.0, score=80, primary_obj="person"))
+    sm.process_tick(create_tick(48.0, 51.0, score=85, primary_obj="person"))
+    pts = 51.0
+
+    assert sm.first_target_pts is not None
+    assert sm.first_target_pts >= 45.0
+
+    # Quiet ticks to close clip (>90s)
+    closed = None
+    while pts <= 160.0:
+        res = sm.process_tick(create_tick(pts, pts + 3.0, score=10))
+        if res:
+            closed = res
+            break
+        pts += 3.0
+
+    assert closed is not None
+    # Incident anchor was at ~46.0s (first_target_pts). Pre-roll must be strictly 10s before anchor.
+    # Start PTS must be >= 34.0 and <= 36.0 (roughly 10s before T=45/46, NOT at T=-10 or T=0!)
+    assert closed.start_pts >= 34.0, f"Clip started too early at {closed.start_pts}s (expected ~35.0s, strictly 10s pre-roll)"
+    assert closed.start_pts <= 36.0, f"Clip started too late at {closed.start_pts}s (expected ~35.0s, strictly 10s pre-roll)"
+    # Verify trimmed frames all start around start_pts
+    assert closed.frames, "Clip has frames"
+    first_frame_pts = closed.frame_metas[0].pts
+    assert first_frame_pts >= 34.0, f"First frame was at {first_frame_pts}s, expected >= 34.0s"
+

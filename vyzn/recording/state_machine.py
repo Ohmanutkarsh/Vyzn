@@ -186,6 +186,8 @@ class ClipStateMachine:
         self.last_frame_pts: float = 0.0
         self.last_active_pts: float = 0.0
         self.event_start_pts: float = 0.0
+        self.first_target_pts: Optional[float] = None
+        self.peak_threat_pts: Optional[float] = None
 
     @property
     def is_recording(self) -> bool:
@@ -260,6 +262,11 @@ class ClipStateMachine:
                     self.peak_breakdown = dict(tick.score_breakdown)
                     self.peak_frame = tick.peak_frame
                     self.peak_frame_pts = tick.peak_pts or tick.tick_start_pts
+                    if tick.score >= 35 or (tick.primary_object not in ("unclassified", "movement", "") and tick.max_confidence >= 0.4):
+                        self.first_target_pts = tick.peak_pts or tick.tick_start_pts
+                    else:
+                        self.first_target_pts = None
+                    self.peak_threat_pts = tick.peak_pts or tick.tick_start_pts
 
                     # Fire 70+ alert at event start!
                     if tick.score >= 70:
@@ -272,9 +279,14 @@ class ClipStateMachine:
             self.active_frames.extend(tick.frames)
             self.active_metas.extend(tick.frame_metas)
 
+            # Update first target detection timestamp if not already set
+            if (tick.score >= 35 or (tick.primary_object not in ("unclassified", "movement", "") and tick.max_confidence >= 0.4)) and self.first_target_pts is None:
+                self.first_target_pts = tick.peak_pts or tick.tick_start_pts
+
             # Update highest score and peak frame
             if tick.score > self.highest_score:
                 self.highest_score = tick.score
+                self.peak_threat_pts = tick.peak_pts or tick.tick_start_pts
                 self.peak_breakdown = dict(tick.score_breakdown)
                 if tick.peak_frame is not None:
                     self.peak_frame = tick.peak_frame
@@ -314,13 +326,15 @@ class ClipStateMachine:
         Closes clip and trims back dead footage:
         Final clip strictly contains [first_active_window_start - 10s, last_active_window_end + 10s].
         """
-        # Incident anchor: The actual moment of interest (trigger or peak activity)
-        incident_anchor = self.trigger_pts or self.peak_frame_pts or self.first_active_window_start
+        # Incident anchor: The actual moment of interest (first confirmed target or peak threat activity)
+        incident_anchor = self.first_target_pts or self.peak_threat_pts or self.peak_frame_pts or self.trigger_pts or self.first_active_window_start
         # In simple terms: anchor pre-roll strictly 10s before the actual footage so users don't wait 40 seconds for action
         if (incident_anchor - self.first_active_window_start) > self.pre_roll_seconds:
             ideal_start_pts = incident_anchor - self.pre_roll_seconds
+            effective_trigger_pts = incident_anchor
         else:
             ideal_start_pts = self.first_active_window_start - self.pre_roll_seconds
+            effective_trigger_pts = self.trigger_pts or self.first_active_window_start
 
         clip_start_pts = self._snap_cut_point(ideal_start_pts, is_start=True)
         # Ensure pre-roll is at least pre_roll_seconds before the action anchor
@@ -401,7 +415,7 @@ class ClipStateMachine:
             part_index=self.current_part_index,
             start_pts=clip_start_pts,
             end_pts=clip_end_pts,
-            trigger_pts=self.trigger_pts,
+            trigger_pts=effective_trigger_pts,
             trigger_reason=self.trigger_reason,
             close_reason=close_reason,
             frames=trimmed_frames,
@@ -433,6 +447,8 @@ class ClipStateMachine:
             self.current_event_id = None
             self.parent_event_id = None
             self.current_part_index = 0
+            self.first_target_pts = None
+            self.peak_threat_pts = None
 
         return segment
 
@@ -491,6 +507,8 @@ class ClipStateMachine:
         self.clip_start_pts = split_pts
         self.first_active_window_start = split_pts
         self.trigger_reason = f"Continued from part {self.current_part_index}"
+        self.first_target_pts = None
+        self.peak_threat_pts = None
 
         # Carry forward remaining frames for next part
         self.active_ticks = [t for t in self.active_ticks if t.tick_start_pts >= split_pts]
@@ -712,6 +730,9 @@ class ClipStateMachine:
         has_detection = len(target_dets) > 0 and in_roi
         has_track = len(tracks) > 0 and in_roi
         is_active = (has_motion or has_detection or has_track) and in_roi
+
+        if (has_detection or has_track) and self.first_target_pts is None and self.state == ClipState.ACTIVE:
+            self.first_target_pts = pts
 
         # Create structured metadata for this individual video frame
         meta = FrameMetadata(
