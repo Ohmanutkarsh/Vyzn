@@ -100,6 +100,7 @@ class DetectionCandidate:
     matched_area_id: Optional[str] = None
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     area_response: str = "none"         # 'alert' | 'review' | 'ignore' | 'none'
+    is_watch_area: bool = False
     is_in_alert_area: bool = False
     is_in_review_area: bool = False
     is_in_ignore_area: bool = False
