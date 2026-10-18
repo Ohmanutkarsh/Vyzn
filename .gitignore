@@ -19,5 +19,6 @@ scratch/
 .gemini/
 config/storage.json
 *.pt
+.cache/
 
 

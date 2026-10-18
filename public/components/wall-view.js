@@ -249,14 +249,17 @@ function renderWallGrid() {
     <main class="wall-grid-area" id="wall-grid-area" style="grid-template-columns: repeat(${cols}, 1fr); grid-template-rows: repeat(${rows}, 1fr);">
       ${pageCameras.map((cam, idx) => {
         const cid = cam.id || cam.camera_id;
+        let streamUrl = cam.stream_url || `/api/cameras/${encodeURIComponent(cid)}/stream`;
         let thumbUrl = cam.snapshot_url || cam.snapshotUrl || `/api/cameras/${encodeURIComponent(cid)}/snapshot.jpg`;
-        if (typeof window !== 'undefined' && window.__vyzn_edge_url && thumbUrl.startsWith('/api/')) {
-          thumbUrl = `${window.__vyzn_edge_url}${thumbUrl}`;
+        if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
+          if (streamUrl.startsWith('/api/')) streamUrl = `${window.__vyzn_edge_url}${streamUrl}`;
+          if (thumbUrl.startsWith('/api/')) thumbUrl = `${window.__vyzn_edge_url}${thumbUrl}`;
         }
         const keyNumber = idx + 1 <= 9 ? idx + 1 : null;
+        const liveSrc = cam.status === 'online' ? streamUrl : thumbUrl;
         return `
           <div class="wall-tile border-neutral" id="tile-${escapeHtml(cid)}" data-cam-id="${escapeHtml(cid)}" data-key-num="${keyNumber || ''}">
-            <img class="wall-tile-img" id="img-${escapeHtml(cid)}" src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(cam.name)}" />
+            <img class="wall-tile-img" id="img-${escapeHtml(cid)}" src="${escapeHtml(liveSrc)}" alt="${escapeHtml(cam.name)}" onerror="this.dataset.streamFailed='true';if(this.src!=='${escapeHtml(thumbUrl)}'){this.src='${escapeHtml(thumbUrl)}';}" />
             
             <!-- Information Overlay (Auto-hides on idle) -->
             <div class="tile-overlay">
@@ -452,6 +455,11 @@ function startWallSnapshotPolling() {
       const cid = cam.id || cam.camera_id;
       const imgEl = document.getElementById(`img-${cid}`);
       if (imgEl && spotlightCameraId !== cid) {
+        // Do NOT overwrite active live MJPEG stream on online cameras!
+        if (cam.status === 'online' && imgEl.dataset.streamFailed !== 'true') {
+          continue;
+        }
+
         const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
         const baseUrl = isLocal ? '' : (window.__vyzn_edge_url || '');
         const snapUrl = `${baseUrl}/api/cameras/${encodeURIComponent(cid)}/snapshot.jpg?t=${Date.now()}`;
@@ -610,7 +618,17 @@ function toggleSpotlight(cameraId) {
       if (prevTile) {
         prevTile.classList.remove('is-spotlight');
         const img = prevTile.querySelector('.wall-tile-img');
-        if (img) img.src = ''; // Release high-res stream
+        if (img) {
+          const cam = allCameras.find(c => (c.id || c.camera_id) === spotlightCameraId);
+          const isOnline = cam && cam.status === 'online';
+          let streamUrl = (cam && cam.stream_url) || `/api/cameras/${encodeURIComponent(spotlightCameraId)}/stream`;
+          let thumbUrl = (cam && (cam.snapshot_url || cam.snapshotUrl)) || `/api/cameras/${encodeURIComponent(spotlightCameraId)}/snapshot.jpg`;
+          if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
+            if (streamUrl.startsWith('/api/')) streamUrl = `${window.__vyzn_edge_url}${streamUrl}`;
+            if (thumbUrl.startsWith('/api/')) thumbUrl = `${window.__vyzn_edge_url}${thumbUrl}`;
+          }
+          img.src = isOnline ? streamUrl : thumbUrl;
+        }
       }
     }
     spotlightCameraId = null;
@@ -643,7 +661,11 @@ function toggleSpotlight(cameraId) {
         // Connect high-resolution MJPEG stream for spotlight tile only
         const img = t.querySelector('.wall-tile-img');
         if (img) {
-          img.src = `/api/cameras/${encodeURIComponent(cameraId)}/stream?t=${Date.now()}`;
+          let sUrl = `/api/cameras/${encodeURIComponent(cameraId)}/stream?t=${Date.now()}`;
+          if (typeof window !== 'undefined' && window.__vyzn_edge_url && sUrl.startsWith('/api/')) {
+            sUrl = `${window.__vyzn_edge_url}${sUrl}`;
+          }
+          img.src = sUrl;
         }
       } else {
         t.style.display = 'none';

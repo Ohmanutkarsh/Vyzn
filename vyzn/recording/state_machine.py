@@ -314,10 +314,24 @@ class ClipStateMachine:
         Closes clip and trims back dead footage:
         Final clip strictly contains [first_active_window_start - 10s, last_active_window_end + 10s].
         """
-        # Snap cut points outward to keyframe boundaries while enforcing >= 10s rule
-        clip_start_pts = self._snap_cut_point(self.first_active_window_start - self.pre_roll_seconds, is_start=True)
-        if (self.first_active_window_start - clip_start_pts) < self.pre_roll_seconds:
-            clip_start_pts = max(0.0, self.first_active_window_start - self.pre_roll_seconds)
+        # Incident anchor: The actual moment of interest (trigger or peak activity)
+        incident_anchor = self.trigger_pts or self.peak_frame_pts or self.first_active_window_start
+        # In simple terms: anchor pre-roll strictly 10s before the actual footage so users don't wait 40 seconds for action
+        if (incident_anchor - self.first_active_window_start) > self.pre_roll_seconds:
+            ideal_start_pts = incident_anchor - self.pre_roll_seconds
+        else:
+            ideal_start_pts = self.first_active_window_start - self.pre_roll_seconds
+
+        clip_start_pts = self._snap_cut_point(ideal_start_pts, is_start=True)
+        # Ensure pre-roll is at least pre_roll_seconds before the action anchor
+        if (incident_anchor - self.first_active_window_start) > self.pre_roll_seconds:
+            if (incident_anchor - clip_start_pts) < self.pre_roll_seconds:
+                clip_start_pts = incident_anchor - self.pre_roll_seconds
+            elif (incident_anchor - clip_start_pts) > (self.pre_roll_seconds + 2.0):
+                clip_start_pts = incident_anchor - self.pre_roll_seconds
+        else:
+            if (self.first_active_window_start - clip_start_pts) < self.pre_roll_seconds:
+                clip_start_pts = self.first_active_window_start - self.pre_roll_seconds
 
         ideal_end_pts = self.last_active_window_end + self.post_roll_seconds
         clip_end_pts = self._snap_cut_point(ideal_end_pts, is_start=False)

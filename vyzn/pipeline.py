@@ -140,15 +140,15 @@ class EdgePipeline:
         # ==============================================================================
         # STEP 5: PRE-ROLL RING BUFFERS & INCOMING FRAME QUEUE
         # ------------------------------------------------------------------------------
-        # Cameras capture video into a shared queue (up to 40 frames buffered).
-        # Each camera has a "Ring Buffer" in memory holding the last 10 seconds of video.
+        # Cameras capture live video into a shared queue (up to 300 frames buffered).
+        # Each camera has a "Ring Buffer" in memory holding the last 10-12 seconds of video.
         # That way, when an intruder trips the alarm, the recorded clip includes
         # the 10 seconds *before* they even entered the camera frame!
         # ==============================================================================
-        self.frame_queue: queue.Queue = queue.Queue(maxsize=40)
+        self.frame_queue: queue.Queue = queue.Queue(maxsize=300)
         self.capture_threads: List[threading.Thread] = []
 
-        # Ring buffers for pre-roll video (stores downscaled frames for ~10 seconds = 40 frames @ 4 fps)
+        # Ring buffers for pre-roll video (stores downscaled frames for ~10 seconds)
         self.ring_buffers: Dict[str, deque] = {}
         # Active event buffers and tracking state
         self.event_buffers: Dict[str, List] = {}
@@ -186,11 +186,12 @@ class EdgePipeline:
         # so the Wall View can color-code camera borders and sort active cameras first!
         self.latest_camera_scores: Dict[str, Tuple[float, int]] = {}
         self._last_yolo_time: Dict[str, float] = {}
+        self._last_detections: Dict[str, List] = {}
 
     def _get_or_create_state_machine(self, camera_id: str) -> ClipStateMachine:
         if camera_id not in self.state_machines:
             cam_cfg = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
-            target_fps = float(getattr(cam_cfg, "ai_inference_fps", getattr(cam_cfg, "target_fps", 4.0)) or 4.0)
+            target_fps = float(getattr(cam_cfg, "target_fps", getattr(cam_cfg, "capture_fps", 15.0)) or 15.0)
             self.state_machines[camera_id] = ClipStateMachine(
                 camera_id=camera_id,
                 start_motion_threshold=getattr(cam_cfg, "start_motion_threshold", None) or self.settings.start_motion_threshold,
@@ -225,7 +226,8 @@ class EdgePipeline:
             if not cam.enabled:
                 continue
 
-            self.ring_buffers[cam.camera_id] = deque(maxlen=int(cam.target_fps * 10))
+            target_fps = float(getattr(cam, "target_fps", getattr(cam, "capture_fps", 15.0)) or 15.0)
+            self.ring_buffers[cam.camera_id] = deque(maxlen=int(target_fps * 12))
 
             # In simple terms: if the camera uses a simulation or test address, use our built-in video generator
             if self.use_synthetic and (str(cam.rtsp_url).startswith("sim://") or str(cam.rtsp_url).startswith("test://")):
@@ -446,11 +448,13 @@ class EdgePipeline:
 
             alive_tracks = prior_alive_tracks
 
-            # Only run heavy AI if there is motion OR an object was recently in view OR periodically per 3s tick window
-            periodic_ai = (frame_time - self._last_yolo_time.get(camera_id, 0.0) >= 2.0)
+            # Throttle deep-learning YOLO execution per camera to ~4-5 FPS (every ~0.20s) to keep CPU low,
+            # while allowing lightweight MOG2 motion gating, tracking, and clip state machine
+            # to run smoothly on all 15-20 FPS live frames!
+            time_since_last_ai = frame_time - self._last_yolo_time.get(camera_id, 0.0)
+            can_run_heavy_ai = (time_since_last_ai >= 0.20 or self._last_yolo_time.get(camera_id, 0.0) == 0.0)
+            periodic_ai = (time_since_last_ai >= 2.0)
             should_run_ai = has_motion or (sm.state != ClipState.IDLE) or (len(alive_tracks) > 0) or periodic_ai
-            if should_run_ai:
-                self._last_yolo_time[camera_id] = frame_time
 
             # ==========================================================================
             # STEP C: YOLOv8 AI OBJECT DETECTION & MOVEMENT TRACKING
@@ -459,14 +463,25 @@ class EdgePipeline:
             # The tracker connects bounding boxes between frames to follow paths.
             # ==========================================================================
             detections = []
-            if should_run_ai:
+            if should_run_ai and can_run_heavy_ai:
+                self._last_yolo_time[camera_id] = frame_time
                 detections = self.detector.detect(frame)
+                self._last_detections[camera_id] = detections
                 active_tracks = self.tracker.update(detections, timestamp=frame_time)
                 alive_tracks = self.tracker.get_alive_tracks(
                     max_missed_seconds=self.settings.track_lost_tolerance_sec,
                     current_time=frame_time
                 )
+            elif should_run_ai:
+                # Inter-inference frame: reuse last detections and coast tracker
+                detections = self._last_detections.get(camera_id, [])
+                self.tracker.update([], timestamp=frame_time)
+                alive_tracks = self.tracker.get_alive_tracks(
+                    max_missed_seconds=self.settings.track_lost_tolerance_sec,
+                    current_time=frame_time
+                )
             else:
+                self._last_detections[camera_id] = []
                 self.tracker.update([], timestamp=frame_time)
                 alive_tracks = []
 
@@ -684,9 +699,11 @@ class EdgePipeline:
         if len(frames) < 3:
             return
 
-        # Calculate exact duration in video timeline (PTS) seconds
+        # Calculate exact duration in video timeline (PTS) seconds and true frame rate
         clip_dur = round(max(1.0, segment.end_pts - segment.start_pts), 1)
-        fps = float(getattr(cam_config, "ai_inference_fps", 4.0) or 4.0)
+        configured_fps = float(getattr(cam_config, "target_fps", getattr(cam_config, "capture_fps", 15.0)) or 15.0)
+        measured_fps = round(len(frames) / clip_dur, 1) if clip_dur > 0 else configured_fps
+        fps = max(10.0, measured_fps if measured_fps >= 10.0 else configured_fps)
         write_result = self.clip_writer.write_clip_from_frames(
             camera_id=camera_id,
             event_group_id=segment.event_group_id,

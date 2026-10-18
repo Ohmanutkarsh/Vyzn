@@ -253,7 +253,7 @@ class RTSPCaptureThread(threading.Thread):
         self,
         config: CameraConfig,
         output_queue: queue.Queue,
-        max_queue_size: int = 20
+        max_queue_size: int = 200
     ):
         super().__init__(name=f"Capture-{config.camera_id}", daemon=True)
         self.config = config
@@ -261,9 +261,10 @@ class RTSPCaptureThread(threading.Thread):
         self.max_queue_size = max_queue_size
         self.running = True
 
-        # Dual-loop frame rates
-        self.capture_fps = float(getattr(config, "capture_fps", 15.0) or 15.0)
-        self.ai_inference_fps = float(getattr(config, "ai_inference_fps", getattr(config, "target_fps", 4.0)) or 4.0)
+        # In simple terms: ingest at camera target rate (15-20 FPS) so recorded clips are smooth live footage
+        self.target_fps = float(getattr(config, "target_fps", getattr(config, "capture_fps", 15.0)) or 15.0)
+        self.capture_fps = self.target_fps
+        self.ai_inference_fps = float(getattr(config, "ai_inference_fps", 4.0) or 4.0)
 
         # Health metrics for remote telemetry & UI
         self.last_frame_timestamp = 0.0
@@ -451,9 +452,10 @@ class RTSPCaptureThread(threading.Thread):
                     frame_counter = 0
                     start_measure_time = now_mono
 
-                # Dual-loop Decimation: Only pass 2-4 FPS to shared YOLO inference worker
-                inference_interval = 1.0 / max(1.0, self.ai_inference_fps)
-                if now_mono - last_pushed_time < inference_interval:
+                # Push smooth live frames at full target rate (15-20 FPS) so recorded clips have smooth video with no skipped frames
+                stream_target_fps = max(5.0, min(30.0, self.target_fps))
+                stream_interval = 1.0 / stream_target_fps
+                if now_mono - last_pushed_time < stream_interval:
                     continue
 
                 last_pushed_time = now_mono
