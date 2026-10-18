@@ -548,36 +548,37 @@ def get_user_cameras_file(email: str) -> Path:
 
 def get_user_cameras(email: str) -> List[Dict[str, Any]]:
     clean_email = email.strip().lower()
-    if clean_email in CAMERAS_BY_USER:
-        return CAMERAS_BY_USER[clean_email]
 
-    # 1. Cloud storage state
+    # 1. Cloud storage state (source of truth across serverless lambdas)
     cloud = fetch_cameras_from_cloud(clean_email)
     if cloud is not None:
         CAMERAS_BY_USER[clean_email] = cloud
         return cloud
 
-    # 2. Local temp file
+    # 2. In-memory cache if non-empty
+    if clean_email in CAMERAS_BY_USER and CAMERAS_BY_USER[clean_email]:
+        return CAMERAS_BY_USER[clean_email]
+
+    # 3. Local temp file
     cam_file = get_user_cameras_file(clean_email)
     if cam_file.exists():
         try:
             with open(cam_file, "r", encoding="utf-8") as f:
                 saved = json.load(f)
-                if isinstance(saved, list):
+                if isinstance(saved, list) and saved:
                     CAMERAS_BY_USER[clean_email] = saved
                     return saved
         except Exception:
             pass
 
-    # 3. Default fallback
-    if clean_email == "dirtbike000000@gmail.com":
+    # 4. Default fallback
+    if clean_email in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"):
         cams = load_real_cameras()
         CAMERAS_BY_USER[clean_email] = cams
         sync_cameras_to_cloud(clean_email, cams)
         return cams
 
-    CAMERAS_BY_USER[clean_email] = []
-    return CAMERAS_BY_USER[clean_email]
+    return CAMERAS_BY_USER.get(clean_email, [])
 
 
 def set_user_cameras(email: str, cameras: List[Dict[str, Any]]):
@@ -612,23 +613,28 @@ def get_user_clips(email: str) -> List[Dict[str, Any]]:
         CLIPS_BY_USER[clean_email] = filtered
         return filtered
 
-    # 2. Local temp file
+    # 3. Local temp file
     clip_file = get_user_clips_file(clean_email)
     if clip_file.exists():
         try:
             with open(clip_file, "r", encoding="utf-8") as f:
                 saved = json.load(f)
-                if isinstance(saved, list):
+                if isinstance(saved, list) and saved:
                     filtered = [c for c in saved if not is_mock_clip(c)]
                     CLIPS_BY_USER[clean_email] = filtered
                     return filtered
         except Exception:
             pass
 
-    # 3. Default fallback for any authenticated user - completely clean empty list
-    clips: List[Dict[str, Any]] = []
-    CLIPS_BY_USER[clean_email] = clips
-    return clips
+    # 4. Default fallback for primary owner accounts
+    if clean_email in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"):
+        c = load_real_clips()
+        filtered = [x for x in c if not is_mock_clip(x)]
+        CLIPS_BY_USER[clean_email] = filtered
+        sync_clips_to_cloud(clean_email, filtered)
+        return filtered
+
+    return [c for c in CLIPS_BY_USER.get(clean_email, []) if not is_mock_clip(c)]
 
 
 def set_user_clips(email: str, clips: List[Dict[str, Any]]):
@@ -1728,7 +1734,9 @@ async def api_cloud_alert_ingress(payload: CloudAlertIngressRequest, request: Re
 # Cameras & Watch Areas
 # ---------------------------------------------------------------------------
 @app.get("/api/cameras")
-def list_cameras(request: Request):
+def list_cameras(request: Request, response: Response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     user = get_current_user(request) or CURRENT_USER
     return get_user_cameras(user["email"])
 

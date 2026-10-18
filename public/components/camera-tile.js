@@ -21,12 +21,21 @@ export function renderCameraTile({ camera, isSelected = false, showActions = fal
 
   let sourceLine = camera.source_line;
   if (!sourceLine) {
-    if (camera.source_type === 'webcam') {
+    const rtsp = String(camera.rtsp_url || '').trim();
+    if (camera.source_type === 'webcam' || rtsp === '0' || rtsp === 'webcam' || (camera.name && camera.name.toLowerCase().includes('webcam'))) {
       sourceLine = 'Webcam';
-    } else if (camera.source_type === 'phone') {
-      sourceLine = `Phone camera · ${camera.ip_address || '192.168.1.15'}`;
+    } else if (camera.source_type === 'phone' || rtsp.includes(':8080') || (camera.name && camera.name.toLowerCase().includes('phone'))) {
+      let host = camera.ip_address;
+      if (!host && rtsp.includes('://')) {
+        try { host = new URL(rtsp).hostname; } catch (_) {}
+      }
+      sourceLine = `Phone camera · ${host || '192.168.31.216'}`;
     } else {
-      sourceLine = `IP camera · ${camera.ip_address || '192.168.1.64'}`;
+      let host = camera.ip_address;
+      if (!host && rtsp.includes('://')) {
+        try { host = new URL(rtsp).hostname; } catch (_) {}
+      }
+      sourceLine = host ? `IP camera · ${host}` : 'IP camera';
     }
   }
 

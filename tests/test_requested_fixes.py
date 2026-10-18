@@ -98,3 +98,23 @@ def test_wall_stream_visual_no_fake_placeholder(client):
     assert resp.status_code == 200
     content = resp.text
     assert "Camera Feed Active" not in content
+
+def test_cameras_consistency_and_nocache(client):
+    from api.index import create_session_token
+
+    # 1. Unauthenticated /api/cameras returns no-cache headers
+    resp = client.get("/api/cameras")
+    assert resp.status_code == 200
+    assert "no-store" in resp.headers.get("cache-control", "")
+    assert isinstance(resp.json(), list)
+
+    # 2. Authenticated tapise user gets non-empty consistent list
+    tok = create_session_token("tapise.utkarsh@gmail.com")
+    resp_user = client.get("/api/cameras", cookies={"vyzn_session": tok})
+    assert resp_user.status_code == 200
+    assert "no-store" in resp_user.headers.get("cache-control", "")
+    data = resp_user.json()
+    assert isinstance(data, list)
+    assert len(data) >= 1
+    assert any("Camera 1" in c.get("name", "") or "phone" in c.get("name", "") for c in data)
+

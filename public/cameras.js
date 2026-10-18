@@ -8,6 +8,7 @@ let pendingRemoveId = null;
 let pendingRenameId = null;
 
 let edgeBaseUrl = null;
+let edgeCameras = null;
 
 async function checkEdgeServer() {
   if (edgeBaseUrl !== null) return edgeBaseUrl;
@@ -26,6 +27,12 @@ async function checkEdgeServer() {
     clearTimeout(timer);
     if (res.ok) {
       edgeBaseUrl = 'http://127.0.0.1:8000';
+      try {
+        const camRes = await fetch('http://127.0.0.1:8000/api/cameras?t=' + Date.now(), { mode: 'cors' });
+        if (camRes.ok) {
+          edgeCameras = await camRes.json();
+        }
+      } catch (e) {}
       return edgeBaseUrl;
     }
   } catch (e) {}
@@ -53,10 +60,29 @@ async function loadCameras() {
   const countEl = document.getElementById('txt-cameras-count');
 
   try {
-    await checkEdgeServer();
-    const res = await fetch('/api/cameras', { credentials: 'include' });
+    const edge = await checkEdgeServer();
+    const res = await fetch(`/api/cameras?t=${Date.now()}`, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' }
+    });
     if (!res.ok) throw new Error('Failed to load cameras');
     camerasList = await res.json();
+
+    // If cloud returned empty list but local edge server is online, fallback to edge cameras
+    if ((!camerasList || camerasList.length === 0) && edge && Array.isArray(edgeCameras) && edgeCameras.length > 0) {
+      camerasList = edgeCameras;
+    } else if ((!camerasList || camerasList.length === 0) && edge) {
+      try {
+        const edgeRes = await fetch(`${edge}/api/cameras?t=${Date.now()}`, { mode: 'cors' });
+        if (edgeRes.ok) {
+          const eCams = await edgeRes.json();
+          if (Array.isArray(eCams) && eCams.length > 0) {
+            camerasList = eCams;
+          }
+        }
+      } catch (e) {}
+    }
 
     if (edgeBaseUrl) {
       camerasList.forEach(c => {

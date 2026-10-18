@@ -11,19 +11,31 @@ import { escapeHtml } from '../utils.js';
  */
 export function renderCameraTile({ camera, isSelected = false, showActions = false }) {
   const camId = camera.id || camera.camera_id;
-  const thumbUrl = camera.snapshot_url || camera.snapshotUrl || `/api/cameras/${camId}/snapshot.jpg`;
+  let thumbUrl = camera.snapshot_url || camera.snapshotUrl || `/api/cameras/${camId}/snapshot.jpg`;
+  if (typeof window !== 'undefined' && window.__vyzn_edge_url && thumbUrl.startsWith('/api/')) {
+    thumbUrl = `${window.__vyzn_edge_url}${thumbUrl}`;
+  }
   const isOnline = camera.status === 'online';
   const statusDotClass = isOnline ? 'neutral' : 'amber';
   const statusText = isOnline ? 'Online' : (camera.offline_since ? `Offline since ${camera.offline_since}` : 'Offline');
 
   let sourceLine = camera.source_line;
   if (!sourceLine) {
-    if (camera.source_type === 'webcam') {
+    const rtsp = String(camera.rtsp_url || '').trim();
+    if (camera.source_type === 'webcam' || rtsp === '0' || rtsp === 'webcam' || (camera.name && camera.name.toLowerCase().includes('webcam'))) {
       sourceLine = 'Webcam';
-    } else if (camera.source_type === 'phone') {
-      sourceLine = `Phone camera · ${camera.ip_address || '192.168.1.15'}`;
+    } else if (camera.source_type === 'phone' || rtsp.includes(':8080') || (camera.name && camera.name.toLowerCase().includes('phone'))) {
+      let host = camera.ip_address;
+      if (!host && rtsp.includes('://')) {
+        try { host = new URL(rtsp).hostname; } catch (_) {}
+      }
+      sourceLine = `Phone camera · ${host || '192.168.31.216'}`;
     } else {
-      sourceLine = `IP camera · ${camera.ip_address || '192.168.1.64'}`;
+      let host = camera.ip_address;
+      if (!host && rtsp.includes('://')) {
+        try { host = new URL(rtsp).hostname; } catch (_) {}
+      }
+      sourceLine = host ? `IP camera · ${host}` : 'IP camera';
     }
   }
 
@@ -36,7 +48,7 @@ export function renderCameraTile({ camera, isSelected = false, showActions = fal
   return `
     <div class="camera-tile ${isSelected ? 'is-selected' : ''}" data-camera-id="${escapeHtml(camId)}" role="button" tabindex="0">
       <div class="camera-thumb-frame">
-        <img class="camera-thumb-img" src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(camera.name)}" loading="lazy" onerror="this.onerror=null;this.src='/static/img/placeholder.jpg'" />
+        <img class="camera-thumb-img" src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(camera.name)}" loading="lazy" onerror="this.onerror=null;this.src='/img/placeholder.jpg'" />
         ${!isOnline ? `
           <div class="camera-offline-overlay">
             <span class="offline-pill">${escapeHtml(statusText)}</span>

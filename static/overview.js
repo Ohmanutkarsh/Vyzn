@@ -50,9 +50,29 @@ async function loadOverviewData() {
   const wallBtn = document.getElementById('btn-wall-view');
 
   try {
-    const res = await fetch('/api/cameras', { credentials: 'include' });
+    const edge = await checkEdgeServer();
+    const res = await fetch(`/api/cameras?t=${Date.now()}`, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' }
+    });
     if (!res.ok) throw new Error('Failed to load cameras');
     camerasList = await res.json();
+
+    // If cloud returned empty list but local edge server is online, fallback to edge cameras
+    if ((!camerasList || camerasList.length === 0) && edge && Array.isArray(edgeCameras) && edgeCameras.length > 0) {
+      camerasList = edgeCameras;
+    } else if ((!camerasList || camerasList.length === 0) && edge) {
+      try {
+        const edgeRes = await fetch(`${edge}/api/cameras?t=${Date.now()}`, { mode: 'cors' });
+        if (edgeRes.ok) {
+          const eCams = await edgeRes.json();
+          if (Array.isArray(eCams) && eCams.length > 0) {
+            camerasList = eCams;
+          }
+        }
+      } catch (e) {}
+    }
 
     if (!camerasList || camerasList.length === 0) {
       if (emptyState) emptyState.style.display = 'flex';
@@ -78,7 +98,6 @@ async function loadOverviewData() {
     const onlineCam = camerasList.find(c => c.status === 'online');
     activeCameraId = onlineCam ? (onlineCam.id || onlineCam.camera_id) : (camerasList[0].id || camerasList[0].camera_id);
 
-    await checkEdgeServer();
     renderPicker();
     renderStrip();
     startLiveStream(activeCameraId);
