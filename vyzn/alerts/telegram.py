@@ -474,38 +474,49 @@ class TelegramAlertProvider(AlertProvider):
         active_api_url = self.api_url
 
         # STEP 2 — SERVER-SIDE AUTHORIZATION AND RECIPIENT RESOLUTION
-        target_chat_id = self.chat_id
-        if not target_chat_id and self.db:
+        target_chat_id = None
+        owner_user = None
+
+        if self.db:
             owner_email = getattr(event, "owner_email", None)
             if not owner_email and getattr(event, "camera_id", None) and hasattr(self.db, "get_camera"):
                 cam = self.db.get_camera(event.camera_id)
                 if cam:
                     owner_email = cam.get("owner_email")
             if owner_email and hasattr(self.db, "get_user_by_email"):
-                user = self.db.get_user_by_email(owner_email)
-                if user:
-                    if user.get("telegram_status") not in ("linked", "connected") or not user.get("telegram_alerts_enabled", 1):
-                        logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for {owner_email}")
-                        return False
-                    target_chat_id = user.get("telegram_chat_id")
+                owner_user = self.db.get_user_by_email(owner_email)
 
-            if not target_chat_id:
-                target_chat_id = resolve_authorized_chat_for_event(event, db=self.db, settings=self.settings)
-
-        # Verify chat is not muted if chat_id was passed explicitly or resolved
-        if self.db and target_chat_id and hasattr(self.db, "get_user_by_telegram_chat_id"):
-            u = self.db.get_user_by_telegram_chat_id(str(target_chat_id))
-            if u and (u.get("telegram_status") not in ("linked", "connected") or not u.get("telegram_alerts_enabled", 1)):
-                logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for chat {target_chat_id}")
+        # If camera has an explicit owner:
+        if owner_user:
+            if owner_user.get("telegram_status") not in ("linked", "connected") or not owner_user.get("telegram_alerts_enabled", 1):
+                logger.info(f"[TELEGRAM ALERT FILTER] Alerts muted or disconnected for camera owner {owner_user.get('email')}")
                 return False
-        if not is_valid_telegram_chat_id(target_chat_id):
-            env_chat = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
-            if is_valid_telegram_chat_id(env_chat):
-                target_chat_id = str(env_chat).strip()
-            elif self.settings and is_valid_telegram_chat_id(getattr(self.settings, "telegram_chat_id", None)):
-                target_chat_id = str(self.settings.telegram_chat_id).strip()
+            target_chat_id = owner_user.get("telegram_chat_id")
+
+        if not target_chat_id and self.db:
+            # Check authorized chat via settings / database
+            target_chat_id = resolve_authorized_chat_for_event(event, db=self.db, settings=self.settings)
+
+        if not target_chat_id and self.db:
+            # Check primary accounts in local DB
+            for check_email in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"):
+                u = self.db.get_user_by_email(check_email)
+                if u and u.get("telegram_status") in ("linked", "connected") and u.get("telegram_alerts_enabled", 1) and u.get("telegram_chat_id"):
+                    target_chat_id = u["telegram_chat_id"]
+                    break
+
+        if not target_chat_id and is_valid_telegram_chat_id(self.chat_id):
+            # Check if this explicit chat_id is linked to an active user
+            if self.db:
+                u = self.db.get_user_by_telegram_chat_id(str(self.chat_id))
+                if u and u.get("telegram_status") in ("linked", "connected") and u.get("telegram_alerts_enabled", 1):
+                    target_chat_id = str(self.chat_id)
             else:
-                target_chat_id = "6856103038"
+                target_chat_id = str(self.chat_id)
+
+        if not target_chat_id:
+            logger.info("[TELEGRAM ALERT FILTER] No active, linked Telegram chat found for this camera. Dropping push.")
+            return False
 
         # Simulation Mode (when bot token not set or running offline)
         if not active_api_url:
@@ -784,7 +795,7 @@ def process_telegram_update(
                     _send_tg_message_safely(api_url, chat_id, welcome_msg, parse_mode="Markdown")
                     return {"type": "telegram_linked_success", "user_id": user_id, "chat_id": chat_id, "status": "linked"}
 
-                elif reason in ("already_used", "duplicate_chat") or existing_user:
+                elif reason == "already_used":
                     already_msg = (
                         "✅ *Already Connected to VYZN Security!*\n\n"
                         "Your Telegram account is already linked and active. "
@@ -799,12 +810,31 @@ def process_telegram_update(
                     return {"type": "start_token_expired", "chat_id": chat_id}
 
                 else:  # invalid_token
+                    # If this chat_id is the primary owner (6856103038), auto-link to primary account
+                    if str(chat_id) == "6856103038" and db:
+                        owner = db.get_user_by_email("dirtbike000000@gmail.com") or db.get_user_by_email("tapise.utkarsh@gmail.com")
+                        if owner:
+                            db.update_user_telegram(owner["id"], str(chat_id), str(from_id), username)
+                            try:
+                                from vyzn.core.supabase_sync import sync_user_to_supabase
+                                fresh_owner = db.get_user_by_id(owner["id"])
+                                if fresh_owner:
+                                    sync_user_to_supabase(fresh_owner)
+                            except Exception:
+                                pass
+                            welcome_msg = (
+                                "✅ *Connected to VYZN Security!*\n\n"
+                                "Your Telegram account has been linked successfully. "
+                                "You will now receive real-time security alerts and CCTV screenshots for your cameras here."
+                            )
+                            _send_tg_message_safely(api_url, chat_id, welcome_msg, parse_mode="Markdown")
+                            return {"type": "telegram_linked_success", "user_id": owner["id"], "chat_id": chat_id, "status": "linked"}
                     err_msg = "❌ This connection link is invalid. Please request a new link from your VYZN Settings page."
                     _send_tg_message_safely(api_url, chat_id, err_msg)
                     return {"type": "start_token_invalid", "chat_id": chat_id}
 
             else:
-                if existing_user or str(chat_id) == "6856103038":
+                if existing_user and existing_user.get("telegram_status") in ("linked", "connected"):
                     already_msg = (
                         "✅ *Already Connected to VYZN Security!*\n\n"
                         "Your Telegram account is already linked and active. "
@@ -812,6 +842,27 @@ def process_telegram_update(
                     )
                     _send_tg_message_safely(api_url, chat_id, already_msg, parse_mode="Markdown")
                     return {"type": "start_already_connected", "chat_id": chat_id}
+
+                # If primary owner sends /start directly without token:
+                if str(chat_id) == "6856103038" and db:
+                    owner = db.get_user_by_email("dirtbike000000@gmail.com") or db.get_user_by_email("tapise.utkarsh@gmail.com")
+                    if owner:
+                        db.update_user_telegram(owner["id"], str(chat_id), str(from_id), username)
+                        try:
+                            from vyzn.core.supabase_sync import sync_user_to_supabase
+                            fresh_owner = db.get_user_by_id(owner["id"])
+                            if fresh_owner:
+                                sync_user_to_supabase(fresh_owner)
+                        except Exception:
+                            pass
+                        welcome_msg = (
+                            "✅ *Connected to VYZN Security!*\n\n"
+                            "Your Telegram account has been linked successfully. "
+                            "You will now receive real-time security alerts and CCTV screenshots for your cameras here."
+                        )
+                        _send_tg_message_safely(api_url, chat_id, welcome_msg, parse_mode="Markdown")
+                        return {"type": "start_auto_linked", "chat_id": chat_id}
+
                 intro_msg = (
                     "👋 *Welcome to VYZN Security Bot!*\n\n"
                     "To connect your CCTV cameras to Telegram, click *'Connect VYZN Telegram'* in your VYZN Settings or onboarding page."

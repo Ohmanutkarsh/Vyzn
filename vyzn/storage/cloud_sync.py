@@ -211,6 +211,10 @@ class CloudSyncWorker(threading.Thread):
                             if hasattr(self, "pipeline") and self.pipeline:
                                 if hasattr(self.pipeline, "dispatcher") and hasattr(self.pipeline.dispatcher, "provider"):
                                     self.pipeline.dispatcher.provider.chat_id = str(chat_id)
+                        elif em and (status in ("not_linked", "disconnected", "revoked") or not chat_id):
+                            local_user = self.db.get_user_by_email(em)
+                            if local_user and local_user.get("telegram_status") in ("linked", "connected"):
+                                self.db.disconnect_user_telegram(local_user["id"])
             except Exception:
                 pass
         except Exception as e:

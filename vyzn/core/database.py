@@ -1449,6 +1449,7 @@ class EventDatabase:
                     if hmac.compare_digest(sig, expected_sig) and time.time() <= int(exp_str):
                         u = self.get_user_by_email(dec_email)
                         if u:
+                            self.writer.queue.put(("UPDATE users SET telegram_chat_id = NULL, telegram_status = 'not_linked' WHERE telegram_chat_id = ? AND id != ?", (str(chat_id), u["id"]), None))
                             self.update_user_telegram(u["id"], str(chat_id), str(telegram_user_id), username)
                             return True, "ok", {"user_id": u["id"]}
                 except Exception:
@@ -1463,11 +1464,10 @@ class EventDatabase:
             self.update_telegram_link_status(token, "expired")
             return False, "expired_token", link
 
-        # Reject duplicate chat linking to multiple different accounts
-        existing_user = self.get_user_by_telegram_chat_id(str(chat_id))
-        if existing_user and existing_user.get("id") != link["user_id"]:
-            self.update_telegram_link_status(token, "duplicate_chat")
-            return False, "duplicate_chat", existing_user
+        # Re-assign chat_id to the authorized user who consumed this link token.
+        # Disconnect any other user account that previously held this chat_id.
+        sql_unlink_others = "UPDATE users SET telegram_chat_id = NULL, telegram_status = 'not_linked' WHERE telegram_chat_id = ? AND id != ?"
+        self.writer.queue.put((sql_unlink_others, (str(chat_id), link["user_id"]), None))
 
         # Mark link as consumed
         sql_link = "UPDATE telegram_links SET status = 'linked', chat_id = ? WHERE token = ?"
@@ -1478,7 +1478,7 @@ class EventDatabase:
         self.update_user_telegram(user_id, str(chat_id), str(telegram_user_id), username)
         self.flush()
 
-        return True, "success", link
+        return True, "success", {"user_id": user_id, "token": token, "chat_id": str(chat_id)}
 
     def get_telegram_link_by_chat_id(self, chat_id: str) -> Optional[Dict[str, Any]]:
         conn = self._get_read_conn()

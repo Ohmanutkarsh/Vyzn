@@ -262,11 +262,6 @@ def sync_users_from_supabase_to_local_db(db: Any) -> int:
             # Update telegram if linked
             tg_status = u.get("telegram_status") or "not_linked"
             tg_chat = str(u.get("telegram_chat_id")) if u.get("telegram_chat_id") else None
-            # Verified override for primary user
-            if email in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"):
-                tg_status = "linked"
-                tg_chat = "6856103038"
-
             invalid_mock_chats = {"none", "null", "12345678", "123456789", "98765432", "987654321", "simulation_chat", ""}
             is_valid_chat = tg_chat and str(tg_chat).strip().lower() not in invalid_mock_chats and len(str(tg_chat).strip().lstrip("-")) >= 8 and str(tg_chat).strip().lstrip("-").isdigit()
 
@@ -275,6 +270,10 @@ def sync_users_from_supabase_to_local_db(db: Any) -> int:
                 if "telegram_alerts_enabled" in u:
                     db.set_user_telegram_alerts(local_user["id"], bool(u.get("telegram_alerts_enabled", 1)))
                 synced_count += 1
+            elif tg_status in ("not_linked", "disconnected", "revoked"):
+                if local_user.get("telegram_status") not in ("not_linked", "disconnected"):
+                    db.disconnect_user_telegram(local_user["id"])
+                    synced_count += 1
         logger.info(f"[SUPABASE] Synced {synced_count} user updates from Supabase to local DB.")
         return synced_count
     except Exception as e:

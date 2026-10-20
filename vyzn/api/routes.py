@@ -2912,11 +2912,11 @@ def api_telegram_status(user: Optional[Dict[str, Any]] = Depends(get_optional_us
         except Exception:
             pass
     if not user:
-        return {"status": "waiting", "connected": False, "telegram_alerts_enabled": False}
+        return {"status": "disconnected", "connected": False, "telegram_alerts_enabled": False}
 
     fresh_user = db.get_user_by_id(user["id"]) or user
-    # If not linked in local DB, check Supabase cloud record
-    if fresh_user.get("telegram_status") not in ("linked", "connected"):
+    # If not marked as explicitly disconnected in local DB, check Supabase cloud record
+    if fresh_user.get("telegram_status") not in ("linked", "connected", "not_linked", "disconnected", "revoked"):
         try:
             from vyzn.core.supabase_sync import get_supabase_url, get_supabase_headers, is_supabase_configured
             if is_supabase_configured() and user.get("email"):
@@ -2933,13 +2933,8 @@ def api_telegram_status(user: Optional[Dict[str, Any]] = Depends(get_optional_us
         except Exception:
             pass
 
-    # Verified primary owner fallback
-    if user.get("email") in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com") and fresh_user.get("telegram_status") not in ("linked", "connected"):
-        db.update_user_telegram(user["id"], "6856103038", "6856103038", "@OWhythiskolaveri")
-        fresh_user = db.get_user_by_id(user["id"]) or fresh_user
-
     alerts_enabled = bool(fresh_user.get("telegram_alerts_enabled", 1))
-    if fresh_user.get("telegram_status") in ("linked", "connected"):
+    if fresh_user.get("telegram_status") in ("linked", "connected") and fresh_user.get("telegram_chat_id"):
         return {
             "status": "connected",
             "connected": True,
@@ -2953,15 +2948,22 @@ def api_telegram_status(user: Optional[Dict[str, Any]] = Depends(get_optional_us
 
     link = db.get_latest_telegram_link_for_user(user["id"])
     if not link:
-        return {"status": "waiting", "connected": False, "telegram_alerts_enabled": alerts_enabled}
+        return {"status": "disconnected", "connected": False, "telegram_alerts_enabled": alerts_enabled}
 
     now_ms = int(time.time() * 1000)
-    if link.get("status") == "mismatch":
+    if link.get("status") == "linked" and fresh_user.get("telegram_chat_id"):
+        return {
+            "status": "connected",
+            "connected": True,
+            "telegram_chat_id": fresh_user.get("telegram_chat_id"),
+            "telegram_username": fresh_user.get("telegram_username"),
+            "telegram_alerts_enabled": alerts_enabled,
+            "linked_at_ms": fresh_user.get("telegram_linked_at_ms")
+        }
+    elif link.get("status") == "mismatch":
         return {"status": "mismatch", "connected": False, "telegram_alerts_enabled": alerts_enabled}
-    elif link.get("status") == "revoked":
+    elif link.get("status") in ("revoked", "expired") or now_ms > link.get("expires_at_ms", 0):
         return {"status": "disconnected", "connected": False, "telegram_alerts_enabled": alerts_enabled}
-    elif now_ms > link.get("expires_at_ms", 0):
-        return {"status": "expired", "connected": False, "telegram_alerts_enabled": alerts_enabled}
     return {"status": "waiting", "connected": False, "telegram_alerts_enabled": alerts_enabled}
 
 
@@ -2970,9 +2972,24 @@ def api_telegram_disconnect(user: Optional[Dict[str, Any]] = Depends(get_optiona
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     db.disconnect_user_telegram(user["id"])
+    # Disconnect linked owner aliases as well so stale chat ID doesn't linger
+    if user.get("email") in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"):
+        other_email = "tapise.utkarsh@gmail.com" if user.get("email") == "dirtbike000000@gmail.com" else "dirtbike000000@gmail.com"
+        other_u = db.get_user_by_email(other_email)
+        if other_u:
+            db.disconnect_user_telegram(other_u["id"])
+            try:
+                from vyzn.core.supabase_sync import sync_user_to_supabase
+                sync_user_to_supabase(other_u)
+            except Exception:
+                pass
     fresh_user = db.get_user_by_id(user["id"])
     if fresh_user:
-        sync_user_to_supabase(fresh_user)
+        try:
+            from vyzn.core.supabase_sync import sync_user_to_supabase
+            sync_user_to_supabase(fresh_user)
+        except Exception:
+            pass
     return {"ok": True, "status": "disconnected"}
 
 
@@ -3124,8 +3141,8 @@ def api_telegram_test(user: Optional[Dict[str, Any]] = Depends(get_optional_user
     fresh_user = db.get_user_by_id(user["id"]) or user
     chat_id = fresh_user.get("telegram_chat_id")
     bot_token = getattr(settings, "telegram_bot_token", None)
-    if bot_token is None:
-        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
+    if not bot_token:
+        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or "8818349193:AAEFI3MPw_RDKWk0PvMJMkJUIC24i03l4DA"
 
     if not chat_id:
         try:

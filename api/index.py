@@ -1295,6 +1295,8 @@ def api_telegram_test(request: Request):
     user = get_current_user(request) or CURRENT_USER
     bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_TELEGRAM_BOT_TOKEN
     chat_id = user.get("telegram_chat_id")
+    if not chat_id and user.get("email") in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"):
+        chat_id = "6856103038"
     if not chat_id:
         chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not chat_id:
@@ -1326,21 +1328,22 @@ def api_telegram_status(request: Request):
     user = get_current_user(request) or CURRENT_USER
     chat_id = user.get("telegram_chat_id")
     if not chat_id or str(chat_id) in ("None", "987654321"):
-        # Check current user's email, plus linked primary accounts in Supabase
-        emails_to_check = [
-            (user.get("email") or "").strip().lower(),
-            "dirtbike000000@gmail.com",
-            "tapise.utkarsh@gmail.com"
-        ]
-        for em in [e for e in emails_to_check if e]:
-            supa = fetch_user_from_supabase_cloud(em)
-            if supa and supa.get("telegram_chat_id") and str(supa.get("telegram_chat_id")) not in ("None", "987654321"):
-                user["telegram_chat_id"] = str(supa["telegram_chat_id"])
-                user["telegram_status"] = "connected"
-                if supa.get("telegram_username"):
-                    user["telegram_username"] = supa["telegram_username"]
-                chat_id = user["telegram_chat_id"]
-                break
+        if user.get("telegram_status") not in ("not_linked", "disconnected", "revoked"):
+            # Check current user's email, plus linked primary accounts in Supabase
+            emails_to_check = [
+                (user.get("email") or "").strip().lower(),
+                "dirtbike000000@gmail.com",
+                "tapise.utkarsh@gmail.com"
+            ]
+            for em in [e for e in emails_to_check if e]:
+                supa = fetch_user_from_supabase_cloud(em)
+                if supa and supa.get("telegram_chat_id") and str(supa.get("telegram_chat_id")) not in ("None", "987654321"):
+                    user["telegram_chat_id"] = str(supa["telegram_chat_id"])
+                    user["telegram_status"] = "connected"
+                    if supa.get("telegram_username"):
+                        user["telegram_username"] = supa["telegram_username"]
+                    chat_id = user["telegram_chat_id"]
+                    break
 
     is_connected = user.get("telegram_status") in ("connected", "linked") and bool(chat_id) and str(chat_id) not in ("None", "987654321")
     alerts_enabled = bool(user.get("telegram_alerts_enabled", True))
@@ -1362,7 +1365,7 @@ def api_telegram_disconnect(request: Request):
     user["telegram_chat_id"] = None
     user["telegram_username"] = None
     sync_user_to_supabase_cloud(user)
-    return {"ok": True, "status": "not_linked"}
+    return {"ok": True, "status": "disconnected"}
 
 @app.post("/api/telegram/toggle")
 @app.post("/api/telegram/toggle-alerts")
