@@ -1242,7 +1242,7 @@ def update_business_hours(payload: Dict[str, Any]):
 # ---------------------------------------------------------------------------
 # Telegram Integration
 # ---------------------------------------------------------------------------
-DEFAULT_TELEGRAM_BOT_TOKEN = "8921915999:AAEEdYYsUz_xwAo0b342w8TEw0NsjG362js"
+DEFAULT_TELEGRAM_BOT_TOKEN = "8818349193:AAEFI3MPw_RDKWk0PvMJMkJUIC24i03l4DA"
 DEFAULT_TELEGRAM_BOT_USERNAME = "Vyzn_security_bot"
 
 @app.get("/api/telegram/config")

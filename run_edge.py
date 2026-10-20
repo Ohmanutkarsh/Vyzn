@@ -90,7 +90,7 @@ def build_synthetic_settings(num_cameras: int, data_dir: Path, demo_mode: bool =
     except Exception:
         pass
     # Read the Telegram token and chat ID so alerts can be sent to your phone
-    settings.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or "8921915999:AAEEdYYsUz_xwAo0b342w8TEw0NsjG362js"
+    settings.telegram_bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or "8818349193:AAEFI3MPw_RDKWk0PvMJMkJUIC24i03l4DA"
     settings.telegram_chat_id = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID") or "6856103038"
 
     # Step A: Check if the user already configured cameras through the website
