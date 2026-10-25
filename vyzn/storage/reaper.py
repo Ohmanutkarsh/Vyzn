@@ -81,27 +81,92 @@ class StorageReaperDaemon(threading.Thread):
     # --------------------------------------------------------------------------
     def get_total_video_bytes(self) -> int:
         total = 0
-        raw_dir = self.data_root / "raw"
-        if raw_dir.exists():
-            for root, _, files in os.walk(raw_dir):
-                for f in files:
-                    fp = os.path.join(root, f)
-                    try:
-                        total += os.path.getsize(fp)
-                    except OSError:
-                        pass
+        for sub in ("full_footage", "clips", "raw"):
+            target_dir = self.data_root / sub
+            if target_dir.exists():
+                for root, _, files in os.walk(target_dir):
+                    for f in files:
+                        fp = os.path.join(root, f)
+                        try:
+                            total += os.path.getsize(fp)
+                        except OSError:
+                            pass
         return total
 
     # ==========================================================================
+    # purge_expired_full_footage(): 72-Hour Continuous Whole Footage Purge
+    # --------------------------------------------------------------------------
+    # Per user instruction:
+    # 1. Whole continuous footage is retained for strictly 72 hours.
+    # 2. After 72 hours, continuous footage files are automatically deleted.
+    # 3. Only the last 72 hours of continuous footage are kept.
+    # 4. Cut incident clips (Score >= 30) are kept lifelong in 'clips/'.
+    # ==========================================================================
+    def purge_expired_full_footage(self) -> int:
+        now = datetime.now(timezone.utc)
+        now_ts = now.timestamp()
+        retention_seconds = float(self.raw_retention_hours * 3600.0)
+        freed_bytes = 0
+        deleted_count = 0
+
+        for folder_name in ("full_footage", "raw"):
+            target_dir = self.data_root / folder_name
+            if not target_dir.exists():
+                continue
+
+            for root, dirs, files in os.walk(target_dir, topdown=False):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        mtime = os.path.getmtime(fp)
+                        file_age = now_ts - mtime
+                        is_expired = file_age > retention_seconds
+                        if not is_expired:
+                            parent_name = os.path.basename(root)
+                            try:
+                                folder_dt = datetime.strptime(parent_name, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                                if (now - folder_dt).total_seconds() > retention_seconds:
+                                    is_expired = True
+                            except ValueError:
+                                pass
+
+                        if is_expired:
+                            size = os.path.getsize(fp)
+                            os.remove(fp)
+                            freed_bytes += size
+                            deleted_count += 1
+                            logger.info(f"Purged expired continuous footage (> {self.raw_retention_hours}h): {fp} ({size // 1024} KB)")
+                    except OSError as e:
+                        logger.warning(f"Failed to remove expired continuous footage {fp}: {e}")
+
+                # Clean up empty date or camera directories
+                try:
+                    if not os.listdir(root) and os.path.abspath(root) != os.path.abspath(str(target_dir)):
+                        os.rmdir(root)
+                except OSError:
+                    pass
+
+        if deleted_count > 0:
+            self.db.log_audit(
+                "PURGE_FULL_FOOTAGE_72H",
+                "system",
+                f"Auto-deleted {deleted_count} continuous footage files older than {self.raw_retention_hours}h (Freed: {freed_bytes // (1024*1024)} MB)"
+            )
+        return freed_bytes
+
+    # ==========================================================================
     # perform_sweep(): The Cleanup Brain
-    # This runs two distinct checks:
-    # 1. EMERGENCY ROTATION: If the hard drive is getting critically full (>= 85%),
-    #    delete the oldest clips first until we are back down to safe levels.
-    # 2. 72-HOUR RETENTION: Check for clips older than 72 hours. If a clip is
-    #    "low tier" (meaning no real threat occurred), delete it to save space.
-    #    If it is "Alert" or "Review" or starred by the user, KEEP IT PERMANENTLY!
+    # This executes three distinct checks:
+    # 1. 72-HOUR CONTINUOUS FOOTAGE PURGE: Deletes whole camera footage older than 72 hours.
+    # 2. EMERGENCY ROTATION: If hard drive is critically full (>= 85%), purges oldest
+    #    continuous footage first, followed by unstarred low-priority clips.
+    # 3. 72-HOUR LOW-TIER PURGE: Purges any expired low-tier clips.
+    #    All cut clips (Score >= 30) have lifelong retention and are NEVER expired.
     # ==========================================================================
     def perform_sweep(self):
+        # --- STEP 1: Standard 72-Hour Continuous Whole Footage Purge ---
+        self.purge_expired_full_footage()
+
         usage_pct = self.check_disk_usage_pct()
         total_bytes = self.get_total_video_bytes()
         max_quota_bytes = int(self.max_quota_gb * (1024 ** 3))
@@ -113,51 +178,79 @@ class StorageReaperDaemon(threading.Thread):
         emergency_disk = usage_pct >= self.disk_safety_threshold_pct
         quota_exceeded = total_bytes > max_quota_bytes
 
-        # --- STEP 1: Emergency Cleanup If Hard Drive Is Too Full ---
+        # --- STEP 2: Emergency Cleanup If Hard Drive Is Too Full ---
+        # Prioritize purging oldest continuous full footage first before touching cut incident clips!
         if quota_exceeded or emergency_disk:
             trigger_reason = "DISK_GUARDRAIL_TRIGGERED" if emergency_disk else "MAX_QUOTA_EXCEEDED"
             logger.warning(
-                f"{trigger_reason}: Used {total_bytes / (1024**3):.2f} GB (max: {self.max_quota_gb:.1f} GB, disk: {usage_pct:.1f}%). Initiating FIFO purge of oldest clips."
+                f"{trigger_reason}: Used {total_bytes / (1024**3):.2f} GB (max: {self.max_quota_gb:.1f} GB, disk: {usage_pct:.1f}%). Initiating emergency FIFO purge."
             )
 
-            # Target ceiling: free up space down to 85% of maximum allowed quota
             target_bytes = int(max_quota_bytes * 0.85)
 
-            # Look up the oldest events first (FIFO = First In, First Out)
-            oldest_events = self.db.query_events(limit=500)
-            oldest_events.sort(key=lambda e: e.start_time)
-
-            for ev in oldest_events:
+            # Sub-step 2A: Emergency purge of oldest continuous footage
+            for sub in ("full_footage", "raw"):
                 if total_bytes <= target_bytes and not emergency_disk:
                     break
-                if ev.starred:
-                    # User clicked "Star/Bookmark" — protect this clip forever!
+                sub_dir = self.data_root / sub
+                if not sub_dir.exists():
                     continue
-
-                # Delete the physical video (.mp4) and preview image (.jpg)
-                freed = 0
-                if ev.file_path and os.path.exists(ev.file_path):
+                footage_files = []
+                for root, _, files in os.walk(sub_dir):
+                    for f in files:
+                        p = os.path.join(root, f)
+                        try:
+                            footage_files.append((p, os.path.getmtime(p), os.path.getsize(p)))
+                        except OSError:
+                            pass
+                footage_files.sort(key=lambda x: x[1])  # oldest first
+                for fp, _, fsize in footage_files:
+                    if total_bytes <= target_bytes and not emergency_disk:
+                        break
                     try:
-                        freed += os.path.getsize(ev.file_path)
-                        os.remove(ev.file_path)
+                        os.remove(fp)
+                        total_bytes = max(0, total_bytes - fsize)
+                        self.db.log_audit("FIFO_EMERGENCY_FOOTAGE_PURGE", "system", f"Emergency purged continuous footage {fp} ({fsize // 1024} KB)")
                     except OSError:
                         pass
+                usage_pct = self.check_disk_usage_pct()
+                emergency_disk = usage_pct >= self.disk_safety_threshold_pct
 
-                if ev.thumb_path and os.path.exists(ev.thumb_path):
-                    try:
-                        freed += os.path.getsize(ev.thumb_path)
-                        os.remove(ev.thumb_path)
-                    except OSError:
-                        pass
+            # Sub-step 2B: If still exceeded, FIFO purge of unstarred/unpinned events
+            if quota_exceeded or emergency_disk:
+                oldest_events = self.db.query_events(limit=500)
+                oldest_events.sort(key=lambda e: e.start_time)
 
-                total_bytes = max(0, total_bytes - freed)
-                # Mark in database that the file has been purged
-                self.db.update_event_status(ev.event_group_id, "deleted")
-                self.db.log_audit("FIFO_QUOTA_PURGE", ev.event_group_id, f"Freed {freed // 1024} KB. Reason: {trigger_reason}")
+                for ev in oldest_events:
+                    if total_bytes <= target_bytes and not emergency_disk:
+                        break
+                    if ev.starred or getattr(ev, "is_pinned", 0):
+                        continue
 
-        # --- STEP 2: Standard 72-Hour Hard Purge ---
-        # Notice the SQL WHERE clause below: it ONLY selects tier = 'low'.
-        # 'review' and 'alert' tier clips are NEVER deleted by this routine!
+                    freed = 0
+                    if ev.file_path and os.path.exists(ev.file_path):
+                        try:
+                            freed += os.path.getsize(ev.file_path)
+                            os.remove(ev.file_path)
+                        except OSError:
+                            pass
+
+                    if ev.thumb_path and os.path.exists(ev.thumb_path):
+                        try:
+                            freed += os.path.getsize(ev.thumb_path)
+                            os.remove(ev.thumb_path)
+                        except OSError:
+                            pass
+
+                    total_bytes = max(0, total_bytes - freed)
+                    self.db.update_event_status(ev.event_group_id, "deleted")
+                    self.db.log_audit("FIFO_QUOTA_PURGE", ev.event_group_id, f"Freed {freed // 1024} KB. Reason: {trigger_reason}")
+                    usage_pct = self.check_disk_usage_pct()
+                    emergency_disk = usage_pct >= self.disk_safety_threshold_pct
+
+        # --- STEP 3: Standard 72-Hour Low-Tier Database Purge ---
+        # Note: Only 'low' tier clips expire. Cut clips (Score >= 30, tier 'review' or 'alert')
+        # are kept lifelong and are NEVER deleted by this routine!
         now = datetime.now(timezone.utc)
         now_ms = int(now.timestamp() * 1000)
         retention_cutoff = (now - timedelta(hours=self.raw_retention_hours)).isoformat()
@@ -187,7 +280,6 @@ class StorageReaperDaemon(threading.Thread):
             fp = row["file_path"]
             tp = row["thumb_path"]
 
-            # 1. Delete physical files on disk / R2
             freed = 0
             if fp and os.path.exists(fp):
                 try:
@@ -202,7 +294,6 @@ class StorageReaperDaemon(threading.Thread):
                 except OSError:
                     pass
 
-            # 2. Update status to deleted
             self.db.update_event_status(ev_id, "deleted")
             self.db.log_audit("PURGE_LOW_TIER_72H", ev_id, f"Auto-deleted expired low-tier clip (Score: {row['score']}, Freed: {freed // 1024} KB)")
 

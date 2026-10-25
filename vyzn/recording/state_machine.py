@@ -401,10 +401,13 @@ class ClipStateMachine:
         # Check if this pure-motion burst was shorter than or equal to min_motion_only_sec (<=3s) without recognized targets
         active_dur = max(0.0, self.last_active_window_end - self.first_active_window_start)
         is_discarded = False
-        if (self.primary_object in ("unclassified", "movement", "")) and active_dur <= self.min_motion_only_sec:
+        # Instruction rule: Never clip or save anything with score < 30!
+        if final_score < 30:
+            is_discarded = True
+        elif (self.primary_object in ("unclassified", "movement", "")) and active_dur <= self.min_motion_only_sec:
             is_discarded = True
         # In simple terms: if an event was split into parts and the very last trailing fragment has less than 3 seconds of footage, discard it so we do not save a 1-second useless stub
-        if self.current_part_index > 0 and active_dur < self.score_interval_seconds:
+        elif self.current_part_index > 0 and active_dur < self.score_interval_seconds:
             is_discarded = True
 
         # Trim ticks past clip_end_pts and before clip_start_pts
@@ -492,12 +495,12 @@ class ClipStateMachine:
             highest_score=self.highest_score,
             primary_object=self.primary_object,
             max_confidence=self.max_confidence,
-            is_discarded=False,
+            is_discarded=bool(self.highest_score < 30),
             is_alert=self.alert_fired,
             score=self.highest_score,
             score_raw=float(self.highest_score),
-            tier="review" if self.highest_score < 70 else "alert",
-            severity_label="Medium" if self.highest_score < 70 else "High",
+            tier="low" if self.highest_score < 30 else ("review" if self.highest_score < 70 else "alert"),
+            severity_label="Low" if self.highest_score < 30 else ("Medium" if self.highest_score < 70 else "High"),
             score_breakdown=self.peak_breakdown,
             ticks=[t for t in self.active_ticks if t.tick_end_pts <= split_pts],
             peak_frame_idx=0,
