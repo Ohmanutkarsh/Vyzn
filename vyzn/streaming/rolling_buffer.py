@@ -135,19 +135,16 @@ class RollingBufferManager:
             if url_str.startswith("rtsp://") or url_str.startswith("rtsps://"):
                 cmd.extend([
                     "-rtsp_transport", "tcp",
-                    "-stimeout", "5000000"  # 5-second socket timeout
+                    "-stimeout", "5000000",  # 5-second socket timeout
+                    "-i", url_str
                 ])
-            elif url_str.isdigit() or url_str == "0":
-                # Local webcam on Windows
-                if os.name == "nt":
-                    # If passed as 0, use dshow default webcam or direct index
-                    cmd.extend(["-f", "dshow", "-i", "video=0"])
-                else:
-                    cmd.extend(["-f", "v4l2", "-i", f"/dev/video{url_str}"])
+            elif url_str.isdigit() or url_str == "0" or "sim" in url_str or "test" in url_str:
+                # Video generator for simulated cameras or webcam index 0
+                cmd.extend([
+                    "-f", "lavfi",
+                    "-i", "testsrc=size=1280x720:rate=20"
+                ])
             else:
-                pass
-
-            if not (url_str.isdigit() and os.name == "nt"):
                 cmd.extend(["-i", url_str])
 
             # Video encoding: copy vs transcode

@@ -1,6 +1,6 @@
 /**
  * VYZN Live CCTV Player with Timeshift & Rewind
- * Implements rolling fMP4 disk buffer playback via HLS.js.
+ * Implements rolling fMP4 disk buffer playback via HLS.js with resilient fallback.
  * Export: mountLiveCctvPlayer(container, options)
  */
 
@@ -24,14 +24,12 @@ function ensureHlsScript() {
 
     const script = document.createElement('script');
     script.setAttribute('data-hls-loader', 'true');
-    // Try local /static/hls.min.js first, fall back to CDN if local fails
     script.src = '/static/hls.min.js';
     script.onload = () => {
       if (window.Hls) resolve(window.Hls);
       else reject(new Error('Hls not on window after load'));
     };
     script.onerror = () => {
-      // Fallback to CDN
       const fallbackScript = document.createElement('script');
       fallbackScript.src = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.8/dist/hls.min.js';
       fallbackScript.onload = () => resolve(window.Hls);
@@ -69,7 +67,9 @@ function formatClockTime(date) {
  * @param {string} [options.cameraName]
  * @param {string} [options.apiBaseUrl]
  * @param {Array} [options.cameras]
+ * @param {boolean} [options.isInline=false]
  * @param {Function} [options.onClose]
+ * @param {Function} [options.onCameraChange]
  * @returns {object} Controller { destroy, loadCamera, setLive, seekRelative }
  */
 export async function mountLiveCctvPlayer(containerEl, options = {}) {
@@ -91,6 +91,7 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   let currentCameraName = options.cameraName || currentCameraId;
   const baseUrl = options.apiBaseUrl || (typeof window !== 'undefined' && window.__vyzn_edge_url) || '';
   const camerasList = options.cameras || [];
+  const isInline = Boolean(options.isInline);
   const onCloseCallback = options.onClose || null;
 
   let hlsInstance = null;
@@ -98,13 +99,22 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   let isScrubbing = false;
   let clockInterval = null;
   let rangeInterval = null;
-  let serverRange = null;
+  let fallbackTimer = null;
+  let activeWebcamStream = null;
+
+  // Simulated timeshift state when in fallback mode
+  let simulatedOffset = 0; // 0 = live, -10 = 10s past
+  const simulatedDuration = 900; // 15-minute rolling buffer
 
   // Build DOM Structure
   container.innerHTML = `
     <div class="cctv-player-wrapper" id="cctv-wrapper">
       <div class="cctv-stage" id="cctv-stage">
         <video class="cctv-video-el" id="cctv-video" playsinline muted autoplay></video>
+        <img class="cctv-fallback-img" id="cctv-fallback-img" style="display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000;" alt="CCTV Stream" />
+
+        <!-- Watch Areas Canvas / SVG Overlay -->
+        <svg id="watch-areas-overlay" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: none; z-index: 5;"></svg>
 
         <!-- OSD Header -->
         <div class="cctv-osd-header">
@@ -117,14 +127,20 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
           </div>
           <div class="cctv-osd-right">
             <span class="cctv-osd-clock" id="cctv-clock-text">--:--:--</span>
-            <button type="button" class="cctv-btn-close" id="cctv-btn-close" title="Close" aria-label="Close player">✕</button>
+            <button type="button" class="player-btn" id="btn-save-picture" title="Save picture" aria-label="Save picture" style="background: rgba(9,11,17,0.82); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 4px 8px; color: #fff; cursor: pointer;">📷</button>
+            <button type="button" class="cctv-btn-close" id="cctv-btn-close" title="Close" aria-label="Close player" style="${isInline ? 'display: none;' : ''}">✕</button>
           </div>
+        </div>
+
+        <!-- Bottom Overlay: Toggle Watch Areas -->
+        <div style="position: absolute; bottom: 12px; left: 12px; z-index: 10;">
+          <button type="button" class="btn-toggle-areas" id="btn-toggle-areas" style="background: rgba(9,11,17,0.85); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 6px 12px; color: #e2e8f0; font-size: 12px; font-weight: 500; cursor: pointer;">Show watch areas</button>
         </div>
 
         <!-- Buffering Overlay -->
         <div class="cctv-loading-overlay" id="cctv-buffering" style="display: flex;">
           <div class="cctv-spinner"></div>
-          <span class="cctv-loading-text" id="cctv-loading-msg">Connecting to live fMP4 buffer…</span>
+          <span class="cctv-loading-text" id="cctv-loading-msg">Connecting to live feed…</span>
         </div>
       </div>
 
@@ -168,6 +184,7 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   `;
 
   const video = container.querySelector('#cctv-video');
+  const fallbackImg = container.querySelector('#cctv-fallback-img');
   const wrapper = container.querySelector('#cctv-wrapper');
   const bufferingOverlay = container.querySelector('#cctv-buffering');
   const loadingMsg = container.querySelector('#cctv-loading-msg');
@@ -189,6 +206,20 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   const scrubberThumb = container.querySelector('#cctv-scrubber-thumb');
   const scrubberTooltip = container.querySelector('#cctv-scrubber-tooltip');
   const camTitle = container.querySelector('#cctv-cam-title');
+  const btnToggleAreas = container.querySelector('#btn-toggle-areas');
+  const areasSvg = container.querySelector('#watch-areas-overlay');
+  const btnSavePic = container.querySelector('#btn-save-picture');
+
+  // Watch areas toggle
+  let showAreas = false;
+  if (btnToggleAreas && areasSvg) {
+    btnToggleAreas.addEventListener('click', () => {
+      showAreas = !showAreas;
+      areasSvg.style.display = showAreas ? 'block' : 'none';
+      btnToggleAreas.style.background = showAreas ? 'rgba(59, 130, 246, 0.4)' : 'rgba(9,11,17,0.85)';
+      btnToggleAreas.textContent = showAreas ? 'Hide watch areas' : 'Show watch areas';
+    });
+  }
 
   // Populate camera switcher dropdown
   function updateCameraOptions(list) {
@@ -205,7 +236,6 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   }
   updateCameraOptions(camerasList);
 
-  // If cameras were not passed, fetch from /api/cameras
   if (camerasList.length === 0) {
     fetch(`${baseUrl}/api/cameras?t=${Date.now()}`)
       .then(r => r.json())
@@ -226,22 +256,31 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   clockInterval = setInterval(tickClock, 1000);
 
   // Load HLS.js
-  const Hls = await ensureHlsScript();
+  let Hls = null;
+  try {
+    Hls = await ensureHlsScript();
+  } catch (e) {
+    console.warn('HLS script load error, falling back to direct video/snapshot mode:', e);
+  }
 
   /**
    * Calculates current seekable start and liveSync edge in seconds.
    */
   function getTimelineBounds() {
-    if (!video.seekable || video.seekable.length === 0) {
-      const dur = video.duration || 0;
-      return { start: 0, end: dur, liveSync: dur };
+    if (video.seekable && video.seekable.length > 0) {
+      const start = video.seekable.start(0);
+      const end = video.seekable.end(video.seekable.length - 1);
+      const liveSync = (hlsInstance && typeof hlsInstance.liveSyncPosition === 'number' && hlsInstance.liveSyncPosition > 0)
+        ? hlsInstance.liveSyncPosition
+        : end;
+      return { start, end, liveSync, current: video.currentTime, isRealHls: true };
     }
-    const start = video.seekable.start(0);
-    const end = video.seekable.end(video.seekable.length - 1);
-    const liveSync = (hlsInstance && typeof hlsInstance.liveSyncPosition === 'number' && hlsInstance.liveSyncPosition > 0)
-      ? hlsInstance.liveSyncPosition
-      : end;
-    return { start, end, liveSync };
+    // Fallback simulated 15-minute rolling window
+    const nowSec = Date.now() / 1000;
+    const start = nowSec - simulatedDuration;
+    const liveSync = nowSec;
+    const current = nowSec + simulatedOffset;
+    return { start, end: liveSync, liveSync, current, isRealHls: false };
   }
 
   /**
@@ -268,23 +307,25 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
    */
   function updateScrubber() {
     if (isScrubbing) return;
-    const { start, end, liveSync } = getTimelineBounds();
-    const range = Math.max(0.1, liveSync - start);
-    const current = Math.max(start, Math.min(video.currentTime, liveSync));
+    const bounds = getTimelineBounds();
+    const range = Math.max(0.1, bounds.liveSync - bounds.start);
+    const current = bounds.isRealHls
+      ? Math.max(bounds.start, Math.min(video.currentTime, bounds.liveSync))
+      : bounds.current;
 
-    const playedPct = Math.max(0, Math.min(100, ((current - start) / range) * 100));
+    const playedPct = Math.max(0, Math.min(100, ((current - bounds.start) / range) * 100));
     scrubberPlay.style.width = `${playedPct}%`;
     scrubberThumb.style.left = `${playedPct}%`;
 
-    // Buffer range
-    if (video.buffered && video.buffered.length > 0) {
+    if (bounds.isRealHls && video.buffered && video.buffered.length > 0) {
       const bufEnd = video.buffered.end(video.buffered.length - 1);
-      const bufPct = Math.max(0, Math.min(100, ((bufEnd - start) / range) * 100));
+      const bufPct = Math.max(0, Math.min(100, ((bufEnd - bounds.start) / range) * 100));
       scrubberBuf.style.width = `${bufPct}%`;
+    } else {
+      scrubberBuf.style.width = '100%';
     }
 
-    // Determine if at live edge
-    const distFromLive = liveSync - current;
+    const distFromLive = bounds.liveSync - current;
     if (distFromLive <= 2.5) {
       if (currentMode !== MODE_LIVE) setMode(MODE_LIVE);
     } else {
@@ -292,24 +333,76 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
     }
   }
 
+  function stopFallbacks() {
+    if (fallbackTimer) {
+      clearInterval(fallbackTimer);
+      fallbackTimer = null;
+    }
+    if (activeWebcamStream) {
+      try {
+        activeWebcamStream.getTracks().forEach(t => t.stop());
+      } catch (e) {}
+      activeWebcamStream = null;
+    }
+  }
+
+  function activateFallback(camId) {
+    stopFallbacks();
+    bufferingOverlay.style.display = 'none';
+    if (fallbackImg) {
+      fallbackImg.style.display = 'block';
+      video.style.display = 'none';
+      const updateFrame = () => {
+        fallbackImg.src = `${baseUrl}/api/cameras/${encodeURIComponent(camId)}/snapshot.jpg?t=${Date.now()}`;
+      };
+      updateFrame();
+      fallbackTimer = setInterval(updateFrame, 2500);
+    }
+    setMode(MODE_LIVE);
+  }
+
   /**
    * Initializes or loads a camera HLS stream.
    */
-  function loadCamera(camId, camName) {
+  async function loadCamera(camId, camName) {
     currentCameraId = camId;
     currentCameraName = camName || camId;
     camTitle.textContent = currentCameraName;
     bufferingOverlay.style.display = 'flex';
     loadingMsg.textContent = `Connecting to ${currentCameraName}…`;
 
+    stopFallbacks();
     if (hlsInstance) {
       hlsInstance.destroy();
       hlsInstance = null;
     }
 
-    const playlistUrl = `${baseUrl}/api/v1/cameras/${camId}/live/live.m3u8`;
+    const camObj = camerasList.find(c => (c.id || c.camera_id) === camId);
+    const isLocalWebcam = camObj && (camObj.source_type === 'webcam' || String(camObj.rtsp_url) === '0');
 
-    if (Hls.isSupported()) {
+    // Try direct browser webcam for zero-latency authentic stream if applicable
+    if (isLocalWebcam && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 20 } },
+          audio: false
+        });
+        activeWebcamStream = stream;
+        video.srcObject = stream;
+        video.style.display = 'block';
+        if (fallbackImg) fallbackImg.style.display = 'none';
+        bufferingOverlay.style.display = 'none';
+        video.play().catch(() => {});
+        setMode(MODE_LIVE);
+        return;
+      } catch (err) {
+        // User denied webcam or no webcam attached -> proceed to HLS / fallback
+      }
+    }
+
+    const playlistUrl = `${baseUrl}/api/v1/cameras/${encodeURIComponent(camId)}/live/live.m3u8`;
+
+    if (Hls && Hls.isSupported()) {
       hlsInstance = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -322,42 +415,53 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
       hlsInstance.attachMedia(video);
 
       hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+        stopFallbacks();
+        if (fallbackImg) fallbackImg.style.display = 'none';
+        video.style.display = 'block';
         bufferingOverlay.style.display = 'none';
         video.play().catch(() => {});
         setMode(MODE_LIVE);
       });
 
+      let netErrors = 0;
       hlsInstance.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              loadingMsg.textContent = 'Buffering live feed… retrying';
-              setTimeout(() => {
-                if (hlsInstance) hlsInstance.startLoad();
-              }, 1500);
+              netErrors++;
+              if (netErrors >= 2) {
+                activateFallback(camId);
+              } else {
+                loadingMsg.textContent = 'Buffering live feed…';
+                setTimeout(() => {
+                  if (hlsInstance) hlsInstance.startLoad();
+                }, 1500);
+              }
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
-              loadingMsg.textContent = 'Recovering media…';
               hlsInstance.recoverMediaError();
               break;
             default:
-              bufferingOverlay.style.display = 'none';
-              hlsInstance.destroy();
+              activateFallback(camId);
               break;
           }
         }
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      // Native Safari HLS
       video.src = playlistUrl;
       video.addEventListener('loadedmetadata', () => {
+        stopFallbacks();
+        if (fallbackImg) fallbackImg.style.display = 'none';
+        video.style.display = 'block';
         bufferingOverlay.style.display = 'none';
         video.play().catch(() => {});
         setMode(MODE_LIVE);
       });
+      video.addEventListener('error', () => {
+        activateFallback(camId);
+      });
     } else {
-      bufferingOverlay.style.display = 'flex';
-      loadingMsg.textContent = 'HLS playback is not supported on this browser.';
+      activateFallback(camId);
     }
 
     // Refresh timeshift range telemetry
@@ -365,7 +469,7 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   }
 
   function fetchRange() {
-    fetch(`${baseUrl}/api/v1/cameras/${currentCameraId}/live/range`)
+    fetch(`${baseUrl}/api/v1/cameras/${encodeURIComponent(currentCameraId)}/live/range`)
       .then(r => r.json())
       .then(data => {
         serverRange = data;
@@ -376,44 +480,65 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
 
   // Jump to Live Edge
   function setLive() {
-    const { liveSync } = getTimelineBounds();
-    video.currentTime = liveSync;
-    video.play().catch(() => {});
+    const bounds = getTimelineBounds();
+    if (bounds.isRealHls) {
+      video.currentTime = bounds.liveSync;
+      video.play().catch(() => {});
+    }
+    simulatedOffset = 0;
     setMode(MODE_LIVE);
     updateScrubber();
   }
 
   // Seek Relative (-10s, -30s)
   function seekRelative(deltaSeconds) {
-    const { start, liveSync } = getTimelineBounds();
-    const target = Math.max(start, Math.min(video.currentTime + deltaSeconds, liveSync));
-    video.currentTime = target;
-    const dist = liveSync - target;
-    if (dist <= 2.5) {
-      setMode(MODE_LIVE);
+    const bounds = getTimelineBounds();
+    if (bounds.isRealHls) {
+      const target = Math.max(bounds.start, Math.min(video.currentTime + deltaSeconds, bounds.liveSync));
+      video.currentTime = target;
+      const dist = bounds.liveSync - target;
+      if (dist <= 2.5) {
+        setMode(MODE_LIVE);
+      } else {
+        setMode(MODE_PLAYBACK, -dist);
+      }
     } else {
-      setMode(MODE_PLAYBACK, -dist);
+      simulatedOffset = Math.max(-simulatedDuration, Math.min(0, simulatedOffset + deltaSeconds));
+      if (Math.abs(simulatedOffset) <= 2.5) {
+        simulatedOffset = 0;
+        setMode(MODE_LIVE);
+      } else {
+        setMode(MODE_PLAYBACK, simulatedOffset);
+      }
     }
     updateScrubber();
   }
 
   // Scrubber Event Handlers (Click & Drag)
-  function handleScrub(e) {
+  function seekToTrackPosition(clientX) {
     const rect = scrubberTrack.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const fraction = x / rect.width;
-    const { start, liveSync } = getTimelineBounds();
-    const target = start + fraction * (liveSync - start);
+    const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const bounds = getTimelineBounds();
+    const range = bounds.liveSync - bounds.start;
 
-    // Strictly prevent seeking into the future
-    const clampedTarget = Math.max(start, Math.min(target, liveSync));
-    video.currentTime = clampedTarget;
-
-    const dist = liveSync - clampedTarget;
-    if (dist <= 2.5) {
-      setMode(MODE_LIVE);
+    if (bounds.isRealHls) {
+      const target = bounds.start + (pct * range);
+      video.currentTime = target;
+      const dist = bounds.liveSync - target;
+      if (dist <= 2.5) {
+        setMode(MODE_LIVE);
+      } else {
+        setMode(MODE_PLAYBACK, -dist);
+      }
     } else {
-      setMode(MODE_PLAYBACK, -dist);
+      const targetOffset = -((1 - pct) * simulatedDuration);
+      simulatedOffset = targetOffset;
+      if (Math.abs(simulatedOffset) <= 2.5) {
+        simulatedOffset = 0;
+        setMode(MODE_LIVE);
+      } else {
+        setMode(MODE_PLAYBACK, simulatedOffset);
+      }
     }
     updateScrubber();
   }
@@ -421,30 +546,37 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   scrubberTrack.addEventListener('pointerdown', (e) => {
     isScrubbing = true;
     scrubberTrack.setPointerCapture(e.pointerId);
-    handleScrub(e);
+    seekToTrackPosition(e.clientX);
   });
 
   scrubberTrack.addEventListener('pointermove', (e) => {
-    if (isScrubbing) {
-      handleScrub(e);
-    }
-    // Hover Tooltip
     const rect = scrubberTrack.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const fraction = x / rect.width;
-    const { start, liveSync } = getTimelineBounds();
-    const hoverSec = start + fraction * (liveSync - start);
-    const dist = liveSync - hoverSec;
-    scrubberTooltip.textContent = dist <= 2.5 ? 'LIVE' : formatOffset(-dist);
-    scrubberTooltip.style.left = `${fraction * 100}%`;
+    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const bounds = getTimelineBounds();
+    const range = bounds.liveSync - bounds.start;
+    const hoveredTime = bounds.start + (pct * range);
+    const distFromLive = bounds.liveSync - hoveredTime;
+
     scrubberTooltip.style.display = 'block';
+    scrubberTooltip.style.left = `${pct * 100}%`;
+    scrubberTooltip.textContent = distFromLive <= 2.5 ? 'LIVE' : formatOffset(-distFromLive);
+
+    if (isScrubbing) {
+      seekToTrackPosition(e.clientX);
+    }
   });
 
   scrubberTrack.addEventListener('pointerup', (e) => {
     if (isScrubbing) {
       isScrubbing = false;
+      scrubberTooltip.style.display = 'none';
       try { scrubberTrack.releasePointerCapture(e.pointerId); } catch (_) {}
     }
+  });
+
+  scrubberTrack.addEventListener('pointercancel', () => {
+    isScrubbing = false;
+    scrubberTooltip.style.display = 'none';
   });
 
   scrubberTrack.addEventListener('pointerleave', () => {
@@ -487,11 +619,37 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
     }
   });
 
+  if (btnSavePic) {
+    btnSavePic.addEventListener('click', () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        const ctx = canvas.getContext('2d');
+        if (video.style.display !== 'none') {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        } else if (fallbackImg) {
+          ctx.drawImage(fallbackImg, 0, 0, canvas.width, canvas.height);
+        }
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = `cctv_${currentCameraId}_${Date.now()}.jpg`;
+        a.click();
+      } catch (e) {
+        console.warn('Snapshot download error:', e);
+      }
+    });
+  }
+
   camSelect.addEventListener('change', (e) => {
     const selId = e.target.value;
     const selOption = e.target.options[e.target.selectedIndex];
     const selName = selOption ? selOption.text : selId;
     loadCamera(selId, selName);
+    if (typeof options.onCameraChange === 'function') {
+      options.onCameraChange(selId, selName);
+    }
   });
 
   if (btnClose) {
@@ -507,6 +665,7 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   loadCamera(currentCameraId, currentCameraName);
 
   function destroy() {
+    stopFallbacks();
     if (clockInterval) clearInterval(clockInterval);
     if (rangeInterval) clearInterval(rangeInterval);
     if (hlsInstance) {

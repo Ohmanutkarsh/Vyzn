@@ -1,13 +1,11 @@
 import { initShell, promptSecurityPin } from './components/shell.js';
 import { renderCameraTile } from './components/camera-tile.js';
-import { mountLiveCctvPlayer } from './components/live-player.js';
 import { t, initI18n } from './i18n.js';
 import { escapeHtml } from './utils.js';
 
 let camerasList = [];
 let pendingRemoveId = null;
 let pendingRenameId = null;
-let activeLivePlayer = null;
 
 let edgeBaseUrl = null;
 let edgeCameras = null;
@@ -124,62 +122,7 @@ async function loadCameras() {
   }
 }
 
-function openLivePlayer(camId, camName) {
-  const modal = document.getElementById('modal-cctv-live');
-  const playerContainer = document.getElementById('cctv-player-container');
-  if (!modal || !playerContainer) return;
-
-  closeAllMenus();
-  if (activeLivePlayer) {
-    activeLivePlayer.destroy();
-    activeLivePlayer = null;
-  }
-
-  modal.style.display = 'flex';
-  activeLivePlayer = mountLiveCctvPlayer(playerContainer, {
-    cameraId: camId,
-    cameraName: camName || camId,
-    cameras: camerasList,
-    apiBaseUrl: edgeBaseUrl || '',
-    onClose: closeLivePlayer
-  });
-}
-
-function closeLivePlayer() {
-  const modal = document.getElementById('modal-cctv-live');
-  if (activeLivePlayer) {
-    activeLivePlayer.destroy();
-    activeLivePlayer = null;
-  }
-  if (modal) modal.style.display = 'none';
-}
-
 function attachTileActions() {
-  // Tile click -> Open Live Timeshift Player
-  document.querySelectorAll('.camera-tile').forEach(tile => {
-    tile.addEventListener('click', (e) => {
-      // Ignore clicks on menu button or within dropdown or area links
-      if (e.target.closest('.camera-menu-wrap') || e.target.closest('a') || e.target.closest('button')) {
-        return;
-      }
-      const camId = tile.getAttribute('data-camera-id');
-      const camObj = camerasList.find(c => (c.id || c.camera_id) === camId);
-      const camName = camObj ? camObj.name : camId;
-      openLivePlayer(camId, camName);
-    });
-  });
-
-  // Watch Live & Timeshift Action Button
-  document.querySelectorAll('.action-watch-live').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeAllMenus();
-      const camId = btn.getAttribute('data-cam-id');
-      const camName = btn.getAttribute('data-cam-name') || camId;
-      openLivePlayer(camId, camName);
-    });
-  });
-
   // Menu trigger toggle
   document.querySelectorAll('.btn-menu-trigger').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -335,24 +278,6 @@ function attachEventListeners() {
       }
     });
   }
-
-  // Close Live CCTV modal on scrim click or Escape key
-  const liveModal = document.getElementById('modal-cctv-live');
-  if (liveModal) {
-    liveModal.addEventListener('click', (e) => {
-      if (e.target === liveModal) {
-        closeLivePlayer();
-      }
-    });
-  }
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      closeLivePlayer();
-      closeRemoveModal();
-      closeRenameModal();
-    }
-  });
 }
 
 function refreshSnapshots() {

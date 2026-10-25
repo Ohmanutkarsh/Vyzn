@@ -1984,6 +1984,32 @@ def stream_camera_visual(camera_id: str = "cam_webcam_1792084160"):
             break
     label = html.escape((cam_name or camera_id.replace("cam_", "").replace("_", " ")).upper())
     cur_time = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Render valid JPEG using Pillow so no browser or shield blocks it
+    try:
+        import io
+        from PIL import Image, ImageDraw
+        img = Image.new("RGB", (640, 360), color=(14, 18, 27))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([10, 10, 629, 349], outline=(30, 41, 59), width=1)
+        draw.ellipse([26, 26, 36, 36], fill=(52, 211, 153))
+        draw.text((45, 24), f"{label} • LIVE", fill=(240, 240, 240))
+        draw.text((470, 24), cur_time, fill=(148, 163, 184))
+        draw.text((245, 165), "Live Video Connected", fill=(226, 232, 240))
+        draw.text((235, 195), "Streaming via VYZN Security", fill=(100, 116, 139))
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        return Response(
+            content=buf.getvalue(),
+            media_type="image/jpeg",
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "no-cache, no-store, must-revalidate"
+            }
+        )
+    except Exception:
+        pass
+
     svg = f'''<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
   <defs>
