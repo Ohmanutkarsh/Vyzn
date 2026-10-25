@@ -8,8 +8,8 @@
     "target_fps": 20.0,
     "capture_fps": 20.0,
     "ai_inference_fps": 20.0,
-    "downscale_width": 854,
-    "downscale_height": 480,
+    "downscale_width": 1920,
+    "downscale_height": 1080,
     "is_night_ir": false,
     "owner_email": "dirtbike000000@gmail.com",
     "business_hours": {
@@ -78,7 +78,8 @@
     "pre_roll_sec": null,
     "post_roll_sec": null,
     "merge_gap_sec": null,
-    "max_clip_duration_sec": null
+    "max_clip_duration_sec": null,
+    "use_native_resolution": true
   },
   {
     "camera_id": "cam_81559",
@@ -89,8 +90,8 @@
     "target_fps": 20.0,
     "capture_fps": 20.0,
     "ai_inference_fps": 20.0,
-    "downscale_width": 854,
-    "downscale_height": 480,
+    "downscale_width": 1920,
+    "downscale_height": 1080,
     "is_night_ir": false,
     "owner_email": "dirtbike000000@gmail.com",
     "business_hours": {
@@ -104,10 +105,22 @@
       {
         "name": "Area 1",
         "points": [
-          [0.1, 0.1],
-          [0.9, 0.1],
-          [0.9, 0.9],
-          [0.1, 0.9]
+          [
+            0.1,
+            0.1
+          ],
+          [
+            0.9,
+            0.1
+          ],
+          [
+            0.9,
+            0.9
+          ],
+          [
+            0.1,
+            0.9
+          ]
         ]
       }
     ],
@@ -118,10 +131,22 @@
         "camera_id": "cam_81559",
         "name": "Area 1",
         "polygon": [
-          [0.1, 0.1],
-          [0.9, 0.1],
-          [0.9, 0.9],
-          [0.1, 0.9]
+          [
+            0.1,
+            0.1
+          ],
+          [
+            0.9,
+            0.1
+          ],
+          [
+            0.9,
+            0.9
+          ],
+          [
+            0.1,
+            0.9
+          ]
         ],
         "response": "alert",
         "min_stay_seconds": 0,
@@ -135,6 +160,7 @@
     "pre_roll_sec": null,
     "post_roll_sec": null,
     "merge_gap_sec": null,
-    "max_clip_duration_sec": null
+    "max_clip_duration_sec": null,
+    "use_native_resolution": true
   }
 ]

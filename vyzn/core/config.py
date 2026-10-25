@@ -65,8 +65,9 @@ class CameraConfig(BaseModel):
     target_fps: float = 20.0
     capture_fps: float = 20.0
     ai_inference_fps: float = 20.0
-    downscale_width: int = 854
-    downscale_height: int = 480
+    downscale_width: int = 1920
+    downscale_height: int = 1080
+    use_native_resolution: bool = True
     is_night_ir: bool = False
     owner_email: Optional[str] = None
     business_hours: BusinessHours = Field(default_factory=BusinessHours)

@@ -2426,8 +2426,8 @@ existing_paths = {r.path for r in app.routes if hasattr(r, "path")}
 for route in list(app.routes):
     if hasattr(route, "path") and route.path.startswith("/api/"):
         alt_path = route.path[4:]  # e.g., '/status'
-        if not alt_path:
-            alt_path = "/"
+        if not alt_path or alt_path == "/":
+            continue
         if alt_path not in existing_paths:
             methods = list(route.methods) if hasattr(route, "methods") and route.methods else ["GET"]
             app.add_api_route(

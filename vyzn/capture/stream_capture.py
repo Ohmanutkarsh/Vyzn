@@ -432,15 +432,9 @@ class RTSPCaptureThread(threading.Thread):
                 with self._latest_lock:
                     self.latest_frame = frame
 
-                # Compress downscaled frame to JPEG for RAM-aware ring buffer (~30KB/frame)
-                h, w = frame.shape[:2]
-                target_w, target_h = self.config.downscale_width, self.config.downscale_height
-                if (w, h) != (target_w, target_h):
-                    buf_frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
-                else:
-                    buf_frame = frame
-
-                ret_enc, jpeg_bytes = cv2.imencode(".jpg", buf_frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                # User instruction: preserve original (OG) resolution for recorded clips & footage
+                # Store original full-resolution frame in ring buffer so pre-roll has full OG resolution
+                ret_enc, jpeg_bytes = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 if ret_enc:
                     with self._ring_lock:
                         self.ring_buffer.append(jpeg_bytes.tobytes())
@@ -460,12 +454,9 @@ class RTSPCaptureThread(threading.Thread):
 
                 last_pushed_time = now_mono
 
-                # Downscale to 360p for MOG2 & Inference
-                downscaled = buf_frame
-
-                # Push to queue with real Unix epoch timestamp
+                # Push original resolution frame so recorded clips and 24h continuous footage preserve original (OG) camera size
                 now_epoch = time.time()
-                item = (self.config.camera_id, now_epoch, downscaled, self.config.is_night_ir)
+                item = (self.config.camera_id, now_epoch, frame, self.config.is_night_ir)
                 if self.output_queue.full():
                     try:
                         self.output_queue.get_nowait()
