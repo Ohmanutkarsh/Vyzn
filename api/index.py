@@ -2000,6 +2000,142 @@ def stream_camera_visual(camera_id: str = "cam_webcam_1792084160"):
 </svg>'''
     return Response(content=svg, media_type="image/svg+xml")
 
+# ---------------------------------------------------------------------------
+# Section 2.2: Live CCTV HLS Streaming & Timeshift Endpoints
+# ---------------------------------------------------------------------------
+from vyzn.streaming.rolling_buffer import get_rolling_buffer_manager
+
+def _resolve_camera_source_url(camera_id: str) -> Optional[str]:
+    """Helper to find RTSP/stream URL for a camera."""
+    for c in load_real_cameras():
+        if c.get("id") == camera_id or c.get("camera_id") == camera_id:
+            return str(c.get("rtsp_url", ""))
+    for c in DEFAULT_REAL_CAMERAS:
+        if c.get("id") == camera_id or c.get("camera_id") == camera_id:
+            return str(c.get("rtsp_url", ""))
+    return None
+
+@app.get("/api/v1/cameras/{camera_id}/live/live.m3u8")
+@app.get("/api/cameras/{camera_id}/live/live.m3u8")
+def get_camera_live_m3u8(camera_id: str):
+    """
+    Serves the rolling fMP4 HLS playlist.
+    Header: Content-Type: application/vnd.apple.mpegurl
+    Cache-Control: no-cache, no-store, must-revalidate
+    """
+    mgr = get_rolling_buffer_manager()
+    cam_dir = mgr.get_camera_buffer_dir(camera_id)
+    playlist_path = cam_dir / "live.m3u8"
+
+    # Auto-start buffer if not running and camera source exists
+    if not mgr.is_buffer_running(camera_id):
+        rtsp_url = _resolve_camera_source_url(camera_id)
+        if rtsp_url:
+            mgr.start_camera_buffer(camera_id, rtsp_url)
+
+    if not playlist_path.exists() or playlist_path.stat().st_size == 0:
+        # Wait briefly for initial segment generation if daemon just started
+        for _ in range(3):
+            time.sleep(0.5)
+            if playlist_path.exists() and playlist_path.stat().st_size > 0:
+                break
+
+    if not playlist_path.exists() or playlist_path.stat().st_size == 0:
+        raise HTTPException(
+            status_code=503,
+            detail="Live buffer initializing. Please retry in 1-2 seconds.",
+            headers={"Retry-After": "1", "Cache-Control": "no-cache, no-store, must-revalidate"}
+        )
+
+    try:
+        content = playlist_path.read_bytes()
+        return Response(
+            content=content,
+            media_type="application/vnd.apple.mpegurl",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "*"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/cameras/{camera_id}/live/init.mp4")
+@app.get("/api/cameras/{camera_id}/live/init.mp4")
+def get_camera_live_init_mp4(camera_id: str):
+    """
+    Serves the fMP4 codec initialization fragment.
+    Header: Content-Type: video/mp4
+    Cache-Control: public, max-age=3600
+    """
+    mgr = get_rolling_buffer_manager()
+    cam_dir = mgr.get_camera_buffer_dir(camera_id)
+    init_path = cam_dir / "init.mp4"
+
+    if not init_path.exists():
+        for _ in range(3):
+            time.sleep(0.5)
+            if init_path.exists():
+                break
+
+    if not init_path.exists():
+        raise HTTPException(status_code=404, detail="Initialization fragment init.mp4 not found")
+
+    return FileResponse(
+        path=str(init_path),
+        media_type="video/mp4",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
+@app.get("/api/v1/cameras/{camera_id}/live/range")
+@app.get("/api/cameras/{camera_id}/live/range")
+def get_camera_live_range(camera_id: str):
+    """
+    Returns timeshift range:
+    {"camera_id": camera_id, "earliest_time": float, "latest_time": float, "is_live": bool, "duration_sec": float}
+    """
+    mgr = get_rolling_buffer_manager()
+    status = mgr.get_camera_buffer_status(camera_id)
+    return JSONResponse(
+        content=status,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
+@app.get("/api/v1/cameras/{camera_id}/live/{segment_name:path}")
+@app.get("/api/cameras/{camera_id}/live/{segment_name:path}")
+def get_camera_live_segment(camera_id: str, segment_name: str):
+    """
+    Serves individual 2-second fMP4 chunks (e.g. seg_000042.m4s).
+    Header: Content-Type: video/iso.segment or video/mp4
+    """
+    clean_seg = Path(segment_name).name
+    if not clean_seg.endswith(".m4s") and not clean_seg.endswith(".mp4"):
+        raise HTTPException(status_code=400, detail="Invalid segment filename")
+
+    mgr = get_rolling_buffer_manager()
+    cam_dir = mgr.get_camera_buffer_dir(camera_id)
+    seg_path = (cam_dir / clean_seg).resolve()
+
+    if not str(seg_path).startswith(str(cam_dir)) or not seg_path.exists():
+        raise HTTPException(status_code=404, detail="Segment not found or expired from rolling buffer")
+
+    return FileResponse(
+        path=str(seg_path),
+        media_type="video/iso.segment",
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
+
 @app.post("/api/cameras/test")
 @app.post("/api/v1/cameras/test-connection")
 def test_camera_connection(payload: Optional[Dict[str, Any]] = None):
