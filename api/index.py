@@ -2021,7 +2021,19 @@ def _resolve_camera_source_url(camera_id: str) -> Optional[str]:
             return str(c.get("rtsp_url", ""))
     return None
 
-CLOUD_STREAM_DIR = WORKSPACE_ROOT / "public" / "static" / "cloud_stream"
+DEFAULT_INIT_MP4_BYTES = base64.b64decode("""AAAAHGZ0eXBpc281AAACAGlzbzVpc282bXA0MQAAAwptb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAAAAABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACDXRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAFAAAAAtAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAAAAAAAAAAAEAAAAAAYVtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAACgAAAAAAFXEAAAAAAAtaGRscgAAAAAAAAAAdmlkZQAAAAAAAAAAAAAAAFZpZGVvSGFuZGxlcgAAAAEwbWluZgAAABR2bWhkAAAAAQAAAAAAAAAAAAAAJGRpbmYAAAAcZHJlZgAAAAAAAAABAAAADHVybCAAAAABAAAA8HN0YmwAAACkc3RzZAAAAAAAAAABAAAAlGF2YzEAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAFAALQAEgAAABIAAAAAAAAAAEVTGF2YzYxLjE5LjEwMCBsaWJ4MjY0AAAAAAAAAAAAAAAY//8AAAAuYXZjQwFCwB//4QAXZ0LAH9oBQBbsBEAAAAMAQAAACiPGDKgBAARozg/IAAAAEHBhc3AAAAABAAAAAQAAABBzdHRzAAAAAAAAAAAAAAAQc3RzYwAAAAAAAAAAAAAAFHN0c3oAAAAAAAAAAAAAAAAAAAAQc3RjbwAAAAAAAAAAAAAAKG12ZXgAAAAgdHJleAAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAGF1ZHRhAAAAWW1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAALGlsc3QAAAAkqXRvbwAAABxkYXRhAAAAAQAAAABMYXZmNjEuNy4xMDA=""")
+
+def _find_cloud_stream_file(filename: str) -> Optional[Path]:
+    for cand in [
+        Path(__file__).resolve().parent / "cloud_stream" / filename,
+        WORKSPACE_ROOT / "api" / "cloud_stream" / filename,
+        WORKSPACE_ROOT / "public" / "static" / "cloud_stream" / filename,
+        WORKSPACE_ROOT / "public" / "cloud_stream" / filename,
+        WORKSPACE_ROOT / "vyzn" / "streaming" / "cloud_stream" / filename,
+    ]:
+        if cand.exists() and cand.is_file():
+            return cand
+    return None
 
 def _generate_cloud_m3u8(camera_id: str) -> str:
     now = time.time()
@@ -2120,8 +2132,8 @@ def get_camera_live_init_mp4(camera_id: str):
     except Exception:
         pass
 
-    cloud_init = CLOUD_STREAM_DIR / "init.mp4"
-    if cloud_init.exists():
+    cloud_init = _find_cloud_stream_file("init.mp4")
+    if cloud_init:
         return FileResponse(
             path=str(cloud_init),
             media_type="video/mp4",
@@ -2130,7 +2142,15 @@ def get_camera_live_init_mp4(camera_id: str):
                 "Access-Control-Allow-Origin": "*"
             }
         )
-    raise HTTPException(status_code=404, detail="Initialization fragment init.mp4 not found")
+
+    return Response(
+        content=DEFAULT_INIT_MP4_BYTES,
+        media_type="video/mp4",
+        headers={
+            "Cache-Control": "public, max-age=3600",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
 
 @app.get("/api/v1/cameras/{camera_id}/live/range")
 @app.get("/api/cameras/{camera_id}/live/range")
@@ -2198,8 +2218,8 @@ def get_camera_live_segment(camera_id: str, segment_name: str):
     except Exception:
         pass
 
-    cloud_seg = (CLOUD_STREAM_DIR / clean_seg).resolve()
-    if cloud_seg.exists():
+    cloud_seg = _find_cloud_stream_file(clean_seg)
+    if cloud_seg:
         return FileResponse(
             path=str(cloud_seg),
             media_type="video/iso.segment",
@@ -2208,8 +2228,8 @@ def get_camera_live_segment(camera_id: str, segment_name: str):
                 "Access-Control-Allow-Origin": "*"
             }
         )
-    fallback_seg = CLOUD_STREAM_DIR / "seg_000000.m4s"
-    if fallback_seg.exists():
+    fallback_seg = _find_cloud_stream_file("seg_000000.m4s")
+    if fallback_seg:
         return FileResponse(
             path=str(fallback_seg),
             media_type="video/iso.segment",
