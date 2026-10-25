@@ -88,7 +88,10 @@ async def vercel_path_rewrite_middleware(request: Request, call_next):
     request.scope["path"] = resolved_path
     return await call_next(request)
 
+import sys
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
+if str(WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(WORKSPACE_ROOT))
 
 # ---------------------------------------------------------------------------
 # Multi-Tenant Session & State Storage for Cloud Serverless Deployments
@@ -2003,7 +2006,10 @@ def stream_camera_visual(camera_id: str = "cam_webcam_1792084160"):
 # ---------------------------------------------------------------------------
 # Section 2.2: Live CCTV HLS Streaming & Timeshift Endpoints
 # ---------------------------------------------------------------------------
-from vyzn.streaming.rolling_buffer import get_rolling_buffer_manager
+try:
+    from vyzn.streaming.rolling_buffer import get_rolling_buffer_manager
+except Exception:
+    get_rolling_buffer_manager = None
 
 def _resolve_camera_source_url(camera_id: str) -> Optional[str]:
     """Helper to find RTSP/stream URL for a camera."""
@@ -2015,6 +2021,22 @@ def _resolve_camera_source_url(camera_id: str) -> Optional[str]:
             return str(c.get("rtsp_url", ""))
     return None
 
+def _get_buffer_mgr():
+    if not get_rolling_buffer_manager:
+        raise HTTPException(
+            status_code=503,
+            detail="Live CCTV rolling buffer runs on your local VYZN Edge Node (http://127.0.0.1:8000). Please ensure run_edge.py is active.",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
+    try:
+        return get_rolling_buffer_manager()
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Live CCTV buffer unavailable on cloud serverless: {e}. Connect via local edge node.",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
+
 @app.get("/api/v1/cameras/{camera_id}/live/live.m3u8")
 @app.get("/api/cameras/{camera_id}/live/live.m3u8")
 def get_camera_live_m3u8(camera_id: str):
@@ -2023,7 +2045,7 @@ def get_camera_live_m3u8(camera_id: str):
     Header: Content-Type: application/vnd.apple.mpegurl
     Cache-Control: no-cache, no-store, must-revalidate
     """
-    mgr = get_rolling_buffer_manager()
+    mgr = _get_buffer_mgr()
     cam_dir = mgr.get_camera_buffer_dir(camera_id)
     playlist_path = cam_dir / "live.m3u8"
 
@@ -2031,7 +2053,10 @@ def get_camera_live_m3u8(camera_id: str):
     if not mgr.is_buffer_running(camera_id):
         rtsp_url = _resolve_camera_source_url(camera_id)
         if rtsp_url:
-            mgr.start_camera_buffer(camera_id, rtsp_url)
+            try:
+                mgr.start_camera_buffer(camera_id, rtsp_url)
+            except Exception:
+                pass
 
     if not playlist_path.exists() or playlist_path.stat().st_size == 0:
         # Wait briefly for initial segment generation if daemon just started
@@ -2070,7 +2095,7 @@ def get_camera_live_init_mp4(camera_id: str):
     Header: Content-Type: video/mp4
     Cache-Control: public, max-age=3600
     """
-    mgr = get_rolling_buffer_manager()
+    mgr = _get_buffer_mgr()
     cam_dir = mgr.get_camera_buffer_dir(camera_id)
     init_path = cam_dir / "init.mp4"
 
@@ -2099,7 +2124,7 @@ def get_camera_live_range(camera_id: str):
     Returns timeshift range:
     {"camera_id": camera_id, "earliest_time": float, "latest_time": float, "is_live": bool, "duration_sec": float}
     """
-    mgr = get_rolling_buffer_manager()
+    mgr = _get_buffer_mgr()
     status = mgr.get_camera_buffer_status(camera_id)
     return JSONResponse(
         content=status,
@@ -2120,7 +2145,7 @@ def get_camera_live_segment(camera_id: str, segment_name: str):
     if not clean_seg.endswith(".m4s") and not clean_seg.endswith(".mp4"):
         raise HTTPException(status_code=400, detail="Invalid segment filename")
 
-    mgr = get_rolling_buffer_manager()
+    mgr = _get_buffer_mgr()
     cam_dir = mgr.get_camera_buffer_dir(camera_id)
     seg_path = (cam_dir / clean_seg).resolve()
 

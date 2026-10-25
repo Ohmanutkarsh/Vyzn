@@ -62,6 +62,7 @@ export function renderCameraTile({ camera, isSelected = false, showActions = fal
             <div class="camera-menu-wrap">
               <button type="button" class="btn-menu-trigger" data-cam-id="${escapeHtml(camId)}" aria-label="Camera options">⋯</button>
               <div class="camera-menu-dropdown" id="menu-${escapeHtml(camId)}" style="display: none;">
+                <button type="button" class="menu-item action-watch-live" data-cam-id="${escapeHtml(camId)}" data-cam-name="${escapeHtml(camera.name)}">▶ Watch Live & Timeshift</button>
                 <button type="button" class="menu-item action-rename" data-cam-id="${escapeHtml(camId)}" data-cam-name="${escapeHtml(camera.name)}">Rename</button>
                 <a href="/areas/${escapeHtml(camId)}" class="menu-item action-areas">Choose watch areas</a>
                 <button type="button" class="menu-item action-remove danger" data-cam-id="${escapeHtml(camId)}" data-cam-name="${escapeHtml(camera.name)}">Remove</button>
@@ -83,6 +84,9 @@ export function renderCameraTile({ camera, isSelected = false, showActions = fal
           <span class="area-text">${escapeHtml(areaSummary)}</span>
           ${areaCount === 0 ? `<a href="/areas/${escapeHtml(camId)}" class="area-hint-link">Choose the area to watch</a>` : ''}
         </div>
+        <button type="button" class="btn btn-secondary btn-sm action-watch-live" data-cam-id="${escapeHtml(camId)}" data-cam-name="${escapeHtml(camera.name)}" style="margin-top: 10px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 500;">
+          ▶ Watch Live & Timeshift
+        </button>
       </div>
     </div>
   `.trim();
