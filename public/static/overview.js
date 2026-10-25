@@ -3,13 +3,11 @@ import { renderCameraTile } from './components/camera-tile.js';
 import { renderFlagRow } from './components/flag-row.js';
 import { openClipDrawer, initClipDrawer } from './components/clip-drawer.js';
 import { openWallView } from './components/wall-view.js';
-import { mountLiveCctvPlayer } from './components/live-player.js';
 import { t, initI18n } from './i18n.js';
 import { escapeHtml } from './utils.js';
 
 let camerasList = [];
 let activeCameraId = null;
-let activeLivePlayer = null;
 let showWatchAreas = false;
 let stalledTimer = null;
 let lastFrameTime = Date.now();
@@ -102,7 +100,7 @@ async function loadOverviewData() {
 
     renderPicker();
     renderStrip();
-    await mountOverviewPlayer(activeCameraId);
+    startLiveStream(activeCameraId);
   } catch (err) {
     if (emptyState) {
       emptyState.style.display = 'flex';
@@ -286,46 +284,13 @@ async function activateBrowserWebcam(cam, cid) {
   }
 }
 
-async function mountOverviewPlayer(cid) {
-  const mountEl = document.getElementById('overview-live-player-mount');
-  if (!mountEl) return;
-
-  const cam = camerasList.find(c => (c.id || c.camera_id) === cid) || camerasList[0];
-  const camName = cam ? cam.name : cid;
-
-  if (activeLivePlayer) {
-    activeLivePlayer.destroy();
-    activeLivePlayer = null;
-  }
-
-  activeLivePlayer = await mountLiveCctvPlayer(mountEl, {
-    cameraId: cid,
-    cameraName: camName,
-    cameras: camerasList,
-    apiBaseUrl: edgeBaseUrl || '',
-    isInline: true,
-    onCameraChange: (newCid) => {
-      switchActiveCamera(newCid);
-    }
-  });
-
-  if (showWatchAreas) {
-    renderWatchAreasOverlay();
-  }
-}
-
 function switchActiveCamera(cid) {
   if (cid === activeCameraId) return;
+  stopCurrentWebcamStream();
   activeCameraId = cid;
   renderPicker();
   renderStrip();
-  const cam = camerasList.find(c => (c.id || c.camera_id) === cid);
-  const camName = cam ? cam.name : cid;
-  if (activeLivePlayer) {
-    activeLivePlayer.loadCamera(cid, camName);
-  } else {
-    mountOverviewPlayer(cid);
-  }
+  startLiveStream(activeCameraId);
   if (showWatchAreas) renderWatchAreasOverlay();
 }
 
@@ -446,8 +411,15 @@ async function startLiveStream(cid) {
 }
 
 function handleVisibilityChange() {
-  if (document.visibilityState === 'visible' && activeCameraId && activeLivePlayer) {
-    activeLivePlayer.setLive();
+  const streamImg = document.getElementById('live-stream-img');
+
+  if (document.visibilityState === 'hidden') {
+    // Drop stream immediately to save bandwidth & CPU
+    if (streamImg) streamImg.src = '';
+    stopCurrentWebcamStream();
+  } else {
+    // Tab active again: resume stream
+    if (activeCameraId) startLiveStream(activeCameraId);
   }
 }
 

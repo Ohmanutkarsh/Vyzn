@@ -3787,6 +3787,14 @@ def serve_overview():
         return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
     return HTMLResponse(content="<h1>VYZN Dashboard</h1><p>Frontend static files not found.</p>")
 
+@app.get("/playback", response_class=HTMLResponse)
+@app.get("/playback/{camera_id}", response_class=HTMLResponse)
+def serve_playback_page(camera_id: Optional[str] = None):
+    playback_file = frontend_dir / "playback.html"
+    if playback_file.exists():
+        return HTMLResponse(content=playback_file.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Playback page not found</h1>")
+
 @app.get("/cameras", response_class=HTMLResponse)
 def serve_cameras_page():
     cam_file = frontend_dir / "cameras.html"
