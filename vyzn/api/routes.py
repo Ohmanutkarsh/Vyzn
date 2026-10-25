@@ -1370,13 +1370,13 @@ def get_camera_live_m3u8_edge(camera_id: str):
     cam_dir = mgr.get_camera_buffer_dir(camera_id)
     playlist_path = cam_dir / "live.m3u8"
 
-    if not mgr.is_buffer_running(camera_id):
-        rtsp_url = _resolve_camera_source_in_edge(camera_id)
-        if rtsp_url:
-            mgr.start_camera_buffer(camera_id, rtsp_url)
+    if not playlist_path.exists() or playlist_path.stat().st_size == 0 or (time.time() - playlist_path.stat().st_mtime > 30):
+        if not mgr.is_buffer_running(camera_id):
+            rtsp_url = _resolve_camera_source_in_edge(camera_id)
+            if rtsp_url:
+                mgr.start_camera_buffer(camera_id, rtsp_url)
 
-    if not playlist_path.exists() or playlist_path.stat().st_size == 0:
-        for _ in range(3):
+        for _ in range(6):
             time.sleep(0.5)
             if playlist_path.exists() and playlist_path.stat().st_size > 0:
                 break

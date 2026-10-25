@@ -146,6 +146,7 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
             <button type="button" class="cctv-btn" id="cctv-btn-play" title="Play/Pause">⏸ Pause</button>
             <button type="button" class="cctv-btn" id="cctv-btn-rewind-10" title="Rewind 10 seconds">⏪ 10s</button>
             <button type="button" class="cctv-btn" id="cctv-btn-rewind-30" title="Rewind 30 seconds">⏪ 30s</button>
+            <button type="button" class="cctv-btn" id="cctv-btn-forward-10" title="Forward 10 seconds">⏩ 10s</button>
             <button type="button" class="cctv-btn cctv-btn-live is-active" id="cctv-btn-live" title="Jump to Live Edge">
               <span class="live-dot"></span> LIVE
             </button>
@@ -178,6 +179,7 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
   const btnPlay = container.querySelector('#cctv-btn-play');
   const btnRewind10 = container.querySelector('#cctv-btn-rewind-10');
   const btnRewind30 = container.querySelector('#cctv-btn-rewind-30');
+  const btnForward10 = container.querySelector('#cctv-btn-forward-10');
   const btnLive = container.querySelector('#cctv-btn-live');
   const timeCurr = container.querySelector('#cctv-time-curr');
   const camSelect = container.querySelector('#cctv-cam-select');
@@ -472,6 +474,7 @@ export async function mountLiveCctvPlayer(containerEl, options = {}) {
 
   btnRewind10.addEventListener('click', () => seekRelative(-10));
   btnRewind30.addEventListener('click', () => seekRelative(-30));
+  btnForward10.addEventListener('click', () => seekRelative(+10));
   btnLive.addEventListener('click', setLive);
 
   btnMute.addEventListener('click', () => {

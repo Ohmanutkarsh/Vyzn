@@ -198,7 +198,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;
 <a href="#storage">Storage</a>
 <a href="/login" style="margin-left:6px;color:var(--tx);font-weight:500;">Console</a>
 </div>
-<a class="btn p" href="#final">Book a demo</a>
+<a class="btn p" href="/login">Start VYZN</a>
 </div></nav>
 
 <header id="hero">
@@ -206,7 +206,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;
 <div class="wrap">
 <h1 class="split">Hours of footage.<br><span>Minutes that matter.</span></h1>
 <p class="lede rv">VYZN keeps a complete rolling 72-hour recording of all cameras, while AI cuts and preserves important events (score 30+) permanently. No clips for scores under 30. Raw footage clears at 72 hours.</p>
-<div class="cta rv"><a class="btn p" href="#final">Book a demo</a><a class="btn g" href="#how">See how it decides</a></div>
+<div class="cta rv"><a class="btn p" href="/login">Start VYZN</a><a class="btn g" href="#how">See how it decides</a></div>
 <div class="stage"><div class="dash" id="dash" aria-label="Illustrative VYZN console">
 <div class="feed"><canvas id="cv"></canvas>
 <div class="ov mono"><span class="rec">REC</span><span>CAM 02 · Main Gate</span><b id="ts"></b></div>
@@ -267,9 +267,9 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;
 
 <section id="final"><div class="wrap">
 <h2 class="split">See what VYZN would keep <span>from your cameras.</span></h2>
-<p class="lede rv">Book a short demo and we’ll walk through it on your own setup.</p>
+<p class="lede rv">Get started with VYZN surveillance AI on your own cameras today.</p>
 <p class="mono rv" style="margin:20px 0 0">Proposed pricing: ₹2,499 one-time setup and ₹999 per camera per year. Runs on a suitable computer you already have.</p>
-<div class="cta rv"><a class="btn p" id="demo" href="mailto:vyzntechnologies@gmail.com?subject=VYZN%20demo">Book a demo</a><a class="btn g" href="#hero">Back to top</a></div>
+<div class="cta rv"><a class="btn p" id="demo" href="/login">Start VYZN</a><a class="btn g" href="#hero">Back to top</a></div>
 </div></section>
 <footer><div class="wrap"><span class="logo"><i></i>VYZN</span><span class="mono">Intelligent CCTV monitoring · Rolling 72h continuous buffer · Lifelong clips (30+)</span></div></footer>
 
@@ -278,7 +278,6 @@ const DEMO_EMAIL="vyzntechnologies@gmail.com";
 function $(id){return document.getElementById(id)}
 const $$=s=>[...document.querySelectorAll(s)],RM=matchMedia("(prefers-reduced-motion:reduce)").matches;
 let seen=0,cur=-1,sv0=0;
-$("demo").href="mailto:"+DEMO_EMAIL+"?subject=VYZN%20demo";
 /* split headings into masked words */
 function split(el){el.setAttribute("aria-label",el.textContent.replace(/\s+/g," ").trim());let i=0;
  (function w(n){[...n.childNodes].forEach(c=>{if(c.nodeType===3){const f=document.createDocumentFragment();c.textContent.split(/(\s+)/).forEach(t=>{if(!t.trim()){f.append(t);return}const s=document.createElement("span");s.className="w";s.setAttribute("aria-hidden","true");s.innerHTML="<i style='--i:"+(i++)+"'>"+t+"</i>";f.append(s)});c.replaceWith(f)}else if(c.nodeType===1&&c.tagName!=="BR")w(c)})})(el)}

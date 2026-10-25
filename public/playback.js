@@ -24,6 +24,7 @@ async function checkEdgeServer() {
   const badgeText = document.getElementById('edge-badge-text');
   const notice = document.getElementById('playback-notice');
 
+  // If already on local server or localhost
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.port === '8000') {
     edgeBaseUrl = '';
     if (badge && badgeText) {
@@ -31,6 +32,42 @@ async function checkEdgeServer() {
       badgeText.textContent = 'Edge Node Connected';
     }
     if (notice) notice.style.display = 'none';
+    return edgeBaseUrl;
+  }
+
+  // If on HTTPS (e.g. Vercel), browser blocks http://127.0.0.1:8000 media requests (Mixed Content)
+  // Always use same-origin relative URLs on HTTPS so cloud streaming works 100% reliably.
+  if (window.location.protocol === 'https:') {
+    edgeBaseUrl = '';
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1200);
+      const res = await fetch('http://127.0.0.1:8000/api/status', {
+        method: 'GET',
+        mode: 'cors',
+        signal: controller.signal
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        if (badge) {
+          badge.className = 'edge-badge is-connected';
+          badge.innerHTML = `<span class="edge-dot"></span><span>Local Edge Active · <a href="http://127.0.0.1:8000/playback" target="_blank" style="color: inherit; text-decoration: underline; font-weight: 600;">Open Direct Console</a></span>`;
+        }
+        if (notice) {
+          notice.style.display = 'flex';
+          notice.innerHTML = `<span style="font-size: 16px;">🟢</span><div>Local Edge Node is online on this machine. Playing cloud buffer. For direct 0ms local camera stream, <a href="http://127.0.0.1:8000/playback" target="_blank" style="color: var(--accent-primary, #3b82f6); font-weight: 600; text-decoration: underline;">Open Direct Edge Console (http://127.0.0.1:8000/playback)</a>.</div>`;
+        }
+        return edgeBaseUrl;
+      }
+    } catch (_) {}
+
+    if (badge && badgeText) {
+      badge.className = 'edge-badge is-cloud';
+      badgeText.textContent = 'Cloud Mode';
+    }
+    if (notice) {
+      notice.style.display = 'flex';
+    }
     return edgeBaseUrl;
   }
 

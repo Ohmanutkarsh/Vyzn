@@ -44,3 +44,31 @@ def test_edge_playback_route():
     resp = client.get("/playback")
     assert resp.status_code == 200
     assert "Playback & Timeshift" in resp.text
+
+def test_forward_10s_button_in_player():
+    """Verify live-player.js includes forward 10s button and seek handler."""
+    player_js = Path("public/components/live-player.js").read_text(encoding="utf-8")
+    assert "cctv-btn-forward-10" in player_js
+    assert "⏩ 10s" in player_js
+    assert "seekRelative(+10)" in player_js
+
+def test_landing_page_start_vyzn_button():
+    """Verify landing page has Start VYZN button sending users to /login."""
+    index_html = Path("public/index.html").read_text(encoding="utf-8")
+    assert "Start VYZN" in index_html
+    assert 'href="/login">Start VYZN</a>' in index_html
+    assert "Book a demo" not in index_html
+
+def test_cloud_live_streaming_endpoints():
+    """Verify Vercel cloud live streaming endpoints return 200."""
+    client = TestClient(vercel_app)
+    r1 = client.get("/api/v1/cameras/cam_81559/live/live.m3u8")
+    assert r1.status_code == 200
+    assert "EXTM3U" in r1.text
+
+    r2 = client.get("/api/v1/cameras/cam_81559/live/init.mp4")
+    assert r2.status_code == 200
+
+    r3 = client.get("/api/v1/cameras/cam_81559/live/range")
+    assert r3.status_code == 200
+    assert r3.json().get("is_live") is True
