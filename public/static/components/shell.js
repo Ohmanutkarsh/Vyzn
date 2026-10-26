@@ -64,7 +64,6 @@ function renderSidebar(activePage, user = {}) {
 
   const navItems = [
     { id: 'overview', href: '/overview', label: 'Overview', icon: '◫' },
-    { id: 'playback', href: '/playback', label: 'Playback', icon: '⏪' },
     { id: 'clips', href: '/clips', label: 'Clips', icon: '▶' },
     { id: 'areas', href: '/areas', label: 'Areas', icon: '⬚' },
     { id: 'cameras', href: '/cameras', label: 'Cameras', icon: '📹' },
@@ -173,7 +172,6 @@ function renderBottomNav(activePage) {
 
   const mobileItems = [
     { id: 'overview', href: '/overview', label: 'Over', icon: '◫' },
-    { id: 'playback', href: '/playback', label: 'Play', icon: '⏪' },
     { id: 'clips', href: '/clips', label: 'Clips', icon: '▶' },
     { id: 'areas', href: '/areas', label: 'Areas', icon: '⬚' },
     { id: 'cameras', href: '/cameras', label: 'Cams', icon: '📹' },

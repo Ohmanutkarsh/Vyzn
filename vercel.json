@@ -15,14 +15,6 @@
       "destination": "/add-camera"
     },
     {
-      "source": "/playback/(.*)",
-      "destination": "/playback"
-    },
-    {
-      "source": "/playback",
-      "destination": "/playback"
-    },
-    {
       "source": "/areas/(.*)",
       "destination": "/areas"
     },
