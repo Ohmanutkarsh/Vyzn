@@ -34,15 +34,20 @@ def get_test_client(tmp_path: Path):
     return TestClient(app), db
 
 
-def test_first_page_serves_login_for_unauthenticated_visitor(tmp_path: Path):
-    """Verifies that visiting the root '/' page serves the login view for unauthenticated visitors."""
+def test_first_page_serves_landing_and_login_page_serves_auth(tmp_path: Path):
+    """Verifies that visiting root '/' serves the landing page and '/login' serves the login view."""
     client, db = get_test_client(tmp_path)
     try:
+        # 1. Landing page at '/'
         res = client.get("/")
         assert res.status_code == 200
-        # Should contain VYZN and the login card elements
         assert "VYZN" in res.text
-        assert "auth-card" in res.text or "Sign in" in res.text or "auth.js" in res.text
+        assert "Get VYZN" in res.text
+
+        # 2. Login view at '/login'
+        res_login = client.get("/login")
+        assert res_login.status_code == 200
+        assert "auth-card" in res_login.text or "Sign in" in res_login.text or "auth.js" in res_login.text
     finally:
         db.close()
 

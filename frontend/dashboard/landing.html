@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VYZN – Keep the footage that matters</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;500;600&family=Martian+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07080a;
+  --p:#0e1013;
+  --p2:#15181c;
+  --ln:rgba(255,255,255,.08);
+  --tx:#e8ebed;
+  --mu:#8a9096;
+  --ac:#2f6fd6;
+  --ac-hover:#3a7be6;
+  --ac-tint:rgba(47,111,214,.14);
+  --ac-glow:rgba(47,111,214,.25);
+  --al:#f0575d;
+  --rv:#e5a33b;
+  --ok:#52b788;
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --sans:"Familjen Grotesk",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --mono:"Martian Mono",ui-monospace,SFMono-Regular,monospace;
+  color-scheme:dark;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px)
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-behavior:smooth;scroll-padding-top:calc(72px + env(safe-area-inset-top,0px))}
+body{margin:0;background:var(--bg);color:var(--tx);font:400 17px/1.55 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:clip}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--ac);outline-offset:3px}
+.wrap{max-width:1240px;margin:0 auto;padding:0 clamp(20px,3.2vw,40px)}
+.mono{font:400 11.5px/1.6 var(--mono);color:var(--mu)}
+#prog{position:fixed;top:0;left:0;right:0;height:2px;background:var(--ac);transform-origin:0 50%;transform:scaleX(0);z-index:60}
+/* nav */
+#nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:50;border-bottom:1px solid transparent;transition:background .3s,border-color .3s,backdrop-filter .3s}
+#nav.sc{background:rgba(7,8,10,.78);backdrop-filter:blur(16px);border-color:var(--ln)}
+#nav .wrap{display:flex;align-items:center;gap:28px;height:60px}
+.logo{font-weight:600;font-size:19px;letter-spacing:-.03em;display:flex;align-items:center;gap:9px}
+.logo i{width:10px;height:10px;border-radius:50%;background:var(--ac);box-shadow:0 0 14px var(--ac)}
+.links{margin-left:auto;display:flex;align-items:center;gap:28px;font-size:15px;color:var(--mu)}
+.links a{transition:color .2s}.links a:hover{color:var(--tx)}
+.btn{display:inline-flex;align-items:center;justify-content:center;border-radius:99px;padding:12px 22px;font-size:15px;font-weight:500;border:1px solid var(--ln);transition:transform .25s var(--ease),background .25s,box-shadow .25s}
+.btn.p{background:var(--ac);color:#ffffff;border-color:transparent}
+.btn.p:hover{background:var(--ac-hover);box-shadow:0 0 0 6px var(--ac-tint),0 8px 40px var(--ac-glow)}
+.btn.g:hover{background:var(--p2)}
+/* motion primitives */
+.w{display:inline-block;overflow:hidden;vertical-align:top;padding-bottom:.08em}
+.w i{display:inline-block;font-style:normal;transform:translateY(110%);transition:transform 1s var(--ease);transition-delay:calc(var(--i)*55ms)}
+.in .w i{transform:none}
+.rv{opacity:0;transform:translateY(28px);transition:opacity .9s var(--ease),transform .9s var(--ease);transition-delay:calc(var(--d,0)*90ms)}
+.rv.in{opacity:1;transform:none}
+/* type */
+h1,h2{margin:0;font-weight:500;letter-spacing:-.05em;line-height:.96}
+h1{font-size:clamp(52px,8.6vw,124px)}
+h2{font-size:clamp(38px,5.6vw,76px)}
+h1 span,h2 span{color:var(--mu)}
+.lede{max-width:48ch;color:var(--mu);font-size:clamp(17px,1.5vw,20px);margin:28px 0 0}
+.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:36px}
+section{padding:clamp(88px,12vw,170px) 0}
+.head{display:grid;grid-template-columns:1.5fr 1fr;gap:48px;align-items:end;margin-bottom:64px}
+.head p{margin:0;color:var(--mu);max-width:42ch}
+/* hero */
+#hero{position:relative;overflow:hidden;padding:clamp(48px,8vw,110px) 0 0}
+#bg{position:absolute;left:0;top:0;width:100%;height:calc(100% + 140px);-webkit-mask-image:linear-gradient(#000 60%,transparent 92%);mask-image:linear-gradient(#000 60%,transparent 92%)}
+#hero::after{content:"";position:absolute;inset:0;background:radial-gradient(55% 45% at 24% 30%,rgba(7,8,10,.92),transparent 80%);pointer-events:none}
+#hero .wrap{position:relative;z-index:1}
+.stage{perspective:1600px;margin-top:clamp(56px,7vw,96px)}
+.dash{transform-origin:50% 0;will-change:transform;display:grid;grid-template-columns:1.7fr 1fr;background:var(--p);border:1px solid var(--ln);border-radius:18px;overflow:hidden;box-shadow:0 60px 120px -30px rgba(0,0,0,.9),0 0 0 1px rgba(47,111,214,.1),0 -20px 120px -40px rgba(47,111,214,.22)}
+.feed{position:relative;aspect-ratio:16/9;background:#0b0d0f;border-right:1px solid var(--ln)}
+canvas{display:block;width:100%;height:100%}
+.ov{position:absolute;top:14px;left:16px;right:16px;display:flex;gap:14px;color:#c9cdd0}
+.ov b{font-weight:400;margin-left:auto;color:var(--mu)}
+.rec{color:var(--al)}.rec::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--al);margin-right:6px;animation:pl 1.2s infinite}
+@keyframes pl{50%{opacity:.25}}
+.callout{position:absolute;left:16px;bottom:16px;max-width:340px;background:rgba(7,8,10,.88);backdrop-filter:blur(6px);border:1px solid var(--al);border-radius:12px;padding:11px 14px;font-size:14px;opacity:0;transform:translateY(8px);transition:.35s var(--ease)}
+.callout.on{opacity:1;transform:none}.callout.kept{border-color:var(--ok)}
+.side{display:flex;flex-direction:column}
+.side>div{padding:18px 20px;border-bottom:1px solid var(--ln)}
+.big{font-size:clamp(44px,5vw,68px);letter-spacing:-.05em;font-weight:500;line-height:1;font-variant-numeric:tabular-nums}
+.meter{position:relative;height:6px;border-radius:9px;background:var(--p2);margin-top:16px}
+.meter i{display:block;height:100%;width:var(--w,0%);border-radius:9px;background:var(--c,var(--mu));transition:width .3s,background .3s}
+.meter::before,.meter::after{content:"";position:absolute;top:-4px;bottom:-4px;width:1px;background:var(--mu);opacity:.6}
+.meter::before{left:30%}.meter::after{left:70%}
+.ev{list-style:none;margin:0;padding:0;font:11.5px var(--mono);color:var(--mu);flex:1}
+.ev li{display:grid;grid-template-columns:62px 1fr auto;gap:10px;padding:11px 20px;border-bottom:1px solid var(--ln);animation:in .5s var(--ease)}
+.ev b{font-weight:500;color:var(--tx)}
+.t-a{color:var(--al)}.t-r{color:var(--rv)}.t-k{color:var(--ok)}
+@keyframes in{from{opacity:0;transform:translateX(-8px)}}
+/* marquee */
+.marq{border-block:1px solid var(--ln);overflow:hidden;padding:22px 0;margin-top:clamp(56px,7vw,96px)}
+.mt{display:flex;width:max-content;animation:mq 46s linear infinite}
+.marq:hover .mt{animation-play-state:paused}
+.mt span{margin-right:56px;color:var(--mu);font-size:16px;display:flex;align-items:center;gap:56px;white-space:nowrap}
+.mt span::after{content:"";width:5px;height:5px;border-radius:50%;background:var(--ac);opacity:.85}
+@keyframes mq{to{transform:translateX(-50%)}}
+/* stats */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--ln);border-radius:18px;overflow:hidden;background:var(--p)}
+.stats>div{padding:34px 28px}
+.stats>div+div{border-left:1px solid var(--ln)}
+.stats .big small{font-size:.36em;color:var(--mu);margin-left:6px;letter-spacing:-.02em}
+.stats p{margin:14px 0 0;color:var(--mu);font-size:15px}
+/* bento */
+.bento{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+.s3{grid-column:span 3}.s2{grid-column:span 2}
+.card{position:relative;overflow:hidden;background:var(--p);border:1px solid var(--ln);border-radius:18px;padding:28px;min-height:300px;display:flex;flex-direction:column;gap:10px;transition:border-color .3s}
+.card::before{content:"";position:absolute;inset:0;background:radial-gradient(360px circle at var(--mx,50%) var(--my,0%),var(--ac-tint),transparent 70%);opacity:0;transition:opacity .3s;pointer-events:none}
+.card:hover{border-color:rgba(47,111,214,.35)}.card:hover::before{opacity:1}
+.card h3{margin:0;font-size:26px;font-weight:500;letter-spacing:-.04em;line-height:1.1}
+.card p{margin:0;color:var(--mu);font-size:15.5px;max-width:40ch}
+.viz{margin-top:auto;padding-top:22px}
+.strip{display:flex;gap:3px;align-items:flex-end;height:70px}
+.strip i{flex:1;background:var(--p2);border-radius:2px}
+.strip i.hot{background:var(--ac);animation:bar 2.4s ease-in-out infinite;animation-delay:var(--dl)}
+@keyframes bar{50%{transform:scaleY(.45);transform-origin:bottom;opacity:.6}}
+.tiers{display:grid;gap:10px;font:12px var(--mono)}
+.tier{display:grid;grid-template-columns:48px 1fr 130px;gap:12px;align-items:center;color:var(--mu)}
+.tier u{display:block;height:6px;border-radius:9px;background:var(--p2);overflow:hidden;text-decoration:none}
+.tier u::after{content:"";display:block;height:100%;width:0;background:var(--c);transition:width 1.4s var(--ease) .3s}
+.in .tier u::after{width:var(--w)}
+.roi{position:relative;height:96px;border:1px solid var(--ln);border-radius:10px;background:repeating-linear-gradient(90deg,transparent 0 23px,var(--ln) 23px 24px)}
+.roi i{position:absolute;left:8%;top:16%;width:54%;height:68%;border:1.5px dashed var(--ac);background:var(--ac-tint);border-radius:6px}
+.roi b{position:absolute;top:50%;width:9px;height:9px;border-radius:50%;background:var(--al);box-shadow:0 0 12px var(--al);animation:walk 5s linear infinite}
+@keyframes walk{from{left:2%}to{left:94%}}
+.tl{position:relative;height:34px;display:grid;grid-template-columns:1fr 3fr 1fr;gap:3px}
+.tl i{background:var(--p2);border-radius:6px}.tl i:nth-child(2){background:rgba(47,111,214,.3)}
+.tl::after{content:"";position:absolute;top:-6px;bottom:-6px;width:2px;background:var(--tx);animation:play 6s linear infinite}
+@keyframes play{from{left:0}to{left:100%}}
+.chat{border:1px solid var(--ln);border-radius:14px 14px 14px 4px;background:var(--p2);padding:12px 14px;font-size:14px;animation:pop 6s var(--ease) infinite}
+@keyframes pop{0%,8%{opacity:0;transform:translateY(10px) scale(.97)}16%,90%{opacity:1;transform:none}100%{opacity:0}}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips span{border:1px solid var(--ln);border-radius:99px;padding:6px 14px;font-size:14px;color:var(--tx);background:var(--p2)}
+.life{display:flex;justify-content:space-between;margin-bottom:8px}
+.bar72{height:8px;border-radius:9px;background:var(--p2);overflow:hidden}
+.bar72 i{display:block;height:100%;background:linear-gradient(90deg,var(--ac),var(--ok));animation:fill 7s linear infinite}
+@keyframes fill{from{width:0}to{width:100%}}
+/* how: sticky story */
+#how{padding:0;height:430vh}
+.stick{position:sticky;top:0;height:100vh;display:flex;align-items:center;padding-top:60px}
+.stick h2{margin-bottom:44px}
+.how{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.3fr);gap:56px}
+.steps{display:grid;grid-template-columns:2px 1fr;gap:24px}
+.rail{background:var(--ln);border-radius:2px;position:relative}
+.rail i{position:absolute;left:0;top:0;width:100%;height:0;background:var(--ac);transition:height .2s linear}
+.step{all:unset;cursor:pointer;display:block;padding:14px 0;color:var(--mu);transition:color .3s}
+.step:focus-visible{outline:2px solid var(--ac)}
+.step h3{margin:0;font-size:clamp(24px,2.6vw,34px);font-weight:500;letter-spacing:-.04em}
+.step p{margin:0;font-size:15.5px;max-height:0;opacity:0;overflow:hidden;transition:max-height .5s var(--ease),opacity .5s,margin .5s}
+.step[aria-selected=true]{color:var(--tx)}
+.step[aria-selected=true] p{max-height:130px;opacity:1;margin-top:8px;color:var(--mu)}
+.win{background:var(--p);border:1px solid var(--ln);border-radius:18px;overflow:hidden}
+.bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--ln)}
+.bar span:last-child{margin-left:auto}
+.bar .d{width:9px;height:9px;border-radius:50%;background:var(--p2)}
+.pane{padding:26px 22px 14px;min-height:340px}
+.bv{animation:in .6s var(--ease)}
+.pane .big{margin-bottom:6px}
+.log{margin-top:26px;font:12.5px/2 var(--mono);color:var(--mu)}
+.log div{display:grid;grid-template-columns:78px 1fr;gap:12px;border-top:1px solid var(--ln);animation:in .5s var(--ease) both}
+/* storage */
+.store{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.3fr);gap:56px;align-items:start}
+.ctl{display:grid;gap:30px}
+label{display:grid;gap:10px;font-size:15px}
+label span{display:flex;justify-content:space-between}
+input[type=range]{width:100%;accent-color:var(--ac)}
+select{background:var(--p);color:var(--tx);border:1px solid var(--ln);border-radius:10px;padding:12px;font:inherit}
+.rows{padding:28px;display:grid;gap:26px}
+.track{height:44px;border:1px solid var(--ln);border-radius:10px;overflow:hidden;background:var(--p2)}
+.fill{height:100%;width:0;display:flex;align-items:center;padding:0 14px;font:12.5px var(--mono);white-space:nowrap;transition:width .9s var(--ease)}
+.fill.a{background:#2a2e33;color:var(--tx)}.fill.b{background:var(--ac);color:#ffffff}
+/* final */
+#final{position:relative;text-align:center;overflow:hidden}
+#final::before{content:"";position:absolute;left:50%;top:50%;width:900px;height:900px;margin:-450px;background:radial-gradient(circle,rgba(47,111,214,.2),transparent 62%);animation:drift 12s ease-in-out infinite alternate;pointer-events:none}
+@keyframes drift{to{transform:translate(120px,-40px) scale(1.25)}}
+#final .wrap{position:relative}
+#final h2{margin:0 auto;max-width:12ch;font-size:clamp(44px,7.4vw,104px)}
+#final .lede{margin-inline:auto}
+#final .cta{justify-content:center}
+footer{border-top:1px solid var(--ln);padding:30px 0}
+footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center}
+@media(max-width:900px){.links{display:none}#nav .btn{margin-left:auto}.head,.how,.store{grid-template-columns:1fr;gap:28px}.dash{grid-template-columns:1fr}.feed{border-right:0;border-bottom:1px solid var(--ln)}.stats{grid-template-columns:1fr 1fr}.stats>div:nth-child(3){border-left:0}.stats>div:nth-child(n+3){border-top:1px solid var(--ln)}.s3,.s2{grid-column:span 6}#how{height:380vh}.stick h2{margin-bottom:24px}.pane{min-height:260px}.tier{grid-template-columns:44px 1fr}.tier span{display:none}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}html{scroll-behavior:auto}.rv{opacity:1;transform:none}.w i{transform:none}}
+</style>
+</head>
+<body>
+<div id="prog"></div>
+<nav id="nav"><div class="wrap">
+<a class="logo" href="#hero"><i></i>VYZN</a>
+<div class="links">
+<a href="#capabilities">Capabilities</a>
+<a href="#how">How it works</a>
+<a href="#storage">Storage</a>
+<a href="/login" style="margin-left:6px;color:var(--tx);font-weight:500;">Console</a>
+</div>
+<a class="btn p" href="/login">Get VYZN</a>
+</div></nav>
+
+<header id="hero">
+<canvas id="bg" aria-hidden="true"></canvas>
+<div class="wrap">
+<h1 class="split">Hours of footage.<br><span>Minutes that matter.</span></h1>
+<p class="lede rv">VYZN keeps a complete rolling 72-hour recording of all cameras, while AI cuts and preserves important events (score 30+) permanently. No clips for scores under 30. Raw footage clears at 72 hours.</p>
+<div class="cta rv"><a class="btn p" href="/login">Get VYZN</a><a class="btn g" href="#how">See how it decides</a></div>
+<div class="stage"><div class="dash" id="dash" aria-label="Illustrative VYZN console">
+<div class="feed"><canvas id="cv"></canvas>
+<div class="ov mono"><span class="rec">REC</span><span>CAM 02 · Main Gate</span><b id="ts"></b></div>
+<div class="callout" id="co"></div></div>
+<div class="side">
+<div><div class="mono">Importance score · illustrative demo</div><div class="big" id="score" style="margin-top:12px">0</div><div class="meter"><i id="mt"></i></div><div class="mono" id="tier" style="margin-top:12px">Idle</div></div>
+<ul class="ev" id="ev"></ul>
+</div></div></div>
+</div>
+<div class="marq"><div class="mt" id="mq">
+<span>Rolling 72-hour full continuous footage</span><span>Score 30+ events clipped for life</span><span>No clips cut for noise under 30</span><span>10 seconds before and after every event</span><span>Telegram instant alerts</span><span>RTSP and IP camera streams</span><span>SHA-256 evidence packs</span><span>Full footage purges at 72h</span><span>Video processed on-site</span>
+</div></div>
+</header>
+
+<section><div class="wrap">
+<div class="stats">
+<div class="rv"><div class="big"><span data-count="3">3</span><small>s</small></div><p>Between scores. Every moment gets ranked from 0 to 100.</p></div>
+<div class="rv"><div class="big">30<small>+</small></div><p>Threshold to cut a clip. Anything under 30 is never clipped.</p></div>
+<div class="rv"><div class="big"><span>∞</span><small>life</small></div><p>Clips that are cut stay in your library permanently.</p></div>
+<div class="rv"><div class="big"><span data-count="72">72</span><small>h</small></div><p>Full continuous footage kept rolling. Clears after 72 hours.</p></div>
+</div></div></section>
+
+<section id="capabilities" style="padding-top:0"><div class="wrap">
+<div class="head"><h2 class="split">Everything a control room does at 3 a.m. <span>Without the control room.</span></h2><p class="rv">VYZN sits between your cameras and your storage. It scores every moment, keeps full footage for 72 hours, and locks qualified clips (30+) for life.</p></div>
+<div class="bento">
+<div class="card s3 rv"><h3>Sees only what moves</h3><p>A motion gate skips still footage, so detection runs only when something moves.</p><div class="viz"><div class="strip" id="strip"></div></div></div>
+<div class="card s3 rv"><h3>Ranks every moment</h3><p>Only moments scored 30 or higher are cut into clips. Clips are kept lifelong; scores under 30 never generate clips.</p><div class="viz tiers"><div class="tier"><b class="t-a">70+</b><u style="--w:90%;--c:var(--al)"></u><span>Alert & clip kept for life</span></div><div class="tier"><b class="t-r">30–70</b><u style="--w:55%;--c:var(--rv)"></u><span>Clip saved permanently</span></div><div class="tier"><b>&lt;30</b><u style="--w:18%;--c:var(--mu)"></u><span>No clip · Clears with 72h raw</span></div></div></div>
+<div class="card s2 rv"><h3>Watches only your area</h3><p>Draw the part of the frame that matters. The road outside stays ignored.</p><div class="viz"><div class="roi"><i></i><b></b></div></div></div>
+<div class="card s2 rv"><h3>One clip per event</h3><p>Triggered on score 30+: 10s before and after, saved permanently with SHA-256 hash.</p><div class="viz"><div class="tl"><i></i><i></i><i></i></div></div></div>
+<div class="card s2 rv"><h3>Alerts in Telegram</h3><p>Thumbnail, description, camera and time, the moment an event qualifies (score 70+).</p><div class="viz"><div class="chat"><b class="t-a">Alert · Entrance</b><br>Person in your area. Score 82.</div></div></div>
+<div class="card s3 rv"><h3>Works with your cameras</h3><p>Reads RTSP and IP streams, or a phone camera for demos. Add cameras by IP address or local server. No camera replacement.</p><div class="viz"><div class="chips"><span>RTSP</span><span>IP camera</span><span>Phone camera</span><span>Local server</span></div></div></div>
+<div class="card s3 rv"><h3>72h rolling raw, permanent clips</h3><p>You always have the complete continuous footage of the last 72 hours. At 72 hours, raw footage purges to free disk space, while cut clips (score 30+) stay for life.</p><div class="viz"><div class="life mono"><span>Full 72h rolling raw</span><span>Cut clips kept for life</span></div><div class="bar72"><i></i></div></div></div>
+</div>
+<div class="cta rv" style="gap:8px;margin-top:28px;align-items:center"><span class="mono" style="margin-right:8px">Built first for</span><div class="chips"><span>Housing societies</span><span>Hostels &amp; PGs</span><span>Student residences</span><span>Gated communities</span><span>Offices and campuses</span><span>Commercial retail</span></div></div>
+</div></section>
+
+<section id="how"><div class="stick"><div class="wrap">
+<h2 class="split">Detect. Score. <span>Keep.</span></h2>
+<div class="how">
+<div class="steps"><div class="rail"><i id="fb"></i></div><div id="steps"></div></div>
+<div class="win"><div class="bar"><span class="d"></span><span class="d"></span><span class="d"></span><span class="mono">vyzn / cam-02</span><span class="mono">example log</span></div><div class="pane" id="pane"></div></div>
+</div></div></div></section>
+
+<section id="storage"><div class="wrap">
+<div class="head"><h2 class="split">Store the event. <span>Not the empty hours.</span></h2><p class="rv">VYZN keeps a rolling 72-hour full buffer of all camera streams. At 72 hours, continuous footage clears—leaving only your permanent incident clips (score 30+).</p></div>
+<div class="store">
+<div class="ctl rv">
+<label><span>Cameras <b class="mono" id="vC"></b></span><input id="iC" type="range" min="1" max="32" value="8"></label>
+<label>Stream bitrate<select id="iB"><option value="2">2 Mbps</option><option value="4" selected>4 Mbps</option><option value="8">8 Mbps</option></select></label>
+<label><span>Time with relevant activity <b class="mono" id="vA"></b></span><input id="iA" type="range" min="1" max="30" value="6"></label>
+</div>
+<div class="win rv"><div class="rows" id="rows">
+<div><div class="mono" style="margin-bottom:10px">Record continuous footage 24/7 (30 days)</div><div class="track"><div class="fill a" id="fa"></div></div></div>
+<div><div class="mono" style="margin-bottom:10px">72h rolling raw + lifelong event clips (score 30+)</div><div class="track"><div class="fill b" id="fk"></div></div></div>
+<div><div class="mono">Estimated storage not used</div><div class="big"><span id="svp">0</span>%</div><div class="mono" id="svt" style="margin-top:6px"></div></div>
+</div></div>
+</div></div></section>
+
+<section id="final"><div class="wrap">
+<h2 class="split">See what VYZN would keep <span>from your cameras.</span></h2>
+<p class="lede rv">Get started with VYZN surveillance AI on your own cameras today.</p>
+<p class="mono rv" style="margin:20px 0 0">Proposed pricing: ₹2,499 one-time setup and ₹999 per camera per year. Runs on a suitable computer you already have.</p>
+<div class="cta rv"><a class="btn p" id="demo" href="/login">Get VYZN</a><a class="btn g" href="#hero">Back to top</a></div>
+</div></section>
+<footer><div class="wrap"><span class="logo"><i></i>VYZN</span><span class="mono">Intelligent CCTV monitoring · Rolling 72h continuous buffer · Lifelong clips (30+)</span></div></footer>
+
+<script>
+const DEMO_EMAIL="vyzntechnologies@gmail.com";
+function $(id){return document.getElementById(id)}
+const $$=s=>[...document.querySelectorAll(s)],RM=matchMedia("(prefers-reduced-motion:reduce)").matches;
+let seen=0,cur=-1,sv0=0;
+/* split headings into masked words */
+function split(el){el.setAttribute("aria-label",el.textContent.replace(/\s+/g," ").trim());let i=0;
+ (function w(n){[...n.childNodes].forEach(c=>{if(c.nodeType===3){const f=document.createDocumentFragment();c.textContent.split(/(\s+)/).forEach(t=>{if(!t.trim()){f.append(t);return}const s=document.createElement("span");s.className="w";s.setAttribute("aria-hidden","true");s.innerHTML="<i style='--i:"+(i++)+"'>"+t+"</i>";f.append(s)});c.replaceWith(f)}else if(c.nodeType===1&&c.tagName!=="BR")w(c)})})(el)}
+$$(".split").forEach(split);
+$$(".rv").forEach(el=>{el.style.setProperty("--d",[...el.parentNode.children].filter(c=>c.classList.contains("rv")).indexOf(el))});
+function count(el){const to=+el.dataset.count,t0=performance.now();(function f(t){const k=Math.min(1,(t-t0)/700);el.textContent=Math.round(to*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(f)})(t0)}
+$$("[data-count]").forEach(e=>{if(!RM)e.textContent="0"});
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(!e.isIntersecting)return;const t=e.target;t.classList.add("in");io.unobserve(t);
+ if(t.dataset.count&&!RM)count(t);if(t.id==="rows"){seen=1;calc()}}),{threshold:.2});
+$$(".split,.rv,[data-count],#rows,.card,.stats").forEach(e=>io.observe(e));
+/* card spotlight + magnetic buttons */
+$$(".card").forEach(c=>c.addEventListener("pointermove",e=>{const r=c.getBoundingClientRect();c.style.setProperty("--mx",e.clientX-r.left+"px");c.style.setProperty("--my",e.clientY-r.top+"px")}));
+if(!RM)$$(".btn.p").forEach(b=>{b.addEventListener("pointermove",e=>{const r=b.getBoundingClientRect();b.style.transform="translate("+(e.clientX-r.left-r.width/2)*.18+"px,"+(e.clientY-r.top-r.height/2)*.3+"px)"});b.addEventListener("pointerleave",()=>b.style.transform="")});
+/* marquee + frame strip */
+$("mq").innerHTML+=$("mq").innerHTML;
+for(let i=0;i<46;i++){const b=document.createElement("i"),hot=i%7===3||i%11===5;b.style.height=(hot?45+(i*17)%55:8+(i*13)%14)+"%";if(hot){b.className="hot";b.style.setProperty("--dl",(i%6)*.35+"s")}$("strip").append(b)}
+/* hero console demo */
+const cv=$("cv"),cx=cv.getContext("2d"),bg=$("bg"),bx=bg.getContext("2d");let W,H,BW,BH,NS=[],HUB,bnext=0,n=412,last=-1;
+function fit(){const r=cv.getBoundingClientRect(),d=devicePixelRatio||1;W=cv.width=r.width*d;H=cv.height=r.height*d;
+ const q=bg.getBoundingClientRect(),e=Math.min(devicePixelRatio||1,2);BW=bg.width=q.width*e;BH=bg.height=q.height*e;
+ const wide=BW>BH*.9;HUB={x:BW*(wide?.74:.5),y:BH*(wide?.3:.34)};NS=[];
+ for(let i=0;i<12;i++){const a=i/12*6.283+.4,k=.28+.22*((i*7)%5)/4,m=Math.min(BW,BH*1.6);
+  NS.push({x:Math.max(BW*.04,Math.min(BW*.97,HUB.x+Math.cos(a)*m*k*1.3)),y:Math.max(BH*.05,Math.min(BH*.62,HUB.y+Math.sin(a)*m*k*.8)),st:0,t:0,s:70+(i*13)%25})}}
+fit();addEventListener("resize",fit);
+const CYC=9000,sc=p=>p<.25?6+p*20:p<.7?Math.min(86,11+(p-.25)*190):Math.max(8,86-(p-.7)*300);
+function feed(ms){const p=(ms%CYC)/CYC,s=Math.round(sc(p)),hot=s>=70;cx.clearRect(0,0,W,H);
+ cx.strokeStyle="rgba(255,255,255,.06)";cx.lineWidth=1;
+ for(let i=0;i<=12;i++){cx.beginPath();cx.moveTo(W*i/12,H*.38);cx.lineTo(W*(i-6)/6*1.1+W/2,H);cx.stroke()}
+ for(let j=0;j<6;j++){const y=H*(.38+.62*(j/6)**1.6);cx.beginPath();cx.moveTo(0,y);cx.lineTo(W,y);cx.stroke()}
+ cx.setLineDash([8,6]);cx.strokeStyle="#2f6fd6";cx.lineWidth=2;cx.strokeRect(W*.08,H*.3,W*.5,H*.6);cx.setLineDash([]);cx.fillStyle="rgba(47,111,214,.08)";cx.fillRect(W*.08,H*.3,W*.5,H*.6);
+ const x=W*(.02+.8*Math.min(1,p/.85)),y=H*.6,w=W*.06,h=H*.3;
+ if(p<.9){cx.fillStyle="#232830";cx.fillRect(x+w*.2,y,w*.6,h);cx.beginPath();cx.arc(x+w/2,y-h*.06,w*.2,0,7);cx.fill();cx.strokeStyle=hot?"#f0575d":s>=30?"#e5a33b":"#8a939a";cx.lineWidth=2;cx.strokeRect(x,y-h*.2,w,h*1.2);cx.fillStyle=cx.strokeStyle;cx.font=Math.round(W/60)+"px Martian Mono,monospace";cx.fillText("person "+(.6+s/250).toFixed(2),x,y-h*.26)}
+ if(hot){cx.strokeStyle="rgba(240,87,93,"+(.5+.5*Math.sin(ms/150))*.6+")";cx.lineWidth=3;cx.strokeRect(2,2,W-4,H-4)}
+ const c=hot?"var(--al)":s>=30?"var(--rv)":"var(--mu)";$("score").textContent=s;$("score").style.color=hot?"var(--al)":"var(--tx)";$("mt").style.setProperty("--w",s+"%");$("mt").style.setProperty("--c",c);
+ $("tier").textContent=hot?"Score 70+ · Alert sent · Saved for life":s>=30?"Score 30–70 · Clipped & saved for life":"Score <30 · No clip cut · 72h rolling";
+ const co=$("co");
+ if(hot){co.className="callout on";co.innerHTML="<b class=t-a>Score "+s+" · Tier 1 Alert</b><br>Person inside your area. Permanent clip VZ-"+n+" is cutting."}
+ else if(p>=.9){co.className="callout on kept";co.innerHTML="<b class=t-k>Clip VZ-"+n+" saved for life</b><br>Score 30+ event locked. Raw stream clears at 72h."}else co.className="callout";
+ const cyc=Math.floor(ms/CYC);if(p>.9&&cyc!==last){last=cyc;n++;addEv()}
+ $("ts").textContent=new Date().toTimeString().slice(0,8)}
+const evs=[["person","Society Main Gate","82"],["vehicle","Hostel Parking","74"],["person","Wing B Back Entry","58"],["unattended bag","Lobby · Wing A","71"]];
+function addEv(){const e=evs[n%4],ul=$("ev"),li=document.createElement("li");li.innerHTML="<span>"+new Date().toTimeString().slice(0,8)+"</span><span><b>"+e[0]+"</b> · "+e[1]+" · VZ-"+n+"</span><span class="+(+e[2]>=70?"t-a":"t-r")+">"+e[2]+"</span>";ul.prepend(li);while(ul.children.length>4)ul.lastChild.remove()}
+n=408;for(let i=0;i<4;i++){n++;addEv()}
+function net(ms){bx.clearRect(0,0,BW,BH);const d=BW/1280;
+ if(ms>bnext){const c=NS.filter(o=>o.st===0);if(c.length){const o=c[Math.random()*c.length|0];o.st=1;o.t=ms}bnext=ms+2800}
+ NS.forEach((o,i)=>{const age=ms-o.t;if(o.st===1&&age>1600){o.st=2;o.t=ms}else if(o.st===2&&age>2800)o.st=0;
+  const col=o.st===1?"240,87,93":o.st===2?"82,183,136":"138,144,150",on=o.st>0;
+  bx.strokeStyle="rgba("+col+","+(on?.55:.13)+")";bx.lineWidth=(on?1.6:1)*d;bx.beginPath();bx.moveTo(o.x,o.y);bx.lineTo(HUB.x,HUB.y);bx.stroke();
+  const q=(ms/(3200+i*230)+i*.13)%1;bx.fillStyle="rgba("+col+","+(on?.95:.35)+")";bx.beginPath();bx.arc(o.x+(HUB.x-o.x)*q,o.y+(HUB.y-o.y)*q,(on?2.6:1.5)*d,0,7);bx.fill();
+  bx.fillStyle="#0b0d0f";bx.strokeStyle="rgba("+col+","+(on?1:.5)+")";bx.lineWidth=1.5*d;bx.beginPath();bx.arc(o.x,o.y,5*d,0,7);bx.fill();bx.stroke();
+  if(on){const g=(age%1600)/1600;bx.strokeStyle="rgba("+col+","+(1-g)*.6+")";bx.beginPath();bx.arc(o.x,o.y,(6+g*26)*d,0,7);bx.stroke();bx.fillStyle="rgb("+col+")";bx.font=Math.max(10,11*d)+"px Martian Mono,monospace";bx.fillText(o.st===1?"score "+o.s:"kept for life",o.x+12*d,o.y-10*d)}});
+ bx.fillStyle="#2f6fd6";bx.shadowColor="#2f6fd6";bx.shadowBlur=20*d;bx.beginPath();bx.arc(HUB.x,HUB.y,8*d,0,7);bx.fill();bx.shadowBlur=0;
+ bx.strokeStyle="rgba(47,111,214,.35)";bx.lineWidth=d;bx.beginPath();bx.arc(HUB.x,HUB.y,22*d,0,7);bx.stroke()}
+function loop(ms){feed(ms);if(scrollY<innerHeight*1.5)net(ms);if(!RM)requestAnimationFrame(loop)}
+if(RM){NS[2].st=2;loop(CYC*.5)}else requestAnimationFrame(loop);
+/* sticky how-it-works story */
+const S=[
+{t:"Detect",d:"A motion gate skips still footage. Only moving frames reach the YOLOv8 detector, which tracks objects across frames.",b:"person · 0.91",l:"Object detected and tracked",g:[["09:14:02","motion gate open · cam-02"],["09:14:02","person detected · conf 0.91"],["09:14:05","object tracked · id 17"]]},
+{t:"Score",d:"Every 3 seconds the moment gets a score from 0 to 100. We never clip anything with a score below 30.",b:"82",l:"Score at 09:14:11",g:[["09:14:05","score 18 · under 30 (no clip cut)"],["09:14:08","score 61 · enters 30–70 review"],["09:14:11","score 82 · alert threshold passed"]]},
+{t:"Keep (30+)",d:"Events scored 30 or higher are cut into permanent clips (10s before and after). These clips stay in your library permanently.",b:"Lifelong",l:"Cut clips (30+) preserved forever",g:[["09:14:11","alert sent to Telegram"],["09:15:52","event closed · 10s buffer added"],["09:15:53","clip VZ-412 locked permanently"]]},
+{t:"72h Purge",d:"You always have the last 72 hours of complete, continuous footage. At 72 hours, the full raw footage clears automatically, while all cut clips remain forever.",b:"72 h",l:"Rolling raw purge · Cut clips saved",g:[["+72 h","full continuous footage purged"],["+72 h","zero clips cut for noise <30"],["+72 h","cut clips (30+) remain intact forever"]]}];
+const sb=$("steps"),how=$("how");
+S.forEach((s,i)=>{const b=document.createElement("button");b.className="step";b.innerHTML="<h3>"+s.t+"</h3><p>"+s.d+"</p>";b.onclick=()=>scrollTo({top:how.offsetTop+(i+.5)/S.length*(how.offsetHeight-innerHeight),behavior:"smooth"});sb.append(b)});
+function setStep(i){if(i===cur)return;cur=i;[...sb.children].forEach((b,k)=>b.setAttribute("aria-selected",k===i));const s=S[i];
+ $("pane").innerHTML="<div class='big bv'>"+s.b+"</div><div class='mono bv'>"+s.l+"</div><div class='log'>"+s.g.map((r,k)=>"<div style='animation-delay:"+(.15+k*.2)+"s'><span>"+r[0]+"</span><span>"+r[1]+"</span></div>").join("")+"</div>"}
+setStep(0);
+/* scroll-linked motion */
+function onScroll(){const y=scrollY,h=document.documentElement.scrollHeight-innerHeight;
+ $("prog").style.transform="scaleX("+(h>0?y/h:0)+")";$("nav").classList.toggle("sc",y>20);
+ const k=Math.min(1,y/(innerHeight*.75));
+ if(!RM){$("dash").style.transform="rotateX("+(18*(1-k))+"deg) scale("+(.93+.07*k)+")";bg.style.transform="translateY("+(-y*.12)+"px)"}
+ const r=how.getBoundingClientRect(),p=Math.min(.999,Math.max(0,-r.top/(r.height-innerHeight)));
+ $("fb").style.height=(p*100)+"%";setStep(Math.floor(p*S.length))}
+let tk=0;addEventListener("scroll",()=>{if(!tk){tk=1;requestAnimationFrame(()=>{tk=0;onScroll()})}},{passive:true});onScroll();
+/* storage estimate */
+function tw(to){const f=sv0,t0=performance.now();sv0=to;(function s(t){const k=Math.min(1,(t-t0)/700);$("svp").textContent=Math.round(f+(to-f)*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(s)})(t0)}
+function calc(){const c=+$("iC").value,b=+$("iB").value,a=+$("iA").value;$("vC").textContent=c;$("vA").textContent=a+"%";
+ const full=c*b*86400*30/8/1e6,keep=full*a/100,f=v=>v>=1?v.toFixed(1)+" TB":Math.round(v*1000)+" GB";
+ $("fa").textContent=f(full);$("fk").textContent=f(keep);$("fa").style.width=seen?"100%":"0";$("fk").style.width=seen?Math.max(a,16)+"%":"0";
+ $("svt").textContent=f(full-keep)+" of "+f(full)+" per month";if(seen)tw(100-a)}
+["iC","iB","iA"].forEach(i=>$(i).addEventListener("input",calc));calc();
+</script>
+</body>
+</html>

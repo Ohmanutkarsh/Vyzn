@@ -2724,6 +2724,9 @@ def serve_settings():
 @app.get("/login/{path:path}", response_class=HTMLResponse)
 @app.get("/setup", response_class=HTMLResponse)
 @app.get("/setup/{path:path}", response_class=HTMLResponse)
+def serve_login(path: Optional[str] = None):
+    return _serve_file_or_fallback("login.html")
+
 @app.get("/", response_class=HTMLResponse)
 def serve_index():
     return _serve_file_or_fallback("index.html")

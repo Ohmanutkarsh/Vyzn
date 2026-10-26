@@ -3758,23 +3758,21 @@ if frontend_dir.exists():
     app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
 
 @app.get("/", response_class=HTMLResponse)
-def serve_root(request: Request, db: EventDatabase = Depends(get_db)):
-    token = request.cookies.get("vyzn_session")
-    user = db.get_session_user(token) if token else None
-    if user:
-        overview_file = frontend_dir / "overview.html"
-        if overview_file.exists():
-            return HTMLResponse(content=overview_file.read_text(encoding="utf-8"))
-    
-    auth_file = frontend_dir / "auth.html"
-    if auth_file.exists():
-        return HTMLResponse(content=auth_file.read_text(encoding="utf-8"))
-    overview_file = frontend_dir / "overview.html"
-    if overview_file.exists():
-        return HTMLResponse(content=overview_file.read_text(encoding="utf-8"))
-    index_file = frontend_dir / "index.html"
-    if index_file.exists():
-        return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+def serve_root():
+    """
+    Serves the official VYZN Landing Page.
+    Features interactive console preview, rolling 72h continuous architecture,
+    importance score demonstration, and 'Get VYZN' CTAs leading to /login.
+    """
+    root_dir = Path(__file__).resolve().parent.parent.parent
+    for candidate in [
+        frontend_dir / "landing.html",
+        root_dir / "public" / "index.html",
+        root_dir / "index.html",
+        frontend_dir / "index.html"
+    ]:
+        if candidate.exists() and candidate.is_file():
+            return HTMLResponse(content=candidate.read_text(encoding="utf-8"))
     return HTMLResponse(content="<h1>VYZN Netra</h1>")
 
 @app.get("/overview", response_class=HTMLResponse)
