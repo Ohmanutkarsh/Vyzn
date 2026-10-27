@@ -226,5 +226,118 @@ python -m pytest tests/
 
 ---
 
+## 💳 Camera Quota & Manual UPI Billing System
+
+VYZN Netra features a camera quota system designed for personal UPI payments with manual verification. Customers cannot add cameras without available quota slots. Top-ups are initiated from **Settings > Camera Plan**, paid via fixed-amount UPI QR codes, proof of payment is verified via a 12-digit UTR, and quota is credited **only** upon manual admin approval.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Customer
+    participant UI as VYZN Web UI
+    participant API as FastAPI Backend
+    participant TG as Telegram Bot
+    actor Admin as Store Owner / Admin
+
+    Customer->>UI: Selects camera quantity in Settings > Camera Plan
+    UI->>API: POST /billing/quota-orders {quantity}
+    API-->>UI: Returns {order_code, amount, upi_link, fixed_amount_qr}
+    Customer->>Customer: Scans QR / opens UPI app & pays fixed amount
+    Customer->>UI: Submits 12-digit UTR reference
+    UI->>API: POST /billing/quota-orders/{id}/submit-utr {utr}
+    API->>TG: Instant alert with order code, tenant, amount, & UTR
+    TG-->>Admin: "Match amount, UTR and order code in UPI app"
+    Admin->>Admin: Verifies UTR in GPay / PhonePe / bank statement
+    Admin->>API: POST /admin/billing/orders/{id}/approve (via /admin/billing)
+    API->>API: Atomic transaction: lock row, set status=paid, add quota
+    API-->>UI: Real-time update: "N cameras added to your quota"
+    Customer->>UI: Adds new camera (Enforcement checks available quota > 0)
+```
+
+### 1. Setting Up UPI ID, Price, and Enforcement
+
+Add the following environment variables to your `.env` file:
+
+```env
+# Personal UPI ID / VPA to receive payments directly to your bank account:
+UPI_VPA=yourbusiness@okhdfcbank
+
+# Payee name displayed in the customer's UPI app (Google Pay, PhonePe, Paytm):
+UPI_PAYEE_NAME="VYZN Surveillance"
+
+# Price per camera quota slot in paise (e.g. 50000 paise = ₹500.00):
+CAMERA_PRICE_PAISE=50000
+
+# Maximum cameras allowed in a single top-up order:
+MAX_CAMERAS_PER_ORDER=20
+
+# Order expiration window in minutes (unpaid orders expire automatically):
+ORDER_EXPIRY_MINUTES=30
+
+# Authorized admin user IDs or emails (comma-separated) for approval actions:
+ADMIN_USER_IDS="admin@vyzn.ai,owner@vyzn.ai,usr_admin_001"
+
+# Enable strict camera quota enforcement on camera creation:
+# Defaults to false so existing local edge cameras and testing demos keep working.
+BILLING_ENFORCEMENT=true
+```
+
+### 2. How to Approve Orders
+
+1. **Customer Submits UTR**: Customer selects camera count in **Settings > Camera Plan**, scans the fixed-amount QR code, and enters the 12-digit UPI reference number (UTR).
+2. **Instant Telegram Notification**: The system immediately dispatches a Telegram message to the store owner containing the order code (e.g. `VYZ-4821`), tenant, quantity, amount, and UTR.
+3. **Verify in UPI App**: Look up the transaction in Google Pay, PhonePe, Paytm, or your bank statement. Match:
+   - **Amount**: Exactly equals the order amount.
+   - **UTR Reference**: Exactly matches the submitted 12-digit number.
+   - **Order Code**: Present in the UPI transaction note (`tn=VYZ-XXXX`).
+4. **Approve via Admin Console**:
+   - Navigate to `/admin/billing` in your browser.
+   - Click **Approve**. The order status updates to `paid` and the purchased quantity is atomically added to the tenant's quota.
+   - If payment is invalid, click **Reject** and supply a reason. Rejection leaves quota untouched.
+   - *Approving twice is strictly idempotent and will never credit quota twice.*
+
+### 3. How to Swap in a Payment Gateway Later
+
+Payment generation is completely decoupled behind the `PaymentProvider` interface in [`vyzn/billing/provider.py`](file:///vyzn/billing/provider.py). No database schemas, API routes, or enforcement paths depend on manual UPI logic.
+
+To swap in a payment gateway (e.g., Razorpay, Stripe, Cashfree):
+
+1. Open [`vyzn/billing/provider.py`](file:///vyzn/billing/provider.py) and create a new provider class implementing `PaymentProvider`:
+
+```python
+from vyzn.billing.provider import PaymentProvider
+
+class RazorpayPaymentProvider(PaymentProvider):
+    def __init__(self, key_id: str, key_secret: str):
+        self.client = razorpay.Client(auth=(key_id, key_secret))
+
+    def build_payment(self, order: dict) -> dict:
+        rp_order = self.client.order.create({
+            "amount": order["amount_paise"],
+            "currency": "INR",
+            "receipt": order["order_code"]
+        })
+        return {
+            "gateway_order_id": rp_order["id"],
+            "upi_link": f"https://checkout.razorpay.com/v1/checkout.js?order_id={rp_order['id']}",
+            "qr": "" # Gateway modal handles QR
+        }
+```
+
+2. In [`vyzn/billing/service.py`](file:///vyzn/billing/service.py), instantiate `BillingService` with your new provider:
+
+```python
+# From:
+self.provider = payment_provider or ManualUpiProvider()
+
+# To:
+self.provider = payment_provider or RazorpayPaymentProvider(key_id=..., key_secret=...)
+```
+
+All quota tracking, partial index order deduplication, atomic row-locking enforcement, and admin audit logging remain 100% intact.
+
+---
+
 ## 📄 License
 Proprietary — All rights reserved © VYZN AI Inc.
+

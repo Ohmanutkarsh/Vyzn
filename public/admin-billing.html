@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Billing Verification — VYZN Admin</title>
+  <link rel="stylesheet" href="/static/tokens.css">
+  <link rel="stylesheet" href="/static/components/ui.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    .admin-layout {
+      max-width: 1000px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-6, 24px);
+      padding-bottom: var(--space-12, 48px);
+    }
+    .admin-card {
+      background: var(--bg-1, #18181b);
+      border: 1px solid var(--border-subtle, #27272a);
+      border-radius: var(--radius-panel, 12px);
+      padding: var(--space-5, 20px) var(--space-6, 24px);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .admin-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-4, 16px);
+      padding-bottom: var(--space-3, 12px);
+      border-bottom: 1px solid var(--border-subtle, #27272a);
+    }
+    .admin-badge {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .admin-badge.pending {
+      background: rgba(245, 158, 11, 0.15);
+      color: #f59e0b;
+    }
+    .admin-badge.success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+    }
+    .verify-callout {
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      border-radius: 8px;
+      padding: 14px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      color: #fef3c7;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .admin-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      text-align: left;
+    }
+    .admin-table th {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-subtle, #27272a);
+      color: var(--text-3, #71717a);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .admin-table td {
+      padding: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: var(--text-1, #f4f4f5);
+      vertical-align: middle;
+    }
+    .btn-approve {
+      background: #10b981;
+      color: #ffffff;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 150ms ease;
+    }
+    .btn-approve:hover {
+      background: #059669;
+    }
+    .btn-reject {
+      background: transparent;
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 150ms ease;
+    }
+    .btn-reject:hover {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: #ef4444;
+    }
+    .toast-msg {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: var(--bg-1, #18181b);
+      border: 1px solid var(--border-subtle, #27272a);
+      color: var(--text-1, #f4f4f5);
+      padding: 12px 20px;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+      display: none;
+      z-index: 10000;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body class="app-shell">
+
+  <!-- Desktop Sidebar -->
+  <div id="app-sidebar"></div>
+
+  <!-- Main Content Wrapper -->
+  <div class="shell-main-wrapper">
+    <!-- Top Header -->
+    <div id="app-header"></div>
+
+    <!-- Admin Content -->
+    <main class="shell-content" id="main-content">
+      <div class="cameras-header-row" style="margin-bottom: var(--space-6, 24px); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 4px 0; color: #ffffff;">Admin Billing Verification</h2>
+          <span style="font-size: 13px; color: var(--text-2, #a1a1aa);">Verify customer UPI payments and credit camera quota slots manually.</span>
+        </div>
+        <button type="button" class="btn btn-secondary" id="btn-refresh-orders" style="font-size: 13px; padding: 6px 14px;">
+          🔄 Refresh Orders
+        </button>
+      </div>
+
+      <div class="admin-layout">
+        <!-- Mandatory Verification Notice -->
+        <div class="verify-callout">
+          <span style="font-size: 22px;">⚠️</span>
+          <div>
+            <strong>Important Verification Policy:</strong> Match amount, UTR and order code in your UPI app before approving. Approving an order immediately increases the tenant's camera quota.
+          </div>
+        </div>
+
+        <!-- Pending Orders Table Card -->
+        <section class="admin-card">
+          <div class="admin-card-header">
+            <h3 style="font-size: 16px; font-weight: 600; margin: 0; color: #ffffff; display: flex; align-items: center; gap: 8px;">
+              <span>📦</span> Pending UPI Orders
+            </h3>
+            <span class="admin-badge pending" id="badge-pending-count">0 Pending</span>
+          </div>
+
+          <div style="overflow-x: auto;">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>Order Code</th>
+                  <th>Tenant / Customer</th>
+                  <th>Quantity</th>
+                  <th>Amount</th>
+                  <th>12-Digit UTR</th>
+                  <th>Submitted At</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="tbody-pending-orders">
+                <tr>
+                  <td colspan="7" style="padding: 24px; text-align: center; color: var(--text-3, #71717a);">
+                    Loading pending orders…
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <div id="app-bottom-nav"></div>
+  </div>
+
+  <div id="toast-notification" class="toast-msg"></div>
+
+  <script type="module" src="/static/admin-billing.js"></script>
+</body>
+</html>

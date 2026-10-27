@@ -69,6 +69,9 @@ function renderSidebar(activePage, user = {}) {
     { id: 'cameras', href: '/cameras', label: 'Cameras', icon: '📹' },
     { id: 'settings', href: '/settings', label: 'Settings', icon: '⚙' },
   ];
+  if (user && (user.role === 'admin' || user.role === 'fleet_admin')) {
+    navItems.push({ id: 'admin-billing', href: '/admin/billing', label: 'Billing Admin', icon: '💳' });
+  }
 
   sidebarContainer.innerHTML = `
     <aside class="shell-sidebar">

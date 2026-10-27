@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initTelegramControls();
   await initBusinessHoursControls();
   await initStorageControls();
+  await initCameraPlanControls();
 });
 
 function showToast(message, isError = false) {
@@ -965,6 +966,458 @@ async function initStorageControls() {
     };
   }
 }
+
+// ==============================================================================
+// Camera Plan & Quota Management Controls
+// ==============================================================================
+
+async function initCameraPlanControls() {
+  let planQuota = {
+    purchased: 0,
+    used: 0,
+    available: 0,
+    price_per_camera_paise: 50000,
+    max_per_order: 20
+  };
+  let selectedQty = 1;
+  let activeOrder = null;
+  let timerInterval = null;
+  let pollInterval = null;
+
+  const modal = document.getElementById('modal-camera-plan');
+  const btnOpenModal = document.getElementById('btn-open-plan-modal');
+  const btnCloseModal = document.getElementById('btn-close-plan-modal');
+  const step1 = document.getElementById('plan-step-1');
+  const step2 = document.getElementById('plan-step-2');
+  const step3 = document.getElementById('plan-step-3');
+
+  // Load and display Quota
+  async function loadQuota() {
+    try {
+      const res = await fetch('/billing/quota', { credentials: 'include' });
+      if (!res.ok) return;
+      const data = await res.json();
+      planQuota = data;
+
+      const valPurchased = document.getElementById('val-plan-purchased');
+      const valUsed = document.getElementById('val-plan-used');
+      const valAvailable = document.getElementById('val-plan-available');
+      const valPrice = document.getElementById('val-plan-price');
+      const badge = document.getElementById('plan-quota-badge');
+
+      if (valPurchased) valPurchased.textContent = data.purchased;
+      if (valUsed) valUsed.textContent = data.used;
+      if (valAvailable) valAvailable.textContent = data.available;
+
+      const unitPriceRs = (data.price_per_camera_paise / 100).toFixed(0);
+      if (valPrice) valPrice.textContent = `₹${unitPriceRs}`;
+
+      if (badge) {
+        if (data.available > 0) {
+          badge.textContent = `${data.available} Slots Free`;
+          badge.className = 'settings-badge success';
+        } else {
+          badge.textContent = 'Quota Full';
+          badge.className = 'settings-badge info';
+        }
+      }
+
+      updateStepperDisplay();
+    } catch (e) {
+      console.warn('Could not load camera quota:', e);
+    }
+  }
+
+  // Load and render Order History
+  async function loadOrderHistory() {
+    const tbody = document.getElementById('tbody-quota-orders');
+    if (!tbody) return;
+
+    try {
+      const res = await fetch('/billing/quota-orders', { credentials: 'include' });
+      if (!res.ok) {
+        tbody.innerHTML = '<tr><td colspan="6" style="padding: 14px 10px; text-align: center; color: var(--text-3);">Could not load orders.</td></tr>';
+        return;
+      }
+      const orders = await res.json();
+      if (!orders || orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="padding: 16px 10px; text-align: center; color: var(--text-3);">No camera quota orders yet.</td></tr>';
+        return;
+      }
+
+      const statusMap = {
+        'paid': { label: 'Verified & Credited', cls: 'settings-badge success' },
+        'submitted': { label: 'Verifying', cls: 'settings-badge info' },
+        'awaiting_payment': { label: 'Awaiting Payment', cls: 'settings-badge info' },
+        'rejected': { label: 'Declined', cls: 'settings-badge' },
+        'expired': { label: 'Expired', cls: 'settings-badge' }
+      };
+
+      tbody.innerHTML = orders.map(ord => {
+        const st = statusMap[ord.status] || { label: ord.status, cls: 'settings-badge' };
+        const amountRs = (ord.amount_paise / 100).toFixed(2);
+        const dateStr = ord.created_at ? new Date(ord.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+        const utrDisplay = ord.utr ? `<code style="font-size: 11px;">${escapeHtml(ord.utr)}</code>` : '<span style="color: var(--text-3);">—</span>';
+
+        return `
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer;" data-order-id="${ord.id}" data-order-status="${ord.status}">
+            <td style="padding: 10px; font-weight: 600; font-family: monospace; color: #ffffff;">${escapeHtml(ord.order_code)}</td>
+            <td style="padding: 10px; color: var(--text-2);">${dateStr}</td>
+            <td style="padding: 10px; color: var(--text-1);">${ord.quantity} camera${ord.quantity > 1 ? 's' : ''}</td>
+            <td style="padding: 10px; font-weight: 600; color: #ffffff;">₹${amountRs}</td>
+            <td style="padding: 10px;"><span class="${st.cls}">${st.label}</span></td>
+            <td style="padding: 10px;">${utrDisplay}</td>
+          </tr>
+        `;
+      }).join('');
+
+      // Add click handler to resume open orders
+      tbody.querySelectorAll('tr[data-order-id]').forEach(row => {
+        row.addEventListener('click', async () => {
+          const ordId = row.getAttribute('data-order-id');
+          const ordStatus = row.getAttribute('data-order-status');
+          if (ordStatus === 'awaiting_payment' || ordStatus === 'submitted') {
+            await resumeOrder(ordId);
+          }
+        });
+      });
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="6" style="padding: 14px 10px; text-align: center; color: var(--text-3);">Error loading orders.</td></tr>';
+    }
+  }
+
+  function updateStepperDisplay() {
+    const qtyEl = document.getElementById('display-plan-qty');
+    const totalEl = document.getElementById('display-plan-total');
+    const rateEl = document.getElementById('display-plan-rate');
+
+    if (qtyEl) qtyEl.textContent = selectedQty;
+
+    const rate = planQuota.price_per_camera_paise / 100;
+    const total = selectedQty * rate;
+
+    if (totalEl) totalEl.textContent = `₹${total.toFixed(2)}`;
+    if (rateEl) rateEl.textContent = `(₹${rate.toFixed(0)} per camera)`;
+  }
+
+  // Stepper buttons
+  const btnMinus = document.getElementById('btn-qty-minus');
+  const btnPlus = document.getElementById('btn-qty-plus');
+
+  if (btnMinus) {
+    btnMinus.addEventListener('click', () => {
+      if (selectedQty > 1) {
+        selectedQty--;
+        updateStepperDisplay();
+      }
+    });
+  }
+
+  if (btnPlus) {
+    btnPlus.addEventListener('click', () => {
+      const maxAllowed = planQuota.max_per_order || 20;
+      if (selectedQty < maxAllowed) {
+        selectedQty++;
+        updateStepperDisplay();
+      }
+    });
+  }
+
+  function showModal() {
+    if (modal) modal.style.display = 'flex';
+  }
+
+  function hideModal() {
+    if (modal) modal.style.display = 'none';
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    activeOrder = null;
+    loadQuota();
+    loadOrderHistory();
+  }
+
+  function showStep(stepIndex) {
+    if (step1) step1.style.display = stepIndex === 1 ? 'block' : 'none';
+    if (step2) step2.style.display = stepIndex === 2 ? 'block' : 'none';
+    if (step3) step3.style.display = stepIndex === 3 ? 'block' : 'none';
+
+    const titleEl = document.getElementById('modal-plan-title');
+    if (titleEl) {
+      if (stepIndex === 1) titleEl.textContent = 'Add Camera Plan';
+      if (stepIndex === 2) titleEl.textContent = 'Pay via UPI QR';
+      if (stepIndex === 3) titleEl.textContent = 'Order Status';
+    }
+  }
+
+  if (btnOpenModal) {
+    btnOpenModal.addEventListener('click', () => {
+      selectedQty = 1;
+      updateStepperDisplay();
+      const errEl = document.getElementById('plan-step1-error');
+      if (errEl) errEl.style.display = 'none';
+      showStep(1);
+      showModal();
+    });
+  }
+
+  if (btnCloseModal) {
+    btnCloseModal.addEventListener('click', hideModal);
+  }
+
+  // Step 1 -> Proceed: create quota order
+  const btnProceed = document.getElementById('btn-proceed-order');
+  if (btnProceed) {
+    btnProceed.addEventListener('click', async () => {
+      const errEl = document.getElementById('plan-step1-error');
+      if (errEl) errEl.style.display = 'none';
+
+      btnProceed.disabled = true;
+      btnProceed.textContent = 'Creating order…';
+
+      try {
+        const res = await fetch('/billing/quota-orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ quantity: selectedQty })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 409) {
+            // Already has open order
+            errEl.textContent = data.detail || 'An open order already exists. Resuming open order…';
+            errEl.style.display = 'block';
+            await loadOrderHistory();
+            return;
+          }
+          throw new Error(data.detail || 'Failed to create order.');
+        }
+
+        activeOrder = data;
+        renderStep2Payment(data);
+        showStep(2);
+      } catch (err) {
+        if (errEl) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+        }
+      } finally {
+        btnProceed.disabled = false;
+        btnProceed.textContent = 'Proceed to Payment →';
+      }
+    });
+  }
+
+  // Render Step 2 Payment View
+  function renderStep2Payment(ord) {
+    const codeEl = document.getElementById('step2-order-code');
+    const amountEl = document.getElementById('step2-amount');
+    const qtyDescEl = document.getElementById('step2-qty-desc');
+    const qrImg = document.getElementById('step2-qr-img');
+    const upiLink = document.getElementById('step2-upi-link');
+    const utrInput = document.getElementById('step2-input-utr');
+    const utrErr = document.getElementById('step2-utr-error');
+
+    if (codeEl) codeEl.textContent = ord.order_code;
+    if (amountEl) amountEl.textContent = `₹${(ord.amount_paise / 100).toFixed(2)}`;
+    if (qtyDescEl) qtyDescEl.textContent = `for ${ord.quantity} camera slot${ord.quantity > 1 ? 's' : ''}`;
+    if (qrImg && ord.qr) qrImg.src = ord.qr;
+    if (upiLink && ord.upi_link) upiLink.href = ord.upi_link;
+    if (utrInput) utrInput.value = '';
+    if (utrErr) utrErr.style.display = 'none';
+
+    // Start countdown timer
+    startExpiryTimer(ord.expires_at);
+  }
+
+  function startExpiryTimer(expiresAtIso) {
+    if (timerInterval) clearInterval(timerInterval);
+    const timerEl = document.getElementById('step2-timer');
+    if (!timerEl) return;
+
+    const targetTime = expiresAtIso ? new Date(expiresAtIso).getTime() : Date.now() + 30 * 60 * 1000;
+
+    const updateTimer = () => {
+      const remainingSec = Math.max(0, Math.floor((targetTime - Date.now()) / 1000));
+      const mins = Math.floor(remainingSec / 60);
+      const secs = remainingSec % 60;
+      timerEl.textContent = `⏱️ ${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+      if (remainingSec <= 0) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        timerEl.textContent = '⏱️ Expired';
+        showToast('Order has expired. Please create a new order.', true);
+      }
+    };
+
+    updateTimer();
+    timerInterval = setInterval(updateTimer, 1000);
+  }
+
+  // Step 2 -> Submit UTR
+  const btnSubmitUtr = document.getElementById('btn-submit-utr');
+  if (btnSubmitUtr) {
+    btnSubmitUtr.addEventListener('click', async () => {
+      const utrInput = document.getElementById('step2-input-utr');
+      const utrErr = document.getElementById('step2-utr-error');
+      const utrVal = utrInput ? utrInput.value.trim() : '';
+
+      if (!/^\d{12}$/.test(utrVal)) {
+        if (utrErr) {
+          utrErr.textContent = 'Please enter a valid 12-digit UPI reference (UTR) number.';
+          utrErr.style.display = 'block';
+        }
+        return;
+      }
+
+      if (utrErr) utrErr.style.display = 'none';
+      btnSubmitUtr.disabled = true;
+      btnSubmitUtr.textContent = 'Submitting UTR…';
+
+      try {
+        const res = await fetch(`/billing/quota-orders/${activeOrder.id}/submit-utr`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ utr: utrVal })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || 'Failed to submit UTR.');
+        }
+
+        activeOrder = data;
+        renderStep3Tracker('submitted', data);
+        showStep(3);
+        startPollingOrderStatus(activeOrder.id);
+      } catch (err) {
+        if (utrErr) {
+          utrErr.textContent = err.message;
+          utrErr.style.display = 'block';
+        }
+      } finally {
+        btnSubmitUtr.disabled = false;
+        btnSubmitUtr.textContent = 'Submit UTR for Verification';
+      }
+    });
+  }
+
+  // Step 3 Live Status Tracker
+  function renderStep3Tracker(status, orderData) {
+    const iconEl = document.getElementById('step3-icon');
+    const titleEl = document.getElementById('step3-title');
+    const msgEl = document.getElementById('step3-msg');
+    const actionWrap = document.getElementById('step3-action-wrap');
+    const badgeEl = document.getElementById('step3-polling-badge');
+
+    if (status === 'submitted') {
+      if (iconEl) iconEl.textContent = '⏳';
+      if (titleEl) titleEl.textContent = 'Verifying Payment';
+      if (msgEl) msgEl.textContent = 'UTR submitted. Payments are verified manually. Once approved, your quota will be activated automatically.';
+      if (badgeEl) badgeEl.style.display = 'inline-flex';
+      if (actionWrap) {
+        actionWrap.innerHTML = `
+          <button type="button" class="btn btn-secondary" id="btn-step3-close" style="width: 100%;">
+            Close & Wait for Approval
+          </button>
+        `;
+        document.getElementById('btn-step3-close')?.addEventListener('click', hideModal);
+      }
+    } else if (status === 'paid') {
+      if (iconEl) iconEl.textContent = '✅';
+      if (titleEl) titleEl.textContent = 'Payment Verified!';
+      const qty = orderData.quantity || activeOrder?.quantity || 1;
+      if (msgEl) msgEl.innerHTML = `<strong style="color: #10b981;">${qty}</strong> camera slot${qty > 1 ? 's' : ''} added to your quota!`;
+      if (badgeEl) badgeEl.style.display = 'none';
+      if (actionWrap) {
+        actionWrap.innerHTML = `
+          <a href="/add-camera" class="btn btn-primary" style="display: block; width: 100%; text-align: center; text-decoration: none; padding: 12px; font-weight: 600;">
+            Add Camera Now →
+          </a>
+        `;
+      }
+    } else if (status === 'rejected') {
+      if (iconEl) iconEl.textContent = '❌';
+      if (titleEl) titleEl.textContent = 'Payment Declined';
+      const reason = orderData.reject_reason || 'Verification was declined by administrator.';
+      if (msgEl) msgEl.textContent = `Reason: ${reason}`;
+      if (badgeEl) badgeEl.style.display = 'none';
+      if (actionWrap) {
+        actionWrap.innerHTML = `
+          <button type="button" class="btn btn-primary" id="btn-step3-retry" style="width: 100%; padding: 12px;">
+            Try Again
+          </button>
+        `;
+        document.getElementById('btn-step3-retry')?.addEventListener('click', () => {
+          showStep(1);
+        });
+      }
+    } else if (status === 'expired') {
+      if (iconEl) iconEl.textContent = '⚠️';
+      if (titleEl) titleEl.textContent = 'Order Expired';
+      if (msgEl) msgEl.textContent = 'This payment request expired before verification. Please initiate a new order.';
+      if (badgeEl) badgeEl.style.display = 'none';
+      if (actionWrap) {
+        actionWrap.innerHTML = `
+          <button type="button" class="btn btn-primary" id="btn-step3-restart" style="width: 100%; padding: 12px;">
+            Start New Order
+          </button>
+        `;
+        document.getElementById('btn-step3-restart')?.addEventListener('click', () => {
+          showStep(1);
+        });
+      }
+    }
+  }
+
+  function startPollingOrderStatus(orderId) {
+    if (pollInterval) clearInterval(pollInterval);
+
+    pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`/billing/quota-orders/${orderId}`, { credentials: 'include' });
+        if (!res.ok) return;
+        const ord = await res.json();
+        activeOrder = ord;
+
+        if (ord.status !== 'submitted') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          renderStep3Tracker(ord.status, ord);
+          loadQuota();
+          loadOrderHistory();
+        }
+      } catch (e) {}
+    }, 4000);
+  }
+
+  async function resumeOrder(orderId) {
+    try {
+      const res = await fetch(`/billing/quota-orders/${orderId}`, { credentials: 'include' });
+      if (!res.ok) return;
+      const ord = await res.json();
+      activeOrder = ord;
+      showModal();
+
+      if (ord.status === 'awaiting_payment') {
+        renderStep2Payment(ord);
+        showStep(2);
+      } else if (ord.status === 'submitted') {
+        renderStep3Tracker('submitted', ord);
+        showStep(3);
+        startPollingOrderStatus(ord.id);
+      }
+    } catch (e) {}
+  }
+
+  // Initial load
+  await loadQuota();
+  await loadOrderHistory();
+}
+
 
 
 

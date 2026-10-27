@@ -21,7 +21,7 @@ import numpy as np
 logger = logging.getLogger("vyzn.api.routes")
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
-from fastapi import FastAPI, HTTPException, Query, Security, Depends, Response, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Security, Depends, Response, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -48,6 +48,8 @@ from vyzn.supabase_client import (
 )
 from vyzn.capture.stream_capture import normalize_camera_stream_url, probe_stream_connection
 from vyzn.api.mobile_viewer import mobile_viewer_router
+from vyzn.api.billing_routes import router as billing_router, get_current_tenant_camera_count
+from vyzn.billing.service import get_tenant_lock, sqlite3_connect_write, is_billing_enforcement_enabled
 from vyzn.core.supabase_sync import (
     sync_user_to_supabase,
     record_login_event_to_supabase,
@@ -87,6 +89,50 @@ async def add_private_network_headers(request: Request, call_next):
     return response
 
 app.include_router(mobile_viewer_router)
+app.include_router(billing_router)
+
+
+def assert_camera_quota_available_locked(
+    db: EventDatabase,
+    settings: EdgeSettings,
+    tenant_id: str,
+    user: Optional[Dict[str, Any]]
+) -> None:
+    """
+    Enforces camera quota under tenant lock.
+    Inside one transaction, counts tenant's cameras, checks purchased in camera_quota,
+    and raises HTTPException(403, detail="QUOTA_EXHAUSTED") if used >= purchased.
+    Enforced strictly when BILLING_ENFORCEMENT=true.
+    """
+    if not is_billing_enforcement_enabled():
+        return
+
+    used = get_current_tenant_camera_count(tenant_id, user)
+    conn = sqlite3_connect_write(db.db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT purchased FROM camera_quota WHERE tenant_id = ?", (tenant_id,))
+        row = cursor.fetchone()
+        if row is not None:
+            purchased = int(row[0])
+        else:
+            # Backfill existing tenant so existing cameras are never blocked
+            from datetime import datetime, timezone
+            now_iso = datetime.now(timezone.utc).isoformat()
+            purchased = used
+            conn.execute(
+                "INSERT INTO camera_quota (tenant_id, purchased, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (tenant_id, purchased, now_iso, now_iso)
+            )
+            conn.commit()
+
+        if used >= purchased:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="QUOTA_EXHAUSTED"
+            )
+    finally:
+        conn.close()
 
 # Global references injected on pipeline startup
 _db_instance: Optional[EventDatabase] = None
@@ -1832,14 +1878,18 @@ def adopt_camera_endpoint(
         owner_email=owner
     )
 
-    existing_idx = next((i for i, c in enumerate(settings.cameras) if c.camera_id == cid), None)
-    if existing_idx is not None:
-        settings.cameras[existing_idx] = new_cam
-    else:
-        settings.cameras.append(new_cam)
-
-    save_cameras_config(settings)
+    tenant_id = str(user.get("tenant_id") or user.get("id") or user.get("user_id") or user.get("email") or "tenant_local") if user else "tenant_local"
     db = get_db()
+    with get_tenant_lock(tenant_id):
+        existing_idx = next((i for i, c in enumerate(settings.cameras) if c.camera_id == cid), None)
+        if existing_idx is not None:
+            settings.cameras[existing_idx] = new_cam
+        else:
+            assert_camera_quota_available_locked(db, settings, tenant_id, user)
+            settings.cameras.append(new_cam)
+
+        save_cameras_config(settings)
+
     db.log_audit("CAMERA_ADOPTED", cid, f"name={req.name}")
     db.flush()
     return {
@@ -1945,19 +1995,23 @@ def create_camera(
         # Ensure only one physical webcam is active in settings
         settings.cameras = [c for c in settings.cameras if str(c.rtsp_url) != "0" or c.camera_id == cid]
 
-    existing_idx = next((i for i, c in enumerate(settings.cameras) if c.camera_id == cid), None)
-    if existing_idx is not None:
-        new_cam.restricted_zones = settings.cameras[existing_idx].restricted_zones
-        new_cam.privacy_zones = settings.cameras[existing_idx].privacy_zones
-        settings.cameras[existing_idx] = new_cam
-    else:
-        settings.cameras.append(new_cam)
-
-    if _pipeline_instance and hasattr(_pipeline_instance, "add_camera_stream"):
-        _pipeline_instance.add_camera_stream(new_cam)
-
-    save_cameras_config(settings)
+    tenant_id = str(user.get("tenant_id") or user.get("id") or user.get("user_id") or user.get("email") or "tenant_local") if user else "tenant_local"
     db = get_db()
+    with get_tenant_lock(tenant_id):
+        existing_idx = next((i for i, c in enumerate(settings.cameras) if c.camera_id == cid), None)
+        if existing_idx is not None:
+            new_cam.restricted_zones = settings.cameras[existing_idx].restricted_zones
+            new_cam.privacy_zones = settings.cameras[existing_idx].privacy_zones
+            settings.cameras[existing_idx] = new_cam
+        else:
+            assert_camera_quota_available_locked(db, settings, tenant_id, user)
+            settings.cameras.append(new_cam)
+
+        if _pipeline_instance and hasattr(_pipeline_instance, "add_camera_stream"):
+            _pipeline_instance.add_camera_stream(new_cam)
+
+        save_cameras_config(settings)
+
     db.log_audit("CAMERA_ADDED", cid, f"name={req.name}, owner={owner}")
     db.flush()
 
@@ -3696,6 +3750,13 @@ def serve_settings_page():
     if settings_file.exists():
         return HTMLResponse(content=settings_file.read_text(encoding="utf-8"))
     return HTMLResponse(content="<h1>Settings page not found</h1>")
+
+@app.get("/admin/billing", response_class=HTMLResponse)
+def serve_admin_billing_page():
+    admin_file = frontend_dir / "admin-billing.html"
+    if admin_file.exists():
+        return HTMLResponse(content=admin_file.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Admin billing dashboard not found</h1>")
 
 @app.get("/login", response_class=HTMLResponse)
 @app.get("/login/code", response_class=HTMLResponse)

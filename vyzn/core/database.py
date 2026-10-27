@@ -246,6 +246,46 @@ class DatabaseWriterWorker(threading.Thread):
         );
         CREATE INDEX IF NOT EXISTS idx_alert_deliveries_event ON alert_deliveries(event_id);
         CREATE INDEX IF NOT EXISTS idx_alert_deliveries_status ON alert_deliveries(status);
+
+        CREATE TABLE IF NOT EXISTS camera_quota (
+            tenant_id TEXT PRIMARY KEY,
+            purchased INTEGER NOT NULL DEFAULT 0 CHECK (purchased >= 0),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS quota_orders (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            user_id TEXT,
+            quantity INTEGER NOT NULL CHECK (quantity > 0),
+            unit_price_paise INTEGER NOT NULL,
+            amount_paise INTEGER NOT NULL,
+            order_code TEXT UNIQUE NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('awaiting_payment', 'submitted', 'paid', 'rejected', 'expired')),
+            utr TEXT UNIQUE,
+            submitted_at TEXT,
+            verified_by TEXT,
+            verified_at TEXT,
+            reject_reason TEXT,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_open_quota_orders_per_tenant 
+            ON quota_orders (tenant_id) 
+            WHERE status IN ('awaiting_payment', 'submitted');
+        CREATE INDEX IF NOT EXISTS idx_quota_orders_tenant ON quota_orders(tenant_id);
+        CREATE INDEX IF NOT EXISTS idx_quota_orders_status ON quota_orders(status);
+
+        CREATE TABLE IF NOT EXISTS payment_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            action TEXT NOT NULL,
+            detail TEXT,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_payment_audit_order ON payment_audit(order_id);
         """)
         try:
             conn.execute("ALTER TABLE events ADD COLUMN user_triage TEXT DEFAULT 'unreviewed';")

@@ -43,9 +43,50 @@ document.addEventListener('DOMContentLoaded', async () => {
   attachStep2Events();
   attachStep3Events();
   attachStepperNavigation();
+  loadCameraQuota();
 
   window.runConnectionTest = runConnectionTest;
 });
+
+let currentQuota = { purchased: 0, used: 0, available: 0 };
+
+async function loadCameraQuota() {
+  try {
+    const res = await fetch('/billing/quota', { credentials: 'include' });
+    if (!res.ok) return;
+    const data = await res.json();
+    currentQuota = data;
+
+    const summaryEl = document.getElementById('quota-summary-text');
+    const subEl = document.getElementById('quota-sub-text');
+    const exhaustedCard = document.getElementById('quota-exhausted-card');
+    const actionBtnWrap = document.getElementById('quota-action-btn-wrap');
+
+    if (summaryEl) {
+      summaryEl.textContent = `Camera quota: ${data.purchased} purchased | ${data.used} used | ${data.available} available`;
+    }
+
+    if (data.available > 0) {
+      if (subEl) subEl.textContent = `You can add ${data.available} more camera${data.available > 1 ? 's' : ''}.`;
+      if (exhaustedCard) exhaustedCard.style.display = 'none';
+      if (actionBtnWrap) actionBtnWrap.style.display = 'none';
+      document.querySelectorAll('.option-card').forEach(btn => {
+        btn.style.opacity = '1';
+        btn.style.pointerEvents = 'auto';
+      });
+    } else {
+      if (subEl) subEl.textContent = 'No camera quota available.';
+      if (exhaustedCard) exhaustedCard.style.display = 'block';
+      if (actionBtnWrap) actionBtnWrap.style.display = 'block';
+      document.querySelectorAll('.option-card').forEach(btn => {
+        btn.style.opacity = '0.4';
+        btn.style.pointerEvents = 'none';
+      });
+    }
+  } catch (err) {
+    console.warn('Could not fetch camera quota:', err);
+  }
+}
 
 function setWizardStep(stepNum, stepperText) {
   const stepper = document.getElementById('wizard-stepper');
@@ -781,6 +822,11 @@ function attachStep3Events() {
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
+          if (res.status === 403 && (errData.detail === 'QUOTA_EXHAUSTED' || String(errData.detail).includes('QUOTA'))) {
+            alert('No camera quota available. You have reached your camera plan limit. Please visit Settings > Camera Plan to top up your quota.');
+            window.location.href = '/settings#camera-plan';
+            return;
+          }
           throw new Error(errData.detail || 'Save failed');
         }
         const data = await res.json();
