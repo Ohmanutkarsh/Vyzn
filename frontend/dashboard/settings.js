@@ -7,14 +7,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const titleEl = document.getElementById('page-title-text');
   if (titleEl) titleEl.textContent = 'Settings';
 
-  await loadProfile();
-  initThemeControls();
-  initPhoneControls();
-  initSecurityPinControls();
-  await initTelegramControls();
-  await initBusinessHoursControls();
-  await initStorageControls();
-  await initCameraPlanControls();
+  try { initThemeControls(); } catch (e) { console.warn('Theme init error:', e); }
+  try { initPhoneControls(); } catch (e) { console.warn('Phone init error:', e); }
+  try { initSecurityPinControls(); } catch (e) { console.warn('Security PIN init error:', e); }
+
+  // Initialize Camera Plan immediately and in parallel without blocking on other tabs
+  initCameraPlanControls().catch(e => console.warn('Camera plan init error:', e));
+  loadProfile().catch(e => console.warn('Profile init error:', e));
+  initTelegramControls().catch(e => console.warn('Telegram init error:', e));
+  initBusinessHoursControls().catch(e => console.warn('Business hours init error:', e));
+  initStorageControls().catch(e => console.warn('Storage init error:', e));
 });
 
 function showToast(message, isError = false) {

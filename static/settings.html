@@ -232,7 +232,201 @@
           </div>
         </section>
 
-        <!-- 2. Phone Number Management -->
+        <!-- 2. Camera Plan & Quota Management -->
+        <section class="settings-card" id="camera-plan" aria-labelledby="card-plan-title">
+          <div class="settings-card-header">
+            <h3 class="settings-card-title" id="card-plan-title">
+              <span>📷</span> Camera Plan & Quota
+            </h3>
+            <span class="settings-badge success" id="plan-quota-badge">Active Plan</span>
+          </div>
+
+          <p style="font-size: 13px; color: var(--text-2); margin: 0 0 16px 0; line-height: 1.5;">
+            Manage your camera quota for this workspace. Top up quota with fixed-amount UPI QR payments. <em>Payments are verified manually.</em>
+          </p>
+
+          <!-- 4-Column Quota Summary -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px;">
+            <div style="background: var(--bg-2, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, #27272a); border-radius: 8px; padding: 14px;">
+              <div style="font-size: 11px; text-transform: uppercase; color: var(--text-3, #71717a); font-weight: 600;">Purchased Quota</div>
+              <div style="font-size: 22px; font-weight: 700; color: #ffffff; margin-top: 4px;" id="val-plan-purchased">—</div>
+              <div style="font-size: 11px; color: var(--text-3, #71717a); margin-top: 2px;">Verified total slots</div>
+            </div>
+
+            <div style="background: var(--bg-2, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, #27272a); border-radius: 8px; padding: 14px;">
+              <div style="font-size: 11px; text-transform: uppercase; color: var(--text-3, #71717a); font-weight: 600;">Used Cameras</div>
+              <div style="font-size: 22px; font-weight: 700; color: #a1a1aa; margin-top: 4px;" id="val-plan-used">—</div>
+              <div style="font-size: 11px; color: var(--text-3, #71717a); margin-top: 2px;">Active CCTV feeds</div>
+            </div>
+
+            <div style="background: var(--bg-2, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, #27272a); border-radius: 8px; padding: 14px;">
+              <div style="font-size: 11px; text-transform: uppercase; color: var(--text-3, #71717a); font-weight: 600;">Available Slots</div>
+              <div style="font-size: 22px; font-weight: 700; color: #10b981; margin-top: 4px;" id="val-plan-available">—</div>
+              <div style="font-size: 11px; color: #10b981; margin-top: 2px;">Ready to connect</div>
+            </div>
+
+            <div style="background: var(--bg-2, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, #27272a); border-radius: 8px; padding: 14px;">
+              <div style="font-size: 11px; text-transform: uppercase; color: var(--text-3, #71717a); font-weight: 600;">Unit Price</div>
+              <div style="font-size: 22px; font-weight: 700; color: #3b82f6; margin-top: 4px;" id="val-plan-price">—</div>
+              <div style="font-size: 11px; color: var(--text-3, #71717a); margin-top: 2px;">Fixed per camera</div>
+            </div>
+          </div>
+
+          <!-- Action Row -->
+          <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle, #27272a); flex-wrap: wrap; gap: 10px;">
+            <div style="font-size: 13px; color: var(--text-2, #a1a1aa);">
+              Need to monitor additional cameras? Add camera quota anytime.
+            </div>
+            <button type="button" class="btn btn-primary" id="btn-open-plan-modal">
+              💳 Add camera plan
+            </button>
+          </div>
+
+          <!-- Order History Table -->
+          <div style="margin-top: 20px;">
+            <div style="font-size: 14px; font-weight: 600; color: var(--text-1, #ffffff); margin-bottom: 10px;">
+              Quota Order History
+            </div>
+            <div style="overflow-x: auto;">
+              <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
+                <thead>
+                  <tr style="border-bottom: 1px solid var(--border-subtle, #27272a); color: var(--text-3, #71717a);">
+                    <th style="padding: 8px 10px;">Order Code</th>
+                    <th style="padding: 8px 10px;">Date</th>
+                    <th style="padding: 8px 10px;">Quantity</th>
+                    <th style="padding: 8px 10px;">Amount</th>
+                    <th style="padding: 8px 10px;">Status</th>
+                    <th style="padding: 8px 10px;">UTR Reference</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-quota-orders">
+                  <tr>
+                    <td colspan="6" style="padding: 16px 10px; text-align: center; color: var(--text-3, #71717a);">Loading order history…</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Camera Plan Purchase Modal -->
+        <div id="modal-camera-plan" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 9999; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+          <div style="background: var(--bg-1, #18181b); border: 1px solid var(--border-subtle, #27272a); border-radius: 14px; width: 92%; max-width: 480px; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); position: relative; max-height: 90vh; overflow-y: auto;">
+            <!-- Modal Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle, #27272a);">
+              <h3 style="font-size: 17px; font-weight: 600; color: #ffffff; margin: 0;" id="modal-plan-title">
+                Add Camera Plan
+              </h3>
+              <button type="button" id="btn-close-plan-modal" style="background: none; border: none; font-size: 20px; color: var(--text-3, #71717a); cursor: pointer; padding: 0 4px;" aria-label="Close modal">×</button>
+            </div>
+
+            <!-- Modal Step 1: Select Quantity -->
+            <div id="plan-step-1">
+              <p style="font-size: 13px; color: var(--text-2, #a1a1aa); margin: 0 0 16px 0; line-height: 1.5;">
+                Select how many additional camera slots you want to add to your plan.
+              </p>
+
+              <div style="background: var(--bg-2, rgba(255,255,255,0.03)); border: 1px solid var(--border-subtle, #27272a); border-radius: 10px; padding: 18px; text-align: center; margin-bottom: 18px;">
+                <label style="font-size: 12px; font-weight: 500; color: var(--text-3, #71717a); text-transform: uppercase; display: block; margin-bottom: 10px;">Number of Cameras</label>
+                <div style="display: inline-flex; align-items: center; gap: 14px;">
+                  <button type="button" id="btn-qty-minus" style="width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--border-subtle, #27272a); background: var(--bg-1, #18181b); color: #ffffff; font-size: 18px; font-weight: 600; cursor: pointer;">-</button>
+                  <span id="display-plan-qty" style="font-size: 24px; font-weight: 700; color: #ffffff; min-width: 44px;">1</span>
+                  <button type="button" id="btn-qty-plus" style="width: 38px; height: 38px; border-radius: 8px; border: 1px solid var(--border-subtle, #27272a); background: var(--bg-1, #18181b); color: #ffffff; font-size: 18px; font-weight: 600; cursor: pointer;">+</button>
+                </div>
+                <div style="margin-top: 14px; font-size: 14px; color: var(--text-1, #f4f4f5);">
+                  Total: <strong style="font-size: 18px; color: #10b981;" id="display-plan-total">₹500.00</strong>
+                </div>
+                <div style="font-size: 11px; color: var(--text-3, #71717a); margin-top: 4px;" id="display-plan-rate">
+                  (₹500 per camera)
+                </div>
+              </div>
+
+              <div id="plan-step1-error" style="color: #ef4444; font-size: 12px; margin-bottom: 12px; display: none;"></div>
+
+              <button type="button" class="btn btn-primary" id="btn-proceed-order" style="width: 100%; padding: 12px; font-size: 14px; font-weight: 600;">
+                Proceed to Payment →
+              </button>
+            </div>
+
+            <!-- Modal Step 2: Pay with UPI QR & Submit UTR -->
+            <div id="plan-step-2" style="display: none;">
+              <!-- Expiry countdown & Order code -->
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 12px;">
+                <span style="color: var(--text-3, #71717a);">Order: <strong id="step2-order-code" style="color: #ffffff; font-family: monospace;">VYZ-XXXX</strong></span>
+                <span style="color: #f59e0b;" id="step2-timer">⏱️ 30:00</span>
+              </div>
+
+              <!-- Amount & Quantity Box -->
+              <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; padding: 12px; text-align: center; margin-bottom: 14px;">
+                <div style="font-size: 11px; text-transform: uppercase; color: #10b981; font-weight: 600;">Fixed Payment Amount</div>
+                <div style="font-size: 24px; font-weight: 700; color: #ffffff; margin-top: 2px;" id="step2-amount">₹500.00</div>
+                <div style="font-size: 12px; color: #a1a1aa; margin-top: 2px;" id="step2-qty-desc">for 1 camera slot</div>
+              </div>
+
+              <!-- Fixed-Amount UPI QR Code -->
+              <div style="text-align: center; margin-bottom: 14px;">
+                <img id="step2-qr-img" src="" alt="Scan UPI QR" style="width: 180px; height: 180px; border-radius: 8px; background: #ffffff; padding: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: inline-block;">
+                <div style="font-size: 11px; color: var(--text-3, #71717a); margin-top: 6px;">
+                  Scan with Google Pay, PhonePe, Paytm, or any UPI app
+                </div>
+              </div>
+
+              <!-- Mobile Deeplink Button -->
+              <div style="margin-bottom: 14px;">
+                <a id="step2-upi-link" href="#" class="btn btn-secondary" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; font-size: 13px; text-decoration: none;">
+                  📱 Open in UPI App
+                </a>
+              </div>
+
+              <!-- Honest Turnaround Notice -->
+              <div style="padding: 10px 12px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 6px; font-size: 12px; color: #93c5fd; margin-bottom: 14px; line-height: 1.4;">
+                ℹ️ <strong>Payments are verified manually.</strong> Proof of payment is the 12-digit UPI reference (UTR) only. Screenshots are not accepted.
+              </div>
+
+              <!-- UTR Input Form -->
+              <div style="margin-bottom: 14px;">
+                <label for="step2-input-utr" style="font-size: 12px; font-weight: 600; color: var(--text-1, #ffffff); display: block; margin-bottom: 6px;">
+                  12-Digit UPI Reference (UTR)
+                </label>
+                <input type="text" id="step2-input-utr" class="settings-input" placeholder="e.g. 482103948210" maxlength="12" inputmode="numeric" style="width: 100%; font-family: monospace; font-size: 15px; letter-spacing: 0.05em;">
+                <div style="font-size: 11px; color: var(--text-3, #71717a); margin-top: 4px; line-height: 1.4;">
+                  Where to find: In GPay, PhonePe, or Paytm, open the payment receipt and look for "UPI transaction ID" or "UTR".
+                </div>
+                <div id="step2-utr-error" style="color: #ef4444; font-size: 12px; margin-top: 6px; display: none;"></div>
+              </div>
+
+              <button type="button" class="btn btn-primary" id="btn-submit-utr" style="width: 100%; padding: 12px; font-size: 14px; font-weight: 600;">
+                Submit UTR for Verification
+              </button>
+            </div>
+
+            <!-- Modal Step 3: Order Status Live Tracker -->
+            <div id="plan-step-3" style="display: none; text-align: center; padding: 16px 8px;">
+              <div id="step3-icon" style="font-size: 42px; margin-bottom: 10px;">⏳</div>
+              <h4 style="font-size: 18px; font-weight: 600; color: #ffffff; margin: 0 0 6px 0;" id="step3-title">
+                Verifying Payment
+              </h4>
+              <p style="font-size: 13px; color: var(--text-2, #a1a1aa); margin: 0 0 16px 0; line-height: 1.5;" id="step3-msg">
+                UTR submitted. Payments are verified manually. Once approved, your quota will be activated automatically.
+              </p>
+
+              <!-- Live Polling Indicator -->
+              <div id="step3-polling-badge" style="font-size: 11px; color: var(--text-3, #71717a); display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 9999px; background: var(--bg-2, rgba(255,255,255,0.05)); margin-bottom: 20px;">
+                <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #3b82f6;"></span>
+                <span>Checking status in real-time…</span>
+              </div>
+
+              <!-- Action buttons depending on state -->
+              <div id="step3-action-wrap">
+                <button type="button" class="btn btn-secondary" id="btn-step3-close" style="width: 100%;">
+                  Close & Wait for Approval
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Phone Number Management -->
         <section class="settings-card" aria-labelledby="card-phone-title">
           <div class="settings-card-header">
             <h3 class="settings-card-title" id="card-phone-title">
