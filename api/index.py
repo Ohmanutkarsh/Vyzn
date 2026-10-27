@@ -1751,7 +1751,7 @@ async def api_cloud_alert_ingress(payload: CloudAlertIngressRequest, request: Re
 # ---------------------------------------------------------------------------
 # Camera Quota & Manual UPI Billing
 # ---------------------------------------------------------------------------
-CAMERA_PRICE_PAISE = int(os.environ.get("CAMERA_PRICE_PAISE", "50000"))
+CAMERA_PRICE_PAISE = int(os.environ.get("CAMERA_PRICE_PAISE", "249900"))
 MAX_CAMERAS_PER_ORDER = int(os.environ.get("MAX_CAMERAS_PER_ORDER", "20"))
 ORDER_EXPIRY_MINUTES = int(os.environ.get("ORDER_EXPIRY_MINUTES", "30"))
 ADMIN_USER_IDS_RAW = os.environ.get("ADMIN_USER_IDS", "dirtbike000000@gmail.com,tapise.utkarsh@gmail.com,usr_primary_cloud")
@@ -2109,6 +2109,14 @@ def api_submit_quota_order_utr(order_id: str, payload: SubmitUtrRequest, request
 
         
     return target_ord
+
+@app.get("/admin/billing", response_class=HTMLResponse)
+def api_admin_billing_page(request: Request):
+    html_path = os.path.join(ROOT_DIR, "public", "admin-billing.html")
+    if os.path.exists(html_path):
+        with open(html_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(f.read())
+    return HTMLResponse("<h1>Admin Billing Page Not Found</h1>", status_code=404)
 
 @app.get("/admin/billing/pending")
 @app.get("/api/admin/billing/pending")

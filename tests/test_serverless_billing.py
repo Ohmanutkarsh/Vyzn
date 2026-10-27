@@ -43,7 +43,7 @@ def test_serverless_quota_math_and_enforcement():
     ord_res = ai.api_create_quota_order(ai.QuotaOrderCreateRequest(quantity=1), UserReq())
     assert ord_res["status"] == "awaiting_payment"
     assert ord_res["quantity"] == 1
-    assert ord_res["amount_paise"] == 50000
+    assert ord_res["amount_paise"] == ai.CAMERA_PRICE_PAISE
 
     # 4. Quota remains 0 until approved
     quota_mid = ai.get_tenant_billing_quota("usr_" + unique_email, unique_email)

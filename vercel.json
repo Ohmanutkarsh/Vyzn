@@ -24,7 +24,7 @@
     },
     {
       "source": "/admin/billing",
-      "destination": "/api"
+      "destination": "/admin-billing"
     },
 
     {

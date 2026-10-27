@@ -63,6 +63,13 @@ async function loadCameraQuota() {
     const data = await res.json();
     currentQuota = data;
 
+    const valPurchased = document.getElementById('val-addcam-purchased');
+    const valUsed = document.getElementById('val-addcam-used');
+    const valAvailable = document.getElementById('val-addcam-available');
+    const boxAvailable = document.getElementById('box-addcam-available');
+    const lblAvailable = document.getElementById('lbl-addcam-available');
+    const descAvailable = document.getElementById('desc-addcam-available');
+
     const summaryEl = document.getElementById('quota-summary-text');
     const subEl = document.getElementById('quota-sub-text');
     const exhaustedCard = document.getElementById('quota-exhausted-card');
@@ -71,14 +78,18 @@ async function loadCameraQuota() {
     const badgeEl = document.getElementById('quota-remaining-badge');
     const iconBox = document.getElementById('quota-status-icon-box');
 
+    if (valPurchased) valPurchased.textContent = data.purchased;
+    if (valUsed) valUsed.textContent = data.used;
+    if (valAvailable) valAvailable.textContent = data.available;
+
     if (summaryEl) {
       summaryEl.textContent = `Camera Quota: ${data.purchased} purchased · ${data.used} used · ${data.available} available`;
     }
 
     if (data.available > 0) {
-      if (subEl) subEl.textContent = `You have ${data.available} available camera slot${data.available > 1 ? 's' : ''} on your plan.`;
+      if (subEl) subEl.textContent = `You have ${data.available} remaining slot${data.available > 1 ? 's' : ''}. You can add up to ${data.available} more camera${data.available > 1 ? 's' : ''} to VYZN.`;
       if (badgeEl) {
-        badgeEl.textContent = `✓ ${data.available} slot${data.available > 1 ? 's' : ''} available`;
+        badgeEl.textContent = `✓ ${data.available} Slot${data.available > 1 ? 's' : ''} Remaining`;
         badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
         badgeEl.style.color = '#34d399';
         badgeEl.style.border = '1px solid rgba(16, 185, 129, 0.3)';
@@ -87,6 +98,20 @@ async function loadCameraQuota() {
         iconBox.style.background = 'rgba(16, 185, 129, 0.1)';
         iconBox.style.borderColor = 'rgba(16, 185, 129, 0.25)';
       }
+      if (boxAvailable) {
+        boxAvailable.style.background = 'rgba(16, 185, 129, 0.05)';
+        boxAvailable.style.borderColor = 'rgba(16, 185, 129, 0.25)';
+      }
+      if (lblAvailable) {
+        lblAvailable.style.color = '#10b981';
+        lblAvailable.textContent = 'Remaining Quota';
+      }
+      if (valAvailable) valAvailable.style.color = '#10b981';
+      if (descAvailable) {
+        descAvailable.style.color = '#10b981';
+        descAvailable.textContent = 'Available to connect';
+      }
+
       if (exhaustedCard) exhaustedCard.style.display = 'none';
       if (actionBtnWrap) actionBtnWrap.style.display = 'none';
       document.querySelectorAll('.option-card').forEach(btn => {
@@ -96,9 +121,9 @@ async function loadCameraQuota() {
         btn.removeAttribute('disabled');
       });
     } else {
-      if (subEl) subEl.textContent = 'No camera quota available. You cannot add new cameras.';
+      if (subEl) subEl.textContent = `Quota limit reached (${data.used} of ${data.purchased} active). You cannot add more cameras.`;
       if (badgeEl) {
-        badgeEl.textContent = '0 slots remaining (Quota full)';
+        badgeEl.textContent = '🚫 0 Remaining (Quota Full)';
         badgeEl.style.background = 'rgba(239, 68, 68, 0.15)';
         badgeEl.style.color = '#f87171';
         badgeEl.style.border = '1px solid rgba(239, 68, 68, 0.35)';
@@ -107,10 +132,24 @@ async function loadCameraQuota() {
         iconBox.style.background = 'rgba(239, 68, 68, 0.1)';
         iconBox.style.borderColor = 'rgba(239, 68, 68, 0.25)';
       }
+      if (boxAvailable) {
+        boxAvailable.style.background = 'rgba(239, 68, 68, 0.06)';
+        boxAvailable.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+      }
+      if (lblAvailable) {
+        lblAvailable.style.color = '#f87171';
+        lblAvailable.textContent = 'Remaining (Full)';
+      }
+      if (valAvailable) valAvailable.style.color = '#f87171';
+      if (descAvailable) {
+        descAvailable.style.color = '#f87171';
+        descAvailable.textContent = '0 slots remaining';
+      }
+
       if (exhaustedCard) {
         exhaustedCard.style.display = 'block';
         if (exhaustedMsg) {
-          exhaustedMsg.textContent = `You have used all ${data.purchased} of your purchased camera slot(s) (${data.used} in use, 0 available). To connect new cameras, top up your camera quota in Settings > Camera Plan.`;
+          exhaustedMsg.textContent = `You have used all ${data.purchased} of your purchased camera slot(s) (${data.used} active, 0 remaining). To connect additional cameras, top up your camera quota in Settings > Camera Plan.`;
         }
       }
       if (actionBtnWrap) actionBtnWrap.style.display = 'block';

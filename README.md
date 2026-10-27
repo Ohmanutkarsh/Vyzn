@@ -265,8 +265,8 @@ UPI_VPA=yourbusiness@okhdfcbank
 # Payee name displayed in the customer's UPI app (Google Pay, PhonePe, Paytm):
 UPI_PAYEE_NAME="VYZN Surveillance"
 
-# Price per camera quota slot in paise (e.g. 50000 paise = ₹500.00):
-CAMERA_PRICE_PAISE=50000
+# Price per camera quota slot in paise (e.g. 249900 paise = ₹2,499.00):
+CAMERA_PRICE_PAISE=249900
 
 # Maximum cameras allowed in a single top-up order:
 MAX_CAMERAS_PER_ORDER=20

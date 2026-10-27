@@ -37,13 +37,13 @@ def get_tenant_lock(tenant_id: str) -> threading.Lock:
 
 
 def get_camera_price_paise() -> int:
-    """Reads configured camera price per unit in paise (e.g. 50000 paise = ₹500)."""
-    raw = os.environ.get("CAMERA_PRICE_PAISE", "50000").strip()
+    """Reads configured camera price per unit in paise (e.g. 249900 paise = ₹2,499.00)."""
+    raw = os.environ.get("CAMERA_PRICE_PAISE", "249900").strip()
     try:
         val = int(raw)
         return max(val, 1)
     except ValueError:
-        return 50000
+        return 249900
 
 
 def get_max_cameras_per_order() -> int:

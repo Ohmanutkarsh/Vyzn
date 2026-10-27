@@ -978,7 +978,7 @@ async function initCameraPlanControls() {
     purchased: 0,
     used: 0,
     available: 0,
-    price_per_camera_paise: 50000,
+    price_per_camera_paise: 249900,
     max_per_order: 20
   };
   let selectedQty = 1;
