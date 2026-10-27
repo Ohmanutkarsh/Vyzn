@@ -406,21 +406,27 @@ class RTSPCaptureThread(threading.Thread):
             frame_counter = 0
             start_measure_time = time.monotonic()
             last_read_mono = time.monotonic()
+            consecutive_read_failures = 0
 
             while self.running:
                 ret, frame = cap.read()
                 now_mono = time.monotonic()
                 now_wall = time.time()
 
-                # Watchdog check: 8-second frame silence triggers reconnect
-                if not ret or (now_mono - last_read_mono > 8.0):
-                    self.status = "offline"
-                    self.is_connected = False
-                    self.last_error = "Watchdog: 8s frame silence / read failure"
-                    logger.warning(
-                        f"[{self.config.camera_id}] Watchdog: frame silence > 8s or read failure. Tearing down connection."
-                    )
-                    break
+                if not ret or frame is None:
+                    consecutive_read_failures += 1
+                    time.sleep(0.04)
+                    if consecutive_read_failures >= 40 or (now_mono - last_read_mono > 8.0):
+                        self.status = "offline"
+                        self.is_connected = False
+                        self.last_error = "Watchdog: 8s frame silence / read failure"
+                        logger.warning(
+                            f"[{self.config.camera_id}] Watchdog: frame silence > 8s or read failure ({consecutive_read_failures} failures). Tearing down connection."
+                        )
+                        break
+                    continue
+
+                consecutive_read_failures = 0
 
                 # Discard DirectShow corrupted scanlines artifact (all black with a bottom glitch stripe)
                 if frame is not None and frame.mean() < 3.0 and frame.max() > 180:

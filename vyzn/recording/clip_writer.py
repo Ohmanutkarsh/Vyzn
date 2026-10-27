@@ -415,24 +415,20 @@ class ClipWriter:
             return ClipWriteResult(str(clip_path), str(thumb_path), [], 0.0, is_valid=False)
 
         n_frames = len(decoded_frames)
-        # Compute expected duration from video PTS timestamps
-        if duration_sec is not None and duration_sec > 0.5:
-            expected_duration = round(float(duration_sec), 1)
+        effective_fps = max(10.0, min(30.0, float(fps)))
+        if duration_sec is not None and duration_sec > 0.5 and n_frames > 0:
+            calc_fps = n_frames / float(duration_sec)
+            if 10.0 <= calc_fps <= 35.0:
+                out_fps = round(calc_fps, 2)
+            else:
+                out_fps = effective_fps
+            expected_duration = round(n_frames / out_fps, 1)
         else:
-            expected_duration = round(n_frames / max(1.0, fps), 1)
+            out_fps = effective_fps
+            expected_duration = round(n_frames / out_fps, 1)
 
-        # Resample to smooth playback rate (minimum 15.0 FPS) to eliminate HTML5 decoder lag, keyframe freeze, and scrub stutter
-        target_fps = max(15.0, round(float(fps), 1))
-        target_total_frames = max(len(decoded_frames), int(round(expected_duration * target_fps)))
-        if target_total_frames > n_frames and n_frames > 0:
-            resampled_frames = []
-            for i in range(target_total_frames):
-                src_i = min(n_frames - 1, int(round(i * (n_frames - 1) / max(1, target_total_frames - 1))))
-                resampled_frames.append(decoded_frames[src_i])
-            out_fps = round(target_total_frames / expected_duration, 2)
-        else:
-            resampled_frames = decoded_frames
-            out_fps = max(15.0, round(n_frames / expected_duration, 2)) if expected_duration > 0 else 15.0
+        # Encode authentic live feed frames directly so clips contain real continuous video motion
+        resampled_frames = decoded_frames
 
         # Extract 3 keyframe thumbnails: start, peak/trigger, end
         p_idx = peak_idx if (peak_idx is not None and 0 <= peak_idx < n_frames) else (n_frames // 2)

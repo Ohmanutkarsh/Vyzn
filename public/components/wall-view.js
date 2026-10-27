@@ -256,10 +256,10 @@ function renderWallGrid() {
           if (thumbUrl.startsWith('/api/')) thumbUrl = `${window.__vyzn_edge_url}${thumbUrl}`;
         }
         const keyNumber = idx + 1 <= 9 ? idx + 1 : null;
-        const liveSrc = cam.status === 'online' ? streamUrl : thumbUrl;
+        const liveSrc = `${streamUrl}?t=${Date.now()}`;
         return `
           <div class="wall-tile border-neutral" id="tile-${escapeHtml(cid)}" data-cam-id="${escapeHtml(cid)}" data-key-num="${keyNumber || ''}">
-            <img class="wall-tile-img" id="img-${escapeHtml(cid)}" src="${escapeHtml(liveSrc)}" alt="${escapeHtml(cam.name)}" onerror="this.dataset.streamFailed='true';if(this.src!=='${escapeHtml(thumbUrl)}'){this.src='${escapeHtml(thumbUrl)}';}" />
+            <img class="wall-tile-img" id="img-${escapeHtml(cid)}" src="${escapeHtml(liveSrc)}" alt="${escapeHtml(cam.name)}" onerror="setTimeout(() => { const el = document.getElementById('img-${escapeHtml(cid)}'); if (el) el.src = '${escapeHtml(streamUrl)}?t=' + Date.now(); }, 2000);" />
             
             <!-- Information Overlay (Auto-hides on idle) -->
             <div class="tile-overlay">
@@ -455,31 +455,14 @@ function startWallSnapshotPolling() {
       const cid = cam.id || cam.camera_id;
       const imgEl = document.getElementById(`img-${cid}`);
       if (imgEl && spotlightCameraId !== cid) {
-        // Do NOT overwrite active live MJPEG stream on online cameras!
-        if (cam.status === 'online' && imgEl.dataset.streamFailed !== 'true') {
-          continue;
+        const streamUrl = cam.stream_url || `/api/cameras/${encodeURIComponent(cid)}/stream?t=${Date.now()}`;
+        if (!imgEl.src || imgEl.src.includes('snapshot.jpg') || imgEl.dataset.streamFailed === 'true') {
+          imgEl.dataset.streamFailed = 'false';
+          imgEl.src = streamUrl;
         }
-
-        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const baseUrl = isLocal ? '' : (window.__vyzn_edge_url || '');
-        const snapUrl = `${baseUrl}/api/cameras/${encodeURIComponent(cid)}/snapshot.jpg?t=${Date.now()}`;
-
-        const tempImg = new Image();
-        tempImg.onload = () => {
-          if (imgEl && isWallOpen) {
-            imgEl.src = tempImg.src;
-            const dotEl = document.getElementById(`dot-${cid}`);
-            if (dotEl) dotEl.className = 'tile-dot';
-            const staleEl = document.getElementById(`stale-${cid}`);
-            if (staleEl) staleEl.style.display = 'none';
-            const offlineEl = document.getElementById(`offline-${cid}`);
-            if (offlineEl) offlineEl.style.display = 'none';
-          }
-        };
-        tempImg.src = snapUrl;
       }
     }
-  }, 2000);
+  }, 3000);
 }
 
 /**
@@ -522,13 +505,8 @@ function handleIncomingBatch(cameraBatch) {
       highestAlertCamera = camId;
     }
 
-    // Update tile image if not in spotlight mode
-    if (spotlightCameraId !== camId) {
-      const imgEl = document.getElementById(`img-${camId}`);
-      if (imgEl && data.jpeg) {
-        imgEl.src = `data:image/jpeg;base64,${data.jpeg}`;
-      }
-    }
+    // Real live camera stream is rendered continuously via /api/cameras/${camId}/stream
+    // WebSocket updates metadata (threat score border, REC badge, online status)
 
     // Update border color based on real 3-second score:
     // neutral < 30, amber 30-70, red 70+ (subtle pulse)
