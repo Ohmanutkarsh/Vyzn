@@ -16,14 +16,18 @@ import html
 import requests
 import urllib.parse
 import smtplib
+import threading
+import re
+from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Union
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
 
 app = FastAPI(title="VYZN Cloud Serverless Console", version="2.0.0", redirect_slashes=False)
 
@@ -92,6 +96,14 @@ import sys
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 if str(WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKSPACE_ROOT))
+
+try:
+    from vyzn.billing.provider import ManualUpiProvider
+    from vyzn.billing.service import send_billing_telegram_alert
+except Exception:
+    ManualUpiProvider = None
+    send_billing_telegram_alert = None
+
 
 # ---------------------------------------------------------------------------
 # Multi-Tenant Session & State Storage for Cloud Serverless Deployments
@@ -1737,6 +1749,485 @@ async def api_cloud_alert_ingress(payload: CloudAlertIngressRequest, request: Re
         return {"ok": False, "status": "failed", "error": str(e)}
 
 # ---------------------------------------------------------------------------
+# Camera Quota & Manual UPI Billing
+# ---------------------------------------------------------------------------
+CAMERA_PRICE_PAISE = int(os.environ.get("CAMERA_PRICE_PAISE", "50000"))
+MAX_CAMERAS_PER_ORDER = int(os.environ.get("MAX_CAMERAS_PER_ORDER", "20"))
+ORDER_EXPIRY_MINUTES = int(os.environ.get("ORDER_EXPIRY_MINUTES", "30"))
+ADMIN_USER_IDS_RAW = os.environ.get("ADMIN_USER_IDS", "dirtbike000000@gmail.com,tapise.utkarsh@gmail.com,usr_primary_cloud")
+BILLING_ENFORCEMENT = os.environ.get("BILLING_ENFORCEMENT", "true").lower() in ("true", "1", "yes")
+
+_BILLING_LOCK = threading.RLock()
+
+_BILLING_STATE_CACHE: Optional[Dict[str, Any]] = None
+
+class QuotaOrderCreateRequest(BaseModel):
+    quantity: int
+
+class SubmitUtrRequest(BaseModel):
+    utr: str
+
+class RejectOrderRequest(BaseModel):
+    reason: Optional[str] = "Verification failed"
+
+def get_billing_state_file() -> Path:
+    import tempfile
+    return Path(tempfile.gettempdir()) / "vyzn_billing_state.json"
+
+def fetch_billing_state_from_cloud() -> Optional[Dict[str, Any]]:
+    if not (SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY):
+        return None
+    headers = {"apikey": SUPABASE_CLOUD_KEY, "Authorization": f"Bearer {SUPABASE_CLOUD_KEY}"}
+    try:
+        url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/authenticated/{SUPABASE_STATE_BUCKET}/billing_state.json"
+        resp = requests.get(url, headers=headers, timeout=3.5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict) and "quotas" in data:
+                return data
+    except Exception:
+        pass
+    return None
+
+def _do_sync_cloud_billing(state_copy: Dict[str, Any]):
+    if not (SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY):
+        return
+    headers = {
+        "apikey": SUPABASE_CLOUD_KEY,
+        "Authorization": f"Bearer {SUPABASE_CLOUD_KEY}",
+        "Content-Type": "application/json",
+        "x-upsert": "true"
+    }
+    try:
+        url = f"{SUPABASE_CLOUD_URL}/storage/v1/object/{SUPABASE_STATE_BUCKET}/billing_state.json"
+        requests.post(url, headers=headers, data=json.dumps(state_copy), timeout=4.0)
+    except Exception:
+        pass
+
+def sync_billing_state_to_cloud(state: Dict[str, Any]):
+    try:
+        state_copy = json.loads(json.dumps(state))
+        t = threading.Thread(target=_do_sync_cloud_billing, args=(state_copy,), daemon=True)
+        t.start()
+    except Exception:
+        pass
+
+
+def get_billing_state() -> Dict[str, Any]:
+    global _BILLING_STATE_CACHE
+    with _BILLING_LOCK:
+        if _BILLING_STATE_CACHE is not None:
+            return _BILLING_STATE_CACHE
+
+        # 1. Cloud storage
+        cloud = fetch_billing_state_from_cloud()
+        if cloud is not None:
+            _BILLING_STATE_CACHE = cloud
+            return cloud
+
+        # 2. Local temp file
+        fpath = get_billing_state_file()
+        if fpath.exists():
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    saved = json.load(f)
+                    if isinstance(saved, dict) and "quotas" in saved:
+                        _BILLING_STATE_CACHE = saved
+                        return saved
+            except Exception:
+                pass
+
+        # 3. Default empty
+        initial = {"quotas": {}, "orders": [], "audits": []}
+        _BILLING_STATE_CACHE = initial
+        sync_billing_state_to_cloud(initial)
+        return initial
+
+def save_billing_state(state: Dict[str, Any]):
+    global _BILLING_STATE_CACHE
+    with _BILLING_LOCK:
+        _BILLING_STATE_CACHE = state
+        try:
+            fpath = get_billing_state_file()
+            with open(fpath, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+        except Exception:
+            pass
+        sync_billing_state_to_cloud(state)
+
+def expire_stale_orders(state: Dict[str, Any]) -> bool:
+    changed = False
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for ord_item in state.get("orders", []):
+        if ord_item.get("status") == "awaiting_payment":
+            exp = ord_item.get("expires_at", "")
+            if exp and now_iso > exp:
+                ord_item["status"] = "expired"
+                changed = True
+    return changed
+
+def is_admin_check(user: Optional[Dict[str, Any]]) -> bool:
+    if not user:
+        return False
+    role = user.get("role", "")
+    if role in ("admin", "fleet_admin"):
+        return True
+    user_id = str(user.get("id") or "").strip().lower()
+    email = str(user.get("email") or "").strip().lower()
+    admin_list = [x.strip().lower() for x in ADMIN_USER_IDS_RAW.split(",") if x.strip()]
+    default_admins = {"dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com", "usr_primary_cloud"}
+    return user_id in admin_list or email in admin_list or email in default_admins or user_id in default_admins
+
+def get_tenant_billing_quota(tenant_id: str, email: str) -> Dict[str, Any]:
+    clean_email = (email or tenant_id or "").strip().lower()
+    used = len(get_user_cameras(clean_email))
+    state = get_billing_state()
+    quotas = state.get("quotas", {})
+    
+    q = quotas.get(clean_email) or (quotas.get(tenant_id) if tenant_id else None)
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    
+    if q is not None:
+        purchased = int(q.get("purchased", 0))
+    else:
+        # Backfill: initialize purchased = current camera count
+        purchased = used
+        q = {
+            "purchased": purchased,
+            "created_at": now_iso,
+            "updated_at": now_iso
+        }
+        quotas[clean_email] = q
+        if tenant_id and tenant_id != clean_email:
+            quotas[tenant_id] = q
+        state["quotas"] = quotas
+        save_billing_state(state)
+        
+    available = max(purchased - used, 0)
+    return {
+        "tenant_id": tenant_id or clean_email,
+        "purchased": purchased,
+        "used": used,
+        "available": available,
+        "price_per_camera_paise": CAMERA_PRICE_PAISE,
+        "max_per_order": MAX_CAMERAS_PER_ORDER,
+        "enforcement_enabled": BILLING_ENFORCEMENT
+    }
+
+
+@app.get("/billing/quota")
+@app.get("/api/billing/quota")
+def api_get_billing_quota(request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    email = user.get("email")
+    return get_tenant_billing_quota(tenant_id, email)
+
+@app.post("/billing/quota-orders")
+@app.post("/api/billing/quota-orders")
+def api_create_quota_order(payload: QuotaOrderCreateRequest, request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    user_id = user.get("id")
+    email = user.get("email")
+    
+    qty = payload.quantity
+    if qty < 1 or qty > MAX_CAMERAS_PER_ORDER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid camera quantity. Must be between 1 and {MAX_CAMERAS_PER_ORDER}."
+        )
+    
+    with _BILLING_LOCK:
+        state = get_billing_state()
+        if expire_stale_orders(state):
+            save_billing_state(state)
+            
+        for ord_item in state.get("orders", []):
+            if (ord_item.get("tenant_id") in (tenant_id, email) or ord_item.get("user_id") == user_id) and ord_item.get("status") in ("awaiting_payment", "submitted"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"An open order ({ord_item.get('order_code')}) with status '{ord_item.get('status')}' already exists. Please complete or wait for verification."
+                )
+                
+        unit_price_paise = CAMERA_PRICE_PAISE
+        amount_paise = qty * unit_price_paise
+        order_code = f"VYZ-{secrets.randbelow(9000) + 1000}"
+        order_id = f"ord_{secrets.token_hex(8)}"
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        expires_at = (now + timedelta(minutes=ORDER_EXPIRY_MINUTES)).isoformat()
+        
+        order_record = {
+            "id": order_id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "user_email": email,
+            "quantity": qty,
+            "unit_price_paise": unit_price_paise,
+            "amount_paise": amount_paise,
+            "order_code": order_code,
+            "status": "awaiting_payment",
+            "utr": None,
+            "submitted_at": None,
+            "verified_by": None,
+            "verified_at": None,
+            "reject_reason": None,
+            "expires_at": expires_at,
+            "created_at": now_iso
+        }
+        
+        payment_data = {}
+        try:
+            if ManualUpiProvider:
+                provider = ManualUpiProvider()
+                payment_data = provider.build_payment(order_record)
+        except Exception:
+            pass
+            
+        upi_link = payment_data.get("upi_link") or f"upi://pay?pa=vyzn@upi&pn=VYZN%20Technologies&am={amount_paise/100:.2f}&tn={order_code}&cu=INR"
+        qr = payment_data.get("qr") or ""
+        
+        state.setdefault("orders", []).append(order_record)
+        state.setdefault("audits", []).append({
+            "id": f"aud_{secrets.token_hex(6)}",
+            "order_id": order_id,
+            "actor": email or tenant_id,
+            "action": "created",
+            "detail": f"Created order for {qty} cameras at ₹{amount_paise/100:.2f}",
+            "created_at": now_iso
+        })
+        save_billing_state(state)
+        
+        return {
+            **order_record,
+            "upi_link": upi_link,
+            "qr_data_uri": qr
+        }
+
+@app.get("/billing/quota-orders")
+@app.get("/api/billing/quota-orders")
+def api_list_quota_orders(request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    email = user.get("email")
+    state = get_billing_state()
+    expire_stale_orders(state)
+    orders = [
+        o for o in state.get("orders", [])
+        if o.get("tenant_id") in (tenant_id, email) or o.get("user_email") == email or is_admin_check(user)
+    ]
+    return sorted(orders, key=lambda x: x.get("created_at") or "", reverse=True)
+
+@app.get("/billing/quota-orders/{order_id}")
+@app.get("/api/billing/quota-orders/{order_id}")
+def api_get_quota_order(order_id: str, request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    email = user.get("email")
+    state = get_billing_state()
+    expire_stale_orders(state)
+    for o in state.get("orders", []):
+        if o.get("id") == order_id:
+            if o.get("tenant_id") not in (tenant_id, email) and o.get("user_email") != email and not is_admin_check(user):
+                raise HTTPException(status_code=403, detail="Permission denied")
+            return o
+    raise HTTPException(status_code=404, detail="Order not found")
+
+@app.post("/billing/quota-orders/{order_id}/submit-utr")
+@app.post("/api/billing/quota-orders/{order_id}/submit-utr")
+def api_submit_quota_order_utr(order_id: str, payload: SubmitUtrRequest, request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    email = user.get("email")
+    
+    raw_utr = (payload.utr or "").strip()
+    if not re.match(r"^[0-9]{12}$", raw_utr):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid UPI reference number (UTR). Must be exactly 12 numeric digits."
+        )
+        
+    with _BILLING_LOCK:
+        state = get_billing_state()
+        expire_stale_orders(state)
+        
+        target_ord = None
+        for o in state.get("orders", []):
+            if o.get("id") == order_id:
+                target_ord = o
+                break
+                
+        if not target_ord:
+            raise HTTPException(status_code=404, detail="Order not found")
+            
+        if target_ord.get("tenant_id") not in (tenant_id, email) and target_ord.get("user_email") != email and not is_admin_check(user):
+            raise HTTPException(status_code=403, detail="Permission denied")
+            
+        if target_ord.get("status") == "submitted":
+            return target_ord
+            
+        if target_ord.get("status") != "awaiting_payment":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Order cannot accept payment proof in '{target_ord.get('status')}' status."
+            )
+            
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        if target_ord.get("expires_at") and now_iso > target_ord["expires_at"]:
+            target_ord["status"] = "expired"
+            save_billing_state(state)
+            raise HTTPException(status_code=400, detail="Order has expired. Please create a new order.")
+            
+        for o in state.get("orders", []):
+            if o.get("id") != order_id and o.get("utr") == raw_utr:
+                raise HTTPException(
+                    status_code=400,
+                    detail="This UPI reference (UTR) has already been submitted for another order."
+                )
+                
+        target_ord["status"] = "submitted"
+        target_ord["utr"] = raw_utr
+        target_ord["submitted_at"] = now_iso
+        
+        state.setdefault("audits", []).append({
+            "id": f"aud_{secrets.token_hex(6)}",
+            "order_id": order_id,
+            "actor": email or tenant_id,
+            "action": "submitted_utr",
+            "detail": f"Submitted UTR {raw_utr}",
+            "created_at": now_iso
+        })
+        save_billing_state(state)
+        
+    try:
+        if send_billing_telegram_alert:
+            ord_copy = dict(target_ord)
+            threading.Thread(target=send_billing_telegram_alert, args=(ord_copy,), daemon=True).start()
+    except Exception:
+        pass
+
+        
+    return target_ord
+
+@app.get("/admin/billing/pending")
+@app.get("/api/admin/billing/pending")
+def api_admin_billing_pending(request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    if not is_admin_check(user):
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    state = get_billing_state()
+    expire_stale_orders(state)
+    pending = [o for o in state.get("orders", []) if o.get("status") == "submitted"]
+    return sorted(pending, key=lambda x: x.get("submitted_at") or x.get("created_at") or "", reverse=True)
+
+@app.post("/admin/billing/orders/{order_id}/approve")
+@app.post("/api/admin/billing/orders/{order_id}/approve")
+def api_admin_billing_approve(order_id: str, request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    if not is_admin_check(user):
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+        
+    with _BILLING_LOCK:
+        state = get_billing_state()
+        target_ord = None
+        for o in state.get("orders", []):
+            if o.get("id") == order_id:
+                target_ord = o
+                break
+                
+        if not target_ord:
+            raise HTTPException(status_code=404, detail="Order not found")
+            
+        if target_ord.get("status") == "paid":
+            return {"ok": True, "already_approved": True, "order": target_ord}
+            
+        if target_ord.get("status") != "submitted":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only submitted orders can be approved (current: '{target_ord.get('status')}')."
+            )
+            
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        target_ord["status"] = "paid"
+        target_ord["verified_by"] = user.get("email") or "admin"
+        target_ord["verified_at"] = now_iso
+        
+        tenant_id = target_ord.get("tenant_id")
+        user_email = (target_ord.get("user_email") or tenant_id or "").strip().lower()
+        quotas = state.setdefault("quotas", {})
+        
+        q = quotas.get(user_email) or (quotas.get(tenant_id) if tenant_id else None)
+        if not q:
+            used = len(get_user_cameras(user_email))
+            q = {"purchased": used, "created_at": now_iso, "updated_at": now_iso}
+            
+        q["purchased"] = int(q.get("purchased", 0)) + int(target_ord.get("quantity", 0))
+        q["updated_at"] = now_iso
+        quotas[user_email] = q
+        if tenant_id and tenant_id != user_email:
+            quotas[tenant_id] = q
+
+            
+        state["quotas"] = quotas
+        state.setdefault("audits", []).append({
+            "id": f"aud_{secrets.token_hex(6)}",
+            "order_id": order_id,
+            "actor": user.get("email") or "admin",
+            "action": "approved",
+            "detail": f"Approved order {target_ord.get('order_code')}, credited {target_ord.get('quantity')} cameras (UTR: {target_ord.get('utr')})",
+            "created_at": now_iso
+        })
+        save_billing_state(state)
+        
+        used_count = len(get_user_cameras(user_email))
+        available_count = max(q["purchased"] - used_count, 0)
+        return {
+            "ok": True,
+            "order": target_ord,
+            "purchased": q["purchased"],
+            "available": available_count
+        }
+
+@app.post("/admin/billing/orders/{order_id}/reject")
+@app.post("/api/admin/billing/orders/{order_id}/reject")
+def api_admin_billing_reject(order_id: str, payload: RejectOrderRequest, request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    if not is_admin_check(user):
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+        
+    with _BILLING_LOCK:
+        state = get_billing_state()
+        target_ord = None
+        for o in state.get("orders", []):
+            if o.get("id") == order_id:
+                target_ord = o
+                break
+                
+        if not target_ord:
+            raise HTTPException(status_code=404, detail="Order not found")
+            
+        if target_ord.get("status") == "paid":
+            raise HTTPException(status_code=400, detail="Cannot reject an already credited order")
+            
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        target_ord["status"] = "rejected"
+        target_ord["reject_reason"] = (payload.reason or "").strip() or "Verification failed"
+        target_ord["verified_by"] = user.get("email") or "admin"
+        target_ord["verified_at"] = now_iso
+        
+        state.setdefault("audits", []).append({
+            "id": f"aud_{secrets.token_hex(6)}",
+            "order_id": order_id,
+            "actor": user.get("email") or "admin",
+            "action": "rejected",
+            "detail": f"Rejected order {target_ord.get('order_code')}: {target_ord['reject_reason']}",
+            "created_at": now_iso
+        })
+        save_billing_state(state)
+        return {"ok": True, "order": target_ord}
+
+# ---------------------------------------------------------------------------
 # Cameras & Watch Areas
 # ---------------------------------------------------------------------------
 @app.get("/api/cameras")
@@ -1752,6 +2243,16 @@ def add_camera(payload: CameraCreateRequest, request: Request):
     if not user:
         raise HTTPException(status_code=401, detail="Authentication required")
     email = user["email"]
+    tenant_id = user.get("id") or email
+
+    # Enforce camera quota
+    quota = get_tenant_billing_quota(tenant_id, email)
+    if quota.get("available", 0) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="QUOTA_EXHAUSTED: You have reached your camera plan limit. Please top up your camera quota in Settings > Camera Plan."
+        )
+
     new_id = f"cam_{int(time.time() * 1000) % 100000}"
     name = (payload.name or "Camera").strip()
     norm_url = normalize_camera_stream_url(payload.rtsp_url)
@@ -2065,6 +2566,16 @@ def get_local_devices():
 def adopt_camera(payload: Dict[str, Any], request: Request):
     user = get_current_user(request)
     email = user["email"] if user else "guest"
+    tenant_id = user.get("id") or email if user else "guest"
+
+    # Enforce camera quota
+    quota = get_tenant_billing_quota(tenant_id, email)
+    if quota.get("available", 0) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="QUOTA_EXHAUSTED: You have reached your camera plan limit. Please top up your camera quota in Settings > Camera Plan."
+        )
+
     new_id = f"cam_{int(time.time() * 1000) % 100000}"
     name = payload.get("name") or "Adopted Camera"
     cam = {
@@ -2464,8 +2975,14 @@ def serve_cameras():
     return _serve_file_or_fallback("cameras.html")
 
 @app.get("/cameras/new", response_class=HTMLResponse)
+@app.get("/add-camera", response_class=HTMLResponse)
 def serve_add_camera():
     return _serve_file_or_fallback("add-camera.html")
+
+@app.get("/admin-billing", response_class=HTMLResponse)
+def serve_admin_billing():
+    return _serve_file_or_fallback("admin-billing.html")
+
 
 @app.get("/areas", response_class=HTMLResponse)
 @app.get("/areas/{camera_id}", response_class=HTMLResponse)

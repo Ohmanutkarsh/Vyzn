@@ -33,7 +33,11 @@ async function loadPendingOrders() {
   if (!tbody) return;
 
   try {
-    const res = await fetch('/admin/billing/pending', { credentials: 'include' });
+    let res = await fetch('/admin/billing/pending', { credentials: 'include' });
+    if (!res.ok && res.status === 404) {
+      res = await fetch('/api/admin/billing/pending', { credentials: 'include' });
+    }
+
     if (res.status === 403) {
       tbody.innerHTML = `
         <tr>
@@ -108,10 +112,16 @@ async function loadPendingOrders() {
         btn.textContent = 'Approving…';
 
         try {
-          const res = await fetch(`/admin/billing/orders/${orderId}/approve`, {
+          let res = await fetch(`/admin/billing/orders/${orderId}/approve`, {
             method: 'POST',
             credentials: 'include'
           });
+          if (!res.ok && res.status === 404) {
+            res = await fetch(`/api/admin/billing/orders/${orderId}/approve`, {
+              method: 'POST',
+              credentials: 'include'
+            });
+          }
 
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {
@@ -141,12 +151,21 @@ async function loadPendingOrders() {
         btn.textContent = 'Rejecting…';
 
         try {
-          const res = await fetch(`/admin/billing/orders/${orderId}/reject`, {
+          let res = await fetch(`/admin/billing/orders/${orderId}/reject`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify({ reason: reason.trim() || 'Payment verification declined' })
           });
+          if (!res.ok && res.status === 404) {
+            res = await fetch(`/api/admin/billing/orders/${orderId}/reject`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ reason: reason.trim() || 'Payment verification declined' })
+            });
+          }
+
 
           const data = await res.json().catch(() => ({}));
           if (!res.ok) {

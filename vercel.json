@@ -11,6 +11,23 @@
       "destination": "/api"
     },
     {
+      "source": "/billing/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/billing",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/billing/(.*)",
+      "destination": "/api"
+    },
+    {
+      "source": "/admin/billing",
+      "destination": "/api"
+    },
+
+    {
       "source": "/cameras/new",
       "destination": "/add-camera"
     },

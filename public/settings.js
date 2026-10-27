@@ -994,7 +994,10 @@ async function initCameraPlanControls() {
   // Load and display Quota
   async function loadQuota() {
     try {
-      const res = await fetch('/billing/quota', { credentials: 'include' });
+      let res = await fetch('/billing/quota', { credentials: 'include' });
+      if (!res.ok) {
+        res = await fetch('/api/billing/quota', { credentials: 'include' });
+      }
       if (!res.ok) return;
       const data = await res.json();
       planQuota = data;
@@ -1034,7 +1037,10 @@ async function initCameraPlanControls() {
     if (!tbody) return;
 
     try {
-      const res = await fetch('/billing/quota-orders', { credentials: 'include' });
+      let res = await fetch('/billing/quota-orders', { credentials: 'include' });
+      if (!res.ok) {
+        res = await fetch('/api/billing/quota-orders', { credentials: 'include' });
+      }
       if (!res.ok) {
         tbody.innerHTML = '<tr><td colspan="6" style="padding: 14px 10px; text-align: center; color: var(--text-3);">Could not load orders.</td></tr>';
         return;
@@ -1044,6 +1050,7 @@ async function initCameraPlanControls() {
         tbody.innerHTML = '<tr><td colspan="6" style="padding: 16px 10px; text-align: center; color: var(--text-3);">No camera quota orders yet.</td></tr>';
         return;
       }
+
 
       const statusMap = {
         'paid': { label: 'Verified & Credited', cls: 'settings-badge success' },
@@ -1175,12 +1182,21 @@ async function initCameraPlanControls() {
       btnProceed.textContent = 'Creating order…';
 
       try {
-        const res = await fetch('/billing/quota-orders', {
+        let res = await fetch('/billing/quota-orders', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ quantity: selectedQty })
         });
+        if (!res.ok && res.status === 404) {
+          res = await fetch('/api/billing/quota-orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ quantity: selectedQty })
+          });
+        }
+
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -1277,12 +1293,21 @@ async function initCameraPlanControls() {
       btnSubmitUtr.textContent = 'Submitting UTR…';
 
       try {
-        const res = await fetch(`/billing/quota-orders/${activeOrder.id}/submit-utr`, {
+        let res = await fetch(`/billing/quota-orders/${activeOrder.id}/submit-utr`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
           body: JSON.stringify({ utr: utrVal })
         });
+        if (!res.ok && res.status === 404) {
+          res = await fetch(`/api/billing/quota-orders/${activeOrder.id}/submit-utr`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ utr: utrVal })
+          });
+        }
+
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -1378,7 +1403,10 @@ async function initCameraPlanControls() {
 
     pollInterval = setInterval(async () => {
       try {
-        const res = await fetch(`/billing/quota-orders/${orderId}`, { credentials: 'include' });
+        let res = await fetch(`/billing/quota-orders/${orderId}`, { credentials: 'include' });
+        if (!res.ok) {
+          res = await fetch(`/api/billing/quota-orders/${orderId}`, { credentials: 'include' });
+        }
         if (!res.ok) return;
         const ord = await res.json();
         activeOrder = ord;
@@ -1396,7 +1424,10 @@ async function initCameraPlanControls() {
 
   async function resumeOrder(orderId) {
     try {
-      const res = await fetch(`/billing/quota-orders/${orderId}`, { credentials: 'include' });
+      let res = await fetch(`/billing/quota-orders/${orderId}`, { credentials: 'include' });
+      if (!res.ok) {
+        res = await fetch(`/api/billing/quota-orders/${orderId}`, { credentials: 'include' });
+      }
       if (!res.ok) return;
       const ord = await res.json();
       activeOrder = ord;
@@ -1412,6 +1443,7 @@ async function initCameraPlanControls() {
       }
     } catch (e) {}
   }
+
 
   // Initial load
   await loadQuota();

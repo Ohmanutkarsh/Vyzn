@@ -52,35 +52,73 @@ let currentQuota = { purchased: 0, used: 0, available: 0 };
 
 async function loadCameraQuota() {
   try {
-    const res = await fetch('/billing/quota', { credentials: 'include' });
-    if (!res.ok) return;
+    let res = await fetch('/billing/quota', { credentials: 'include' });
+    if (!res.ok) {
+      res = await fetch('/api/billing/quota', { credentials: 'include' });
+    }
+    if (!res.ok) {
+      console.warn('Could not load camera quota from server');
+      return;
+    }
     const data = await res.json();
     currentQuota = data;
 
     const summaryEl = document.getElementById('quota-summary-text');
     const subEl = document.getElementById('quota-sub-text');
     const exhaustedCard = document.getElementById('quota-exhausted-card');
+    const exhaustedMsg = document.getElementById('quota-exhausted-message');
     const actionBtnWrap = document.getElementById('quota-action-btn-wrap');
+    const badgeEl = document.getElementById('quota-remaining-badge');
+    const iconBox = document.getElementById('quota-status-icon-box');
 
     if (summaryEl) {
-      summaryEl.textContent = `Camera quota: ${data.purchased} purchased | ${data.used} used | ${data.available} available`;
+      summaryEl.textContent = `Camera Quota: ${data.purchased} purchased · ${data.used} used · ${data.available} available`;
     }
 
     if (data.available > 0) {
-      if (subEl) subEl.textContent = `You can add ${data.available} more camera${data.available > 1 ? 's' : ''}.`;
+      if (subEl) subEl.textContent = `You have ${data.available} available camera slot${data.available > 1 ? 's' : ''} on your plan.`;
+      if (badgeEl) {
+        badgeEl.textContent = `✓ ${data.available} slot${data.available > 1 ? 's' : ''} available`;
+        badgeEl.style.background = 'rgba(16, 185, 129, 0.15)';
+        badgeEl.style.color = '#34d399';
+        badgeEl.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+      }
+      if (iconBox) {
+        iconBox.style.background = 'rgba(16, 185, 129, 0.1)';
+        iconBox.style.borderColor = 'rgba(16, 185, 129, 0.25)';
+      }
       if (exhaustedCard) exhaustedCard.style.display = 'none';
       if (actionBtnWrap) actionBtnWrap.style.display = 'none';
       document.querySelectorAll('.option-card').forEach(btn => {
         btn.style.opacity = '1';
         btn.style.pointerEvents = 'auto';
+        btn.style.cursor = 'pointer';
+        btn.removeAttribute('disabled');
       });
     } else {
-      if (subEl) subEl.textContent = 'No camera quota available.';
-      if (exhaustedCard) exhaustedCard.style.display = 'block';
+      if (subEl) subEl.textContent = 'No camera quota available. You cannot add new cameras.';
+      if (badgeEl) {
+        badgeEl.textContent = '0 slots remaining (Quota full)';
+        badgeEl.style.background = 'rgba(239, 68, 68, 0.15)';
+        badgeEl.style.color = '#f87171';
+        badgeEl.style.border = '1px solid rgba(239, 68, 68, 0.35)';
+      }
+      if (iconBox) {
+        iconBox.style.background = 'rgba(239, 68, 68, 0.1)';
+        iconBox.style.borderColor = 'rgba(239, 68, 68, 0.25)';
+      }
+      if (exhaustedCard) {
+        exhaustedCard.style.display = 'block';
+        if (exhaustedMsg) {
+          exhaustedMsg.textContent = `You have used all ${data.purchased} of your purchased camera slot(s) (${data.used} in use, 0 available). To connect new cameras, top up your camera quota in Settings > Camera Plan.`;
+        }
+      }
       if (actionBtnWrap) actionBtnWrap.style.display = 'block';
       document.querySelectorAll('.option-card').forEach(btn => {
-        btn.style.opacity = '0.4';
+        btn.style.opacity = '0.35';
         btn.style.pointerEvents = 'none';
+        btn.style.cursor = 'not-allowed';
+        btn.setAttribute('disabled', 'true');
       });
     }
   } catch (err) {
@@ -189,9 +227,17 @@ function attachStepperNavigation() {
 
 function attachStep1Events() {
   document.querySelectorAll('[data-choice]').forEach(card => {
-    card.addEventListener('click', () => {
+    card.addEventListener('click', (e) => {
+      if (currentQuota && currentQuota.available <= 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        alert('No camera quota available. You have 0 available camera slots. Please add a camera plan in Settings.');
+        window.location.href = '/settings#camera-plan';
+        return;
+      }
       currentChoice = card.getAttribute('data-choice');
       setWizardStep('step-2', 'Step 2 of 3');
+
 
       document.querySelectorAll('.path-section').forEach(s => s.style.display = 'none');
       const pathEl = document.getElementById(`path-${currentChoice}`);
@@ -791,8 +837,15 @@ function attachStep3Events() {
       });
       if (!pin) return;
 
+      if (currentQuota && currentQuota.available <= 0) {
+        alert('No camera quota available. You have 0 available camera slots. Please add a camera plan in Settings.');
+        window.location.href = '/settings#camera-plan';
+        return;
+      }
+
       btnSave.disabled = true;
       btnSave.textContent = 'Saving…';
+
 
       // Cleanly release browser webcam tracks so hardware webcam 0 is unlocked
       if (activeWebcamStream) {
