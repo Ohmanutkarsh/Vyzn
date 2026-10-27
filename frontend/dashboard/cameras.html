@@ -22,13 +22,51 @@
 
     <!-- Cameras Content -->
     <main class="shell-content" id="main-content">
-      <div class="cameras-header-row">
+      <!-- Cameras Header Row -->
+      <div class="cameras-header-row" style="margin-bottom: var(--space-4, 16px); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
         <div>
-          <h2 style="font-size: 20px; font-weight: 600; margin: 0 0 4px 0;" id="txt-cameras-title">Cameras</h2>
-          <span style="font-size: 13px; color: var(--text-2);" id="txt-cameras-count">Loading cameras…</span>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <h2 style="font-size: 20px; font-weight: 600; margin: 0;" id="txt-cameras-title">Cameras</h2>
+            <span id="badge-cameras-quota" style="font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 9999px; background: rgba(113, 113, 122, 0.2); color: #d4d4d8; border: 1px solid rgba(113, 113, 122, 0.3);">
+              Loading quota…
+            </span>
+          </div>
+          <span style="font-size: 13px; color: var(--text-2); margin-top: 4px; display: block;" id="txt-cameras-count">Loading cameras…</span>
         </div>
-        <div>
-          <a href="/cameras/new" class="btn btn-primary" id="btn-add-camera" style="text-decoration: none;">+ Add camera</a>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <a href="/settings#camera-plan" class="btn btn-secondary" style="font-size: 13px; padding: 7px 14px; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;" id="btn-manage-plan">
+            💳 Camera Plan
+          </a>
+          <a href="/cameras/new" class="btn btn-primary" id="btn-add-camera" style="text-decoration: none; font-size: 13px; padding: 7px 16px;">+ Add camera</a>
+        </div>
+      </div>
+
+      <!-- Camera Quota Summary Widget -->
+      <div id="cameras-quota-card" style="margin-bottom: var(--space-6, 24px); padding: 14px 18px; border-radius: 12px; background: rgba(24, 24, 27, 0.85); border: 1px solid #27272a; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">📹</span>
+            <span style="font-size: 13.5px; font-weight: 600; color: #ffffff;" id="txt-quota-headline">Camera Quota:</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 14px; font-size: 13px; flex-wrap: wrap;">
+            <div>
+              <span style="color: #71717a;">Purchased:</span>
+              <strong style="color: #ffffff; margin-left: 4px;" id="val-cameras-purchased">—</strong>
+            </div>
+            <div style="color: #3f3f46;">|</div>
+            <div>
+              <span style="color: #71717a;">Active:</span>
+              <strong style="color: #a1a1aa; margin-left: 4px;" id="val-cameras-used">—</strong>
+            </div>
+            <div style="color: #3f3f46;">|</div>
+            <div>
+              <span style="color: #71717a;">Remaining:</span>
+              <strong style="color: #10b981; margin-left: 4px;" id="val-cameras-available">—</strong>
+            </div>
+          </div>
+        </div>
+        <div style="font-size: 12.5px; color: #a1a1aa;" id="txt-quota-note">
+          Checking plan quota…
         </div>
       </div>
 
