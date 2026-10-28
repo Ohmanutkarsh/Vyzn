@@ -1372,13 +1372,38 @@ def api_telegram_test(request: Request):
         raise HTTPException(status_code=400, detail="Telegram is not linked yet. Please click 'Connect Telegram' first.")
 
     api_url = f"https://api.telegram.org/bot{bot_token}"
-    msg = "🔔 *VYZN Security Test Alert*\n\nYour Telegram connection is verified and operational!"
+    msg = (
+        "🚨 *VYZN Security Alert · Verification Ping*\n\n"
+        "Security monitoring is active. CCTV threat clips with score 70+ will be delivered directly here with instant photo evidence and triage buttons.\n\n"
+        f"• Status: Operational\n• Time: {time.strftime('%I:%M %p').lstrip('0').lower()}"
+    )
+    inline_keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "Open Console", "url": "https://vyzn-security.vercel.app/settings"},
+                {"text": "Acknowledge", "callback_data": "ack_test"}
+            ]
+        ]
+    }
     start_t = time.time()
     try:
-        r = requests.post(f"{api_url}/sendMessage", json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown"}, timeout=8.0)
+        thumb_bytes = next(iter(USER_SNAPSHOTS.values())) if USER_SNAPSHOTS else None
+        if thumb_bytes:
+            r = requests.post(
+                f"{api_url}/sendPhoto",
+                data={"chat_id": chat_id, "caption": msg, "reply_markup": json.dumps(inline_keyboard)},
+                files={"photo": ("test_alert.jpg", thumb_bytes, "image/jpeg")},
+                timeout=10.0
+            )
+        else:
+            r = requests.post(
+                f"{api_url}/sendMessage",
+                json={"chat_id": chat_id, "text": msg, "parse_mode": "Markdown", "reply_markup": inline_keyboard},
+                timeout=8.0
+            )
         lat = int((time.time() - start_t) * 1000)
         if r.status_code == 200 and r.json().get("ok"):
-            return {"ok": True, "delivered": True, "latencyMs": lat, "message": "Test message sent to Telegram successfully"}
+            return {"ok": True, "delivered": True, "latencyMs": lat, "message": "Test alert sent to Telegram successfully"}
         else:
             raise HTTPException(status_code=502, detail=f"Telegram API error: {r.text}")
     except Exception as e:
@@ -1454,7 +1479,7 @@ async def api_telegram_webhook(request: Request):
     if not isinstance(payload, dict) or "update_id" not in payload:
         raise HTTPException(status_code=400, detail="Invalid update structure")
 
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    bot_token = get_telegram_bot_token()
     api_url = f"https://api.telegram.org/bot{bot_token}" if bot_token else None
 
     # Handle inline button callbacks
@@ -1693,7 +1718,7 @@ async def api_telegram_manual_link(request: Request):
         user["telegram_alerts_enabled"] = True
         user["telegram_linked_at_ms"] = int(time.time() * 1000)
         sync_user_to_supabase_cloud(user)
-        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        bot_token = get_telegram_bot_token()
         if bot_token:
             try:
                 requests.post(
@@ -1760,38 +1785,60 @@ async def api_cloud_alert_ingress(payload: CloudAlertIngressRequest, request: Re
         return {"ok": False, "status": "muted", "message": "Customer has muted Telegram alerts"}
 
     chat_id = target_user["telegram_chat_id"]
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    bot_token = get_telegram_bot_token()
     api_url = f"https://api.telegram.org/bot{bot_token}" if bot_token else None
 
     cam_name = payload.camera_name or payload.camera_id or "Camera"
     desc = payload.description or "Security alert detected in monitored area."
-    caption = f"🚨 VYZN Alert · {cam_name}\n{desc}\nToday, {time.strftime('%I:%M %p').lstrip('0').lower()}"
+    caption = f"🚨 VYZN Security Alert · {cam_name}\n{desc}\nToday, {time.strftime('%I:%M %p').lstrip('0').lower()}"
+
+    public_base = os.environ.get("VYZN_PUBLIC_URL") or "https://vyzn-security.vercel.app"
+    clip_url = f"{public_base.rstrip('/')}/clips/{payload.event_id}"
 
     inline_keyboard = {
         "inline_keyboard": [
             [
-                {"text": "Open clip", "url": f"https://vyzn.ai/clips/{payload.event_id}"},
+                {"text": "Open clip", "url": clip_url},
                 {"text": "Not an issue", "callback_data": f"not_an_issue_{payload.event_id}"}
             ]
         ]
     }
 
     if not api_url:
-        return {"ok": True, "status": "simulated", "event_id": payload.event_id, "recipient": chat_id}
+        return {"ok": True, "status": "simulated", "event_id": payload.event_id, "recipient": chat_id, "recipient_chat_id": chat_id}
 
-    # Text notification if thumbnail not supplied in serverless payload
+    # Resolve snapshot thumbnail if available
+    thumb_bytes = USER_SNAPSHOTS.get(payload.camera_id)
+    if not thumb_bytes and payload.camera_id:
+        for k, v in USER_SNAPSHOTS.items():
+            if k in payload.camera_id or payload.camera_id in k:
+                thumb_bytes = v
+                break
+
     try:
-        resp = requests.post(
-            f"{api_url}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": caption,
-                "reply_markup": inline_keyboard
-            },
-            timeout=8.0
-        )
+        if thumb_bytes:
+            resp = requests.post(
+                f"{api_url}/sendPhoto",
+                data={
+                    "chat_id": chat_id,
+                    "caption": caption,
+                    "reply_markup": json.dumps(inline_keyboard)
+                },
+                files={"photo": ("alert_thumb.jpg", thumb_bytes, "image/jpeg")},
+                timeout=12.0
+            )
+        else:
+            resp = requests.post(
+                f"{api_url}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": caption,
+                    "reply_markup": inline_keyboard
+                },
+                timeout=8.0
+            )
         delivered = (resp.status_code == 200 and resp.json().get("ok"))
-        return {"ok": delivered, "status": "delivered" if delivered else "failed", "event_id": payload.event_id}
+        return {"ok": delivered, "status": "delivered" if delivered else "failed", "event_id": payload.event_id, "recipient_chat_id": chat_id}
     except Exception as e:
         return {"ok": False, "status": "failed", "error": str(e)}
 
@@ -2784,13 +2831,46 @@ def send_clip_to_telegram(clip_id: str, request: Request):
     clip = next((c for c in clips if str(c.get("id")) == clip_id or str(c.get("clip_number")) == clip_id), None)
     cam_name = clip.get("camera_name", "Camera") if clip else "Camera"
     summary = clip.get("summary", "Activity detected") if clip else "Activity detected"
-    text = f"🚨 *VYZN Security Clip Notification*\n\n• Camera: *{cam_name}*\n• Event: {summary}\n• Clip ID: `{clip_id}`"
+    score = int(clip.get("score") or clip.get("importance_score") or 0) if clip else 0
+    text = f"🚨 *VYZN Security Alert · {cam_name}*\n{summary}\nScore: {score} · Today, {time.strftime('%I:%M %p').lstrip('0').lower()}"
+
+    public_base = os.environ.get("VYZN_PUBLIC_URL") or "https://vyzn-security.vercel.app"
+    clip_url = f"{public_base.rstrip('/')}/clips/{clip_id}"
+    inline_keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "Open clip", "url": clip_url},
+                {"text": "Not an issue", "callback_data": f"not_an_issue_{clip_id}"}
+            ]
+        ]
+    }
+
+    cam_id = clip.get("camera_id") if clip else resolve_camera_id_from_clip_id(clip_id)
+    thumb_bytes = USER_SNAPSHOTS.get(cam_id) if cam_id else None
+
     try:
-        r = requests.post(
-            f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
-            timeout=6.0
-        )
+        if thumb_bytes:
+            r = requests.post(
+                f"https://api.telegram.org/bot{bot_token}/sendPhoto",
+                data={
+                    "chat_id": chat_id,
+                    "caption": text,
+                    "reply_markup": json.dumps(inline_keyboard)
+                },
+                files={"photo": ("alert_thumb.jpg", thumb_bytes, "image/jpeg")},
+                timeout=10.0
+            )
+        else:
+            r = requests.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "reply_markup": inline_keyboard,
+                    "parse_mode": "Markdown"
+                },
+                timeout=6.0
+            )
         if r.status_code == 200:
             return {"ok": True, "delivered": True}
         else:

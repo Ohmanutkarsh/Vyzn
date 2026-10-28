@@ -406,6 +406,15 @@ class TelegramAlertProvider(AlertProvider):
             bot_token = getattr(settings, "telegram_bot_token", None)
         if bot_token is None:
             bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
+        if bot_token is None:
+            try:
+                from vyzn.core.supabase_sync import get_supabase_url, get_supabase_headers, is_supabase_configured
+                if is_supabase_configured():
+                    r = requests.get(f"{get_supabase_url()}/storage/v1/object/vyzn-cloud-state/billing_state.json", headers=get_supabase_headers(), timeout=2.0)
+                    if r.status_code == 200 and r.json().get("telegram_bot_token"):
+                        bot_token = str(r.json()["telegram_bot_token"]).strip()
+            except Exception:
+                pass
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.db = db
