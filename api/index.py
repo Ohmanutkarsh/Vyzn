@@ -1290,6 +1290,69 @@ def get_telegram_bot_username() -> str:
         return tok_user.strip()
     return DEFAULT_TELEGRAM_BOT_USERNAME
 
+DEFAULT_ADMIN_TELEGRAM_BOT_USERNAME = "Vyzn_admin_bot"
+
+def get_admin_telegram_bot_token() -> Optional[str]:
+    """
+    Safely retrieves the dedicated Admin Telegram Bot Token without committing secrets to git.
+    Order of precedence:
+    1. Authenticated Supabase cloud state (vyzn-cloud-state/billing_state.json)
+    2. ADMIN_TELEGRAM_BOT_TOKEN environment variable (local .env or Vercel config)
+    3. VYZN_ADMIN_TELEGRAM_BOT_TOKEN environment variable
+    """
+    try:
+        state = get_billing_state()
+        if state and state.get("admin_telegram_bot_token"):
+            return str(state["admin_telegram_bot_token"]).strip()
+    except Exception:
+        pass
+    tok = os.environ.get("ADMIN_TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_ADMIN_TELEGRAM_BOT_TOKEN")
+    if tok and tok.strip():
+        return tok.strip()
+    return None
+
+def get_admin_telegram_bot_username() -> str:
+    try:
+        state = get_billing_state()
+        if state and state.get("admin_telegram_bot_username"):
+            return str(state["admin_telegram_bot_username"]).strip()
+    except Exception:
+        pass
+    tok_user = os.environ.get("ADMIN_TELEGRAM_BOT_USERNAME") or os.environ.get("VYZN_ADMIN_TELEGRAM_BOT_USERNAME")
+    if tok_user and tok_user.strip():
+        return tok_user.strip()
+    return DEFAULT_ADMIN_TELEGRAM_BOT_USERNAME
+
+def get_admin_telegram_chat_id() -> str:
+    try:
+        state = get_billing_state()
+        if state and state.get("admin_telegram_chat_id"):
+            return str(state["admin_telegram_chat_id"]).strip()
+    except Exception:
+        pass
+    return os.environ.get("ADMIN_TELEGRAM_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID") or "6856103038"
+
+def sync_quota_to_supabase_table(tenant_id: str, purchased: int):
+    """Lifetime persistence: saves tenant quota into Supabase PostgreSQL table."""
+    if not (SUPABASE_CLOUD_URL and SUPABASE_CLOUD_KEY):
+        return
+    headers = {
+        "apikey": SUPABASE_CLOUD_KEY,
+        "Authorization": f"Bearer {SUPABASE_CLOUD_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates"
+    }
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    payload = {
+        "tenant_id": tenant_id,
+        "purchased": purchased,
+        "updated_at": now_iso
+    }
+    try:
+        requests.post(f"{SUPABASE_CLOUD_URL}/rest/v1/camera_quota", headers=headers, json=payload, timeout=3.5)
+    except Exception:
+        pass
+
 @app.get("/api/telegram/config")
 def api_telegram_config():
     bot = get_telegram_bot_username()
@@ -1734,6 +1797,365 @@ async def api_telegram_manual_link(request: Request):
                 pass
         return {"ok": True, "chat_id": chat_id, "status": "connected"}
     return {"ok": False, "error": "Missing or invalid chat_id"}
+
+
+@app.post("/api/telegram/admin-webhook")
+async def api_telegram_admin_webhook(request: Request):
+    """
+    Webhook handler for dedicated Vyzn Admin Bot (@Vyzn_admin_bot).
+    Handles manual UPI verification, camera quota approvals, rejections, quota lookups, and order audits.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    if not isinstance(payload, dict) or "update_id" not in payload:
+        raise HTTPException(status_code=400, detail="Invalid update structure")
+
+    bot_token = get_admin_telegram_bot_token()
+    if not bot_token:
+        return {"ok": False, "error": "Admin bot token not configured"}
+
+    api_url = f"https://api.telegram.org/bot{bot_token}"
+    admin_chat_id = get_admin_telegram_chat_id()
+    allowed_admin_chats = {str(admin_chat_id), "6856103038"}
+
+    # 1. Handle Inline Button Callbacks (Approve / Reject)
+    if "callback_query" in payload:
+        cq = payload["callback_query"]
+        cq_id = cq.get("id")
+        from_user = cq.get("from", {})
+        caller_chat_id = str(from_user.get("id"))
+        data = str(cq.get("data", ""))
+        msg = cq.get("message", {})
+        msg_id = msg.get("message_id")
+        orig_chat_id = msg.get("chat", {}).get("id")
+
+        if caller_chat_id not in allowed_admin_chats:
+            try:
+                requests.post(
+                    f"{api_url}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id, "text": "⛔ Unauthorized: Admin access only.", "show_alert": True},
+                    timeout=5.0
+                )
+            except Exception:
+                pass
+            return {"ok": False, "error": "Unauthorized"}
+
+        if data.startswith("admin_approve_"):
+            order_id = data[len("admin_approve_"):].strip()
+            with _BILLING_LOCK:
+                state = get_billing_state()
+                target_ord = None
+                for o in state.get("orders", []):
+                    if o.get("id") == order_id or o.get("order_code") == order_id:
+                        target_ord = o
+                        break
+
+                if not target_ord:
+                    try:
+                        requests.post(f"{api_url}/answerCallbackQuery", json={"callback_query_id": cq_id, "text": "❌ Order not found.", "show_alert": True}, timeout=5.0)
+                    except Exception:
+                        pass
+                    return {"ok": False, "error": "Order not found"}
+
+                if target_ord.get("status") == "paid":
+                    try:
+                        requests.post(f"{api_url}/answerCallbackQuery", json={"callback_query_id": cq_id, "text": f"ℹ️ Order {target_ord.get('order_code')} is already approved and paid.", "show_alert": True}, timeout=5.0)
+                    except Exception:
+                        pass
+                    return {"ok": True, "already_approved": True}
+
+                if target_ord.get("status") != "submitted":
+                    try:
+                        requests.post(f"{api_url}/answerCallbackQuery", json={"callback_query_id": cq_id, "text": f"⚠️ Cannot approve order in '{target_ord.get('status')}' status.", "show_alert": True}, timeout=5.0)
+                    except Exception:
+                        pass
+                    return {"ok": False, "status": target_ord.get("status")}
+
+                now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                target_ord["status"] = "paid"
+                target_ord["verified_by"] = f"telegram_admin_{caller_chat_id}"
+                target_ord["verified_at"] = now_iso
+
+                tenant_id = target_ord.get("tenant_id")
+                user_email = (target_ord.get("user_email") or tenant_id or "").strip().lower()
+                quotas = state.setdefault("quotas", {})
+
+                q = quotas.get(user_email) or (quotas.get(tenant_id) if tenant_id else None)
+                if not q:
+                    used = len(get_user_cameras(user_email))
+                    q = {"purchased": used, "created_at": now_iso, "updated_at": now_iso}
+
+                qty = int(target_ord.get("quantity", 1))
+                q["purchased"] = int(q.get("purchased", 0)) + qty
+                q["updated_at"] = now_iso
+                quotas[user_email] = q
+                if tenant_id and tenant_id != user_email:
+                    quotas[tenant_id] = q
+
+                state["quotas"] = quotas
+                state.setdefault("audits", []).append({
+                    "id": f"aud_{secrets.token_hex(6)}",
+                    "order_id": target_ord.get("id"),
+                    "actor": f"telegram_admin_{caller_chat_id}",
+                    "action": "approved",
+                    "detail": f"Approved order {target_ord.get('order_code')}, credited {qty} cameras (UTR: {target_ord.get('utr')}) via Vyzn Admin Bot",
+                    "created_at": now_iso
+                })
+                save_billing_state(state)
+
+                # Supabase lifetime persistence
+                sync_quota_to_supabase_table(user_email, q["purchased"])
+                if tenant_id and tenant_id != user_email:
+                    sync_quota_to_supabase_table(tenant_id, q["purchased"])
+
+            # Feedback to admin
+            try:
+                requests.post(
+                    f"{api_url}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id, "text": f"✅ Order {target_ord.get('order_code')} approved! +{qty} camera quota credited.", "show_alert": True},
+                    timeout=5.0
+                )
+            except Exception:
+                pass
+
+            if orig_chat_id and msg_id:
+                amt = target_ord.get("amount_paise", 0) / 100.0
+                approved_text = (
+                    "✅ *ORDER APPROVED & LIFETIME QUOTA CREDITED*\n\n"
+                    f"• *Order Code*: `{target_ord.get('order_code')}`\n"
+                    f"• *Tenant / Account*: `{user_email}`\n"
+                    f"• *Credited*: *+{qty}* camera(s)\n"
+                    f"• *Total Purchased Quota*: *{q['purchased']}* camera(s)\n"
+                    f"• *Amount Verified*: *₹{amt:,.2f}*\n"
+                    f"• *UTR Reference*: `{target_ord.get('utr')}`\n"
+                    f"• *Verified At*: {now_iso}\n"
+                    f"• *Verified By*: Vyzn Admin Bot (`{caller_chat_id}`)\n"
+                    f"• *Status*: *PAID & ACTIVE* (Permanently saved in Supabase)\n\n"
+                    "🎉 Customer can now immediately add their camera(s) in VYZN."
+                )
+                try:
+                    requests.post(
+                        f"{api_url}/editMessageText",
+                        json={
+                            "chat_id": orig_chat_id,
+                            "message_id": msg_id,
+                            "text": approved_text,
+                            "parse_mode": "Markdown"
+                        },
+                        timeout=5.0
+                    )
+                except Exception:
+                    pass
+
+            return {"ok": True, "action": "approved", "order_code": target_ord.get("order_code")}
+
+        elif data.startswith("admin_reject_"):
+            order_id = data[len("admin_reject_"):].strip()
+            with _BILLING_LOCK:
+                state = get_billing_state()
+                target_ord = None
+                for o in state.get("orders", []):
+                    if o.get("id") == order_id or o.get("order_code") == order_id:
+                        target_ord = o
+                        break
+
+                if not target_ord:
+                    try:
+                        requests.post(f"{api_url}/answerCallbackQuery", json={"callback_query_id": cq_id, "text": "❌ Order not found.", "show_alert": True}, timeout=5.0)
+                    except Exception:
+                        pass
+                    return {"ok": False, "error": "Order not found"}
+
+                if target_ord.get("status") != "submitted":
+                    try:
+                        requests.post(f"{api_url}/answerCallbackQuery", json={"callback_query_id": cq_id, "text": f"⚠️ Cannot reject order in '{target_ord.get('status')}' status.", "show_alert": True}, timeout=5.0)
+                    except Exception:
+                        pass
+                    return {"ok": False, "status": target_ord.get("status")}
+
+                now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                target_ord["status"] = "rejected"
+                target_ord["reject_reason"] = "Payment not verified in UPI app by Admin"
+                target_ord["verified_by"] = f"telegram_admin_{caller_chat_id}"
+                target_ord["verified_at"] = now_iso
+
+                state.setdefault("audits", []).append({
+                    "id": f"aud_{secrets.token_hex(6)}",
+                    "order_id": target_ord.get("id"),
+                    "actor": f"telegram_admin_{caller_chat_id}",
+                    "action": "rejected",
+                    "detail": f"Rejected order {target_ord.get('order_code')} via Vyzn Admin Bot",
+                    "created_at": now_iso
+                })
+                save_billing_state(state)
+
+            try:
+                requests.post(
+                    f"{api_url}/answerCallbackQuery",
+                    json={"callback_query_id": cq_id, "text": f"❌ Order {target_ord.get('order_code')} rejected.", "show_alert": True},
+                    timeout=5.0
+                )
+            except Exception:
+                pass
+
+            if orig_chat_id and msg_id:
+                amt = target_ord.get("amount_paise", 0) / 100.0
+                rejected_text = (
+                    "❌ *ORDER REJECTED*\n\n"
+                    f"• *Order Code*: `{target_ord.get('order_code')}`\n"
+                    f"• *Tenant*: `{target_ord.get('tenant_id')}`\n"
+                    f"• *Amount*: *₹{amt:,.2f}*\n"
+                    f"• *UTR Reference*: `{target_ord.get('utr')}`\n"
+                    f"• *Reason*: Payment could not be verified in UPI app\n"
+                    f"• *Status*: *REJECTED*\n"
+                    f"• *Quota*: *Unchanged*"
+                )
+                try:
+                    requests.post(
+                        f"{api_url}/editMessageText",
+                        json={
+                            "chat_id": orig_chat_id,
+                            "message_id": msg_id,
+                            "text": rejected_text,
+                            "parse_mode": "Markdown"
+                        },
+                        timeout=5.0
+                    )
+                except Exception:
+                    pass
+
+            return {"ok": True, "action": "rejected", "order_code": target_ord.get("order_code")}
+
+        return {"ok": True}
+
+    # 2. Handle Admin Text Commands
+    if "message" in payload:
+        msg = payload["message"]
+        chat_id = str(msg.get("chat", {}).get("id"))
+        text = (msg.get("text") or "").strip()
+
+        if chat_id not in allowed_admin_chats:
+            try:
+                requests.post(
+                    f"{api_url}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": "⛔ *Unauthorized Access*\n\nThis is a private administrative bot for VYZN payment processing.",
+                        "parse_mode": "Markdown"
+                    },
+                    timeout=5.0
+                )
+            except Exception:
+                pass
+            return {"ok": False, "error": "Unauthorized"}
+
+        if text.startswith("/start") or text.startswith("/help"):
+            intro = (
+                "🛡️ *VYZN Admin Console Bot*\n\n"
+                "Welcome to the VYZN payment processing & camera quota console.\n\n"
+                "*Commands:*\n"
+                "• `/pending` — Show submitted orders waiting for manual payment verification\n"
+                "• `/quota <email>` — Check an account's lifetime camera quota\n"
+                "• `/orders` — View the 5 most recent payment orders\n\n"
+                "When a customer pays via UPI and submits their UTR, an approval card with one-click *Approve* and *Reject* buttons will arrive here instantly."
+            )
+            try:
+                requests.post(f"{api_url}/sendMessage", json={"chat_id": chat_id, "text": intro, "parse_mode": "Markdown"}, timeout=5.0)
+            except Exception:
+                pass
+            return {"ok": True}
+
+        if text.startswith("/pending"):
+            state = get_billing_state()
+            expire_stale_orders(state)
+            pending = [o for o in state.get("orders", []) if o.get("status") == "submitted"]
+            if not pending:
+                msg_txt = "🟢 *No Pending Orders*\n\nAll customer camera quota orders have been verified and processed!"
+                try:
+                    requests.post(f"{api_url}/sendMessage", json={"chat_id": chat_id, "text": msg_txt, "parse_mode": "Markdown"}, timeout=5.0)
+                except Exception:
+                    pass
+                return {"ok": True, "count": 0}
+
+            for ord_item in pending:
+                oid = ord_item.get("id")
+                ocode = ord_item.get("order_code")
+                otenant = ord_item.get("tenant_id") or ord_item.get("user_email")
+                oqty = ord_item.get("quantity", 1)
+                oamt = ord_item.get("amount_paise", 0) / 100.0
+                outr = ord_item.get("utr", "N/A")
+                otime = ord_item.get("submitted_at", "N/A")
+
+                card_txt = (
+                    "💳 *Pending Quota Order*\n\n"
+                    f"• *Order Code*: `{ocode}`\n"
+                    f"• *Tenant*: `{otenant}`\n"
+                    f"• *Quantity*: *+{oqty}* camera(s)\n"
+                    f"• *Amount*: *₹{oamt:,.2f}*\n"
+                    f"• *UTR*: `{outr}`\n"
+                    f"• *Submitted At*: {otime}"
+                )
+                kb = {
+                    "inline_keyboard": [
+                        [
+                            {"text": f"✅ Approve (+{oqty} cams)", "callback_data": f"admin_approve_{oid}"},
+                            {"text": "❌ Reject", "callback_data": f"admin_reject_{oid}"}
+                        ]
+                    ]
+                }
+                try:
+                    requests.post(f"{api_url}/sendMessage", json={"chat_id": chat_id, "text": card_txt, "parse_mode": "Markdown", "reply_markup": kb}, timeout=5.0)
+                except Exception:
+                    pass
+            return {"ok": True, "count": len(pending)}
+
+        if text.startswith("/quota"):
+            parts = text.split()
+            target_account = parts[1].strip().lower() if len(parts) > 1 else "dirtbike000000@gmail.com"
+            state = get_billing_state()
+            quotas = state.get("quotas", {})
+            q = quotas.get(target_account)
+            purchased = q.get("purchased", 0) if q else 0
+            used = len(get_user_cameras(target_account))
+            available = max(purchased - used, 0)
+
+            reply = (
+                f"📊 *Lifetime Camera Quota for `{target_account}`*\n\n"
+                f"• *Purchased*: *{purchased}* cameras\n"
+                f"• *Currently In Use*: *{used}* cameras\n"
+                f"• *Available Slots*: *{available}* cameras\n\n"
+                "🔒 _Stored permanently in Supabase cloud state._"
+            )
+            try:
+                requests.post(f"{api_url}/sendMessage", json={"chat_id": chat_id, "text": reply, "parse_mode": "Markdown"}, timeout=5.0)
+            except Exception:
+                pass
+            return {"ok": True}
+
+        if text.startswith("/orders"):
+            state = get_billing_state()
+            orders = sorted(state.get("orders", []), key=lambda x: x.get("created_at", ""), reverse=True)[:5]
+            if not orders:
+                txt = "No orders found."
+            else:
+                lines = ["📜 *Recent Quota Orders:*\n"]
+                for o in orders:
+                    code = o.get("order_code")
+                    st = o.get("status")
+                    amt = o.get("amount_paise", 0) / 100.0
+                    utr = o.get("utr") or "None"
+                    lines.append(f"• `{code}`: {st.upper()} | ₹{amt:.0f} | UTR: `{utr}`")
+                txt = "\n".join(lines)
+            try:
+                requests.post(f"{api_url}/sendMessage", json={"chat_id": chat_id, "text": txt, "parse_mode": "Markdown"}, timeout=5.0)
+            except Exception:
+                pass
+            return {"ok": True}
+
+    return {"ok": True}
 
 
 class CloudAlertIngressRequest(BaseModel):
@@ -2195,7 +2617,7 @@ def api_submit_quota_order_utr(order_id: str, payload: SubmitUtrRequest, request
         save_billing_state(state)
         
     try:
-        admin_tg_token = os.environ.get("ADMIN_TELEGRAM_BOT_TOKEN")
+        admin_tg_token = get_admin_telegram_bot_token()
         if admin_tg_token and send_billing_telegram_alert:
             ord_copy = dict(target_ord)
             threading.Thread(target=send_billing_telegram_alert, args=(ord_copy,), daemon=True).start()
@@ -2282,6 +2704,9 @@ def api_admin_billing_approve(order_id: str, request: Request):
             "created_at": now_iso
         })
         save_billing_state(state)
+        sync_quota_to_supabase_table(user_email, q["purchased"])
+        if tenant_id and tenant_id != user_email:
+            sync_quota_to_supabase_table(tenant_id, q["purchased"])
         
         used_count = len(get_user_cameras(user_email))
         available_count = max(q["purchased"] - used_count, 0)

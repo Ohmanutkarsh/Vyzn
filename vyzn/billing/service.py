@@ -121,10 +121,25 @@ def send_billing_telegram_alert(order: Dict[str, Any], settings: Any = None) -> 
     Uses existing Telegram alert integration safely without raising unhandled exceptions.
     """
     try:
-        from vyzn.alerts.telegram import _send_tg_message_safely
+        import requests
+        import json
 
-        bot_token = os.environ.get("ADMIN_TELEGRAM_BOT_TOKEN")
-        chat_id = os.environ.get("ADMIN_TELEGRAM_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID")
+        bot_token = os.environ.get("ADMIN_TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_ADMIN_TELEGRAM_BOT_TOKEN")
+        chat_id = os.environ.get("ADMIN_TELEGRAM_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID") or "6856103038"
+
+        # Dynamic cloud fallback
+        if not bot_token:
+            try:
+                from vyzn.core.supabase_sync import get_supabase_url, get_supabase_headers, is_supabase_configured
+                if is_supabase_configured():
+                    r = requests.get(f"{get_supabase_url()}/storage/v1/object/vyzn-cloud-state/billing_state.json", headers=get_supabase_headers(), timeout=2.5)
+                    if r.status_code == 200:
+                        s = r.json()
+                        bot_token = s.get("admin_telegram_bot_token")
+                        if s.get("admin_telegram_chat_id"):
+                            chat_id = str(s["admin_telegram_chat_id"])
+            except Exception:
+                pass
 
         if not bot_token or not chat_id:
             logger.info("Payment Telegram alert skipped: dedicated admin bot (ADMIN_TELEGRAM_BOT_TOKEN) not configured.")
@@ -132,20 +147,48 @@ def send_billing_telegram_alert(order: Dict[str, Any], settings: Any = None) -> 
 
         api_url = f"https://api.telegram.org/bot{bot_token}"
         amount_rupees = order["amount_paise"] / 100.0
+        order_id = str(order.get("id"))
+        order_code = order.get("order_code")
+        tenant = order.get("tenant_id") or order.get("user_email") or "Unknown"
+        qty = order.get("quantity", 1)
+        utr = order.get("utr", "N/A")
+        sub_time = order.get("submitted_at") or datetime.now(timezone.utc).isoformat()
 
         text = (
-            "📦 *New VYZN Camera Quota Payment Submitted*\n\n"
-            f"• *Order Code*: `{order['order_code']}`\n"
-            f"• *Tenant*: `{order['tenant_id']}`\n"
-            f"• *Quantity*: *{order['quantity']}* camera(s)\n"
-            f"• *Amount*: *₹{amount_rupees:.2f}*\n"
-            f"• *UTR Reference*: `{order.get('utr', 'N/A')}`\n"
-            f"• *Submitted At*: {order.get('submitted_at', datetime.now(timezone.utc).isoformat())}\n\n"
-            "⚠️ _Match amount, UTR and order code in your UPI app before approving._\n"
-            "👉 Approve or reject via the Admin Billing Dashboard."
+            "💳 *New VYZN Camera Quota Payment Submitted*\n\n"
+            f"• *Order Code*: `{order_code}`\n"
+            f"• *Tenant / Account*: `{tenant}`\n"
+            f"• *Cameras Requested*: *+{qty}* camera(s)\n"
+            f"• *Amount*: *₹{amount_rupees:,.2f}*\n"
+            f"• *12-Digit UTR*: `{utr}`\n"
+            f"• *Submitted At*: {sub_time}\n\n"
+            "⚠️ *Manual Verification Required:*\n"
+            f"_Match amount (₹{amount_rupees:,.2f}), UTR (`{utr}`), and order code in your UPI app before approving._"
         )
 
-        return _send_tg_message_safely(api_url=api_url, chat_id=chat_id, text=text, parse_mode="Markdown")
+        inline_keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": f"✅ Approve (+{qty} cams)", "callback_data": f"admin_approve_{order_id}"},
+                    {"text": "❌ Reject", "callback_data": f"admin_reject_{order_id}"}
+                ],
+                [
+                    {"text": "📊 Open Admin Console", "url": "https://vyzn-security.vercel.app/admin/billing"}
+                ]
+            ]
+        }
+
+        resp = requests.post(
+            f"{api_url}/sendMessage",
+            json={
+                "chat_id": str(chat_id),
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": inline_keyboard
+            },
+            timeout=8.0
+        )
+        return (resp.status_code == 200 and resp.json().get("ok"))
     except Exception as e:
         logger.warning(f"Failed to dispatch Telegram billing notification: {e}")
         return False
