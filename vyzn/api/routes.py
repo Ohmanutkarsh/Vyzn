@@ -2933,7 +2933,7 @@ def api_telegram_link(user: Optional[Dict[str, Any]] = Depends(get_optional_user
     b64_payload = base64.urlsafe_b64encode(payload_str.encode("utf-8")).decode("ascii").rstrip("=")
     link_token = f"tg_{b64_payload}_{sig}"
     db.create_telegram_link(user["id"], user.get("phone_e164"), ttl_sec=3600, token=link_token)
-    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME") or os.environ.get("VYZN_TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_bot") or "Vyzn_security_bot"
+    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME") or os.environ.get("VYZN_TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_alert_bot") or "Vyzn_security_alert_bot"
     deep_link = f"https://t.me/{bot_username}?start={link_token}"
     now_ms = int(time.time() * 1000)
     return {
@@ -3194,7 +3194,7 @@ def api_telegram_test(user: Optional[Dict[str, Any]] = Depends(get_optional_user
     chat_id = fresh_user.get("telegram_chat_id")
     bot_token = getattr(settings, "telegram_bot_token", None)
     if not bot_token:
-        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or "8818349193:AAEFI3MPw_RDKWk0PvMJMkJUIC24i03l4DA"
+        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN") or ""
 
     if not chat_id:
         try:
@@ -3302,7 +3302,7 @@ def api_get_telegram_config(settings: EdgeSettings = Depends(get_settings)):
     """Returns status and masked value of configured Telegram Bot Token."""
     tok = os.environ.get("TELEGRAM_BOT_TOKEN") or getattr(settings, "telegram_bot_token", None) or ""
     masked = f"{tok[:6]}...{tok[-4:]}" if len(tok) > 10 else ("Configured" if tok else "")
-    u = os.environ.get("TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_bot") or "Vyzn_security_bot"
+    u = os.environ.get("TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_alert_bot") or "Vyzn_security_alert_bot"
     return {
         "ok": True,
         "is_token_set": bool(tok),
@@ -3338,7 +3338,7 @@ def api_telegram_config(
     return {
         "ok": True,
         "bot_token_set": bool(os.environ.get("TELEGRAM_BOT_TOKEN") or getattr(settings, "telegram_bot_token", None)),
-        "bot_username": os.environ.get("TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_bot") or "Vyzn_security_bot"
+        "bot_username": os.environ.get("TELEGRAM_BOT_USERNAME") or getattr(settings, "telegram_bot_username", "Vyzn_security_alert_bot") or "Vyzn_security_alert_bot"
     }
 
 

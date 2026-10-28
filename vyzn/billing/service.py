@@ -123,16 +123,11 @@ def send_billing_telegram_alert(order: Dict[str, Any], settings: Any = None) -> 
     try:
         from vyzn.alerts.telegram import _send_tg_message_safely
 
-        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
-        if not bot_token and settings:
-            bot_token = getattr(settings, "telegram_bot_token", None)
-
-        chat_id = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("VYZN_TELEGRAM_CHAT_ID")
-        if not chat_id and settings:
-            chat_id = getattr(settings, "telegram_chat_id", None)
+        bot_token = os.environ.get("ADMIN_TELEGRAM_BOT_TOKEN")
+        chat_id = os.environ.get("ADMIN_TELEGRAM_CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID")
 
         if not bot_token or not chat_id:
-            logger.info("Telegram notification skipped: bot token or chat ID not set.")
+            logger.info("Payment Telegram alert skipped: dedicated admin bot (ADMIN_TELEGRAM_BOT_TOKEN) not configured.")
             return False
 
         api_url = f"https://api.telegram.org/bot{bot_token}"

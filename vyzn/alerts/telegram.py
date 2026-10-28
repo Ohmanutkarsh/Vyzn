@@ -35,6 +35,8 @@ def is_valid_telegram_chat_id(cid: Any) -> bool:
     s = str(cid).strip().lower()
     if s in INVALID_MOCK_CHATS:
         return False
+    if s.startswith("chat_"):
+        return True
     digits = s.lstrip("-")
     return digits.isdigit() and len(digits) >= 8
 
@@ -514,23 +516,24 @@ class TelegramAlertProvider(AlertProvider):
             else:
                 target_chat_id = str(self.chat_id)
 
-        if not target_chat_id:
-            logger.info("[TELEGRAM ALERT FILTER] No active, linked Telegram chat found for this camera. Dropping push.")
-            return False
-
         # Simulation Mode (when bot token not set or running offline)
         if not active_api_url:
+            sim_chat = target_chat_id or "chat_sim_offline"
             payload = self.build_alert_payload(event, base_url=base_url, camera_name=camera_name)
             thumb_bytes = get_alert_thumbnail_bytes(event, thumb_path=thumb_path, video_path=video_path)
             event_id = str(getattr(event, "event_group_id", "") or getattr(event, "event_id", ""))
             logger.info(
-                f"[TELEGRAM SIMULATION] Photo alert to {target_chat_id}:\n"
+                f"[TELEGRAM SIMULATION] Photo alert to {sim_chat}:\n"
                 f"{payload['caption']}\n"
                 f"Thumbnail: {'Available (' + str(len(thumb_bytes)) + ' bytes)' if thumb_bytes else 'Unavailable'}"
             )
             if self.db and hasattr(self.db, "mark_alert_delivery_success"):
-                self.db.mark_alert_delivery_success(event_id, channel="telegram", recipient_id=str(target_chat_id))
+                self.db.mark_alert_delivery_success(event_id, channel="telegram", recipient_id=str(sim_chat))
             return True
+
+        if not target_chat_id:
+            logger.info("[TELEGRAM ALERT FILTER] No active, linked Telegram chat found for this camera. Dropping push.")
+            return False
 
         # STEP 3 — DUPLICATE PREVENTION & IDEMPOTENCY
         event_id = str(getattr(event, "event_group_id", "") or getattr(event, "event_id", ""))

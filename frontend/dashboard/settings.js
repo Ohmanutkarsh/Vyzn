@@ -265,7 +265,7 @@ let currentTgToken = null;
 // ------------------------------------------------------------------------------
 // When you click 'Connect VYZN Telegram':
 // 1. We ask the server to create a secure 10-minute linking code.
-// 2. We open the official Telegram Bot (@Vyzn_security_bot) in a new browser tab.
+// 2. We open the official Telegram Bot (@Vyzn_security_alert_bot) in a new browser tab.
 // 3. When you tap 'Start' on Telegram, your account is instantly linked!
 // 4. All camera alerts and threat photos will automatically go to your Telegram.
 // ==============================================================================
@@ -360,7 +360,7 @@ async function initTelegramControls() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ bot_token: tokVal, bot_username: 'Vyzn_security_bot' })
+          body: JSON.stringify({ bot_token: tokVal, bot_username: 'Vyzn_security_alert_bot' })
         });
         const d = await res.json();
         if (!res.ok) throw new Error(d.detail || 'Failed to save bot token');

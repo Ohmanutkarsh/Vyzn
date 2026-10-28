@@ -1504,10 +1504,10 @@ class EventDatabase:
             self.update_telegram_link_status(token, "expired")
             return False, "expired_token", link
 
-        # Re-assign chat_id to the authorized user who consumed this link token.
-        # Disconnect any other user account that previously held this chat_id.
-        sql_unlink_others = "UPDATE users SET telegram_chat_id = NULL, telegram_status = 'not_linked' WHERE telegram_chat_id = ? AND id != ?"
-        self.writer.queue.put((sql_unlink_others, (str(chat_id), link["user_id"]), None))
+        # Reject duplicate chat binding to a different account
+        existing_user = self.get_user_by_telegram_chat_id(str(chat_id))
+        if existing_user and existing_user.get("id") != link["user_id"]:
+            return False, "duplicate_chat", link
 
         # Mark link as consumed
         sql_link = "UPDATE telegram_links SET status = 'linked', chat_id = ? WHERE token = ?"

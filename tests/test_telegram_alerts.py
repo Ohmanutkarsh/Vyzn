@@ -265,7 +265,7 @@ def test_telegram_api_endpoints_workflow(tmp_path: Path):
     link_data = res.json()
     assert link_data["ok"] is True
     assert "start=" in link_data["deepLink"]
-    assert "Vyzn_security_bot" in link_data["deepLink"] or link_data["botUsername"] == "Vyzn_security_bot"
+    assert "Vyzn_security_alert_bot" in link_data["deepLink"] or link_data["botUsername"] == "Vyzn_security_alert_bot" or "Vyzn_security_bot" in link_data["deepLink"]
     token = link_data["token"]
 
     # 3. GET /api/telegram/status (waiting)

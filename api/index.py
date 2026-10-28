@@ -1257,17 +1257,62 @@ def update_business_hours(payload: Dict[str, Any]):
 # ---------------------------------------------------------------------------
 # Telegram Integration
 # ---------------------------------------------------------------------------
-DEFAULT_TELEGRAM_BOT_TOKEN = "8818349193:AAEFI3MPw_RDKWk0PvMJMkJUIC24i03l4DA"
-DEFAULT_TELEGRAM_BOT_USERNAME = "Vyzn_security_bot"
+DEFAULT_TELEGRAM_BOT_USERNAME = "Vyzn_security_alert_bot"
+
+def get_telegram_bot_token() -> Optional[str]:
+    """
+    Safely retrieves the Telegram Bot Token without committing secrets to git.
+    Order of precedence:
+    1. TELEGRAM_BOT_TOKEN environment variable (local .env or Vercel config)
+    2. VYZN_TELEGRAM_BOT_TOKEN environment variable
+    3. Authenticated Supabase cloud state (vyzn-cloud-state/billing_state.json)
+    """
+    tok = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
+    if tok and tok.strip():
+        return tok.strip()
+    try:
+        state = get_billing_state()
+        if state and state.get("telegram_bot_token"):
+            return str(state["telegram_bot_token"]).strip()
+    except Exception:
+        pass
+    return None
+
+def get_telegram_bot_username() -> str:
+    tok_user = os.environ.get("TELEGRAM_BOT_USERNAME") or os.environ.get("VYZN_TELEGRAM_BOT_USERNAME")
+    if tok_user and tok_user.strip():
+        return tok_user.strip()
+    try:
+        state = get_billing_state()
+        if state and state.get("telegram_bot_username"):
+            return str(state["telegram_bot_username"]).strip()
+    except Exception:
+        pass
+    return DEFAULT_TELEGRAM_BOT_USERNAME
 
 @app.get("/api/telegram/config")
 def api_telegram_config():
-    bot = os.environ.get("TELEGRAM_BOT_USERNAME") or DEFAULT_TELEGRAM_BOT_USERNAME
-    return {"bot_username": bot, "bot_configured": True, "is_token_set": True, "bot_token_masked": "••••••••"}
+    bot = get_telegram_bot_username()
+    tok = get_telegram_bot_token()
+    is_set = bool(tok)
+    masked = f"{tok[:4]}••••{tok[-4:]}" if (is_set and len(tok) >= 8) else ("Configured" if is_set else "Not Set")
+    return {"bot_username": bot, "bot_configured": is_set, "is_token_set": is_set, "bot_token_masked": masked}
 
 @app.post("/api/telegram/config")
 def api_telegram_config_post(payload: Dict[str, Any]):
-    return {"ok": True, "is_token_set": True, "bot_username": payload.get("bot_username", DEFAULT_TELEGRAM_BOT_USERNAME)}
+    new_token = (payload.get("bot_token") or "").strip()
+    new_username = (payload.get("bot_username") or DEFAULT_TELEGRAM_BOT_USERNAME).strip()
+    if new_token:
+        os.environ["TELEGRAM_BOT_TOKEN"] = new_token
+        try:
+            with _BILLING_LOCK:
+                state = get_billing_state()
+                state["telegram_bot_token"] = new_token
+                state["telegram_bot_username"] = new_username
+                save_billing_state(state)
+        except Exception:
+            pass
+    return {"ok": True, "is_token_set": bool(new_token or get_telegram_bot_token()), "bot_username": new_username}
 
 @app.api_route("/api/telegram/link", methods=["GET", "POST"])
 def api_telegram_link(request: Request):
@@ -1278,7 +1323,7 @@ def api_telegram_link(request: Request):
     sig = hmac.new(b"vyzn_tg_secret_2026", payload_str.encode("utf-8"), hashlib.sha256).hexdigest()[:12]
     b64_payload = base64.urlsafe_b64encode(payload_str.encode("utf-8")).decode("ascii").rstrip("=")
     token = f"tg_{b64_payload}_{sig}"
-    bot = os.environ.get("TELEGRAM_BOT_USERNAME") or DEFAULT_TELEGRAM_BOT_USERNAME
+    bot = get_telegram_bot_username()
     TELEGRAM_TOKENS[token] = {
         "user_id": user.get("id"),
         "email": clean_email,
@@ -1308,7 +1353,9 @@ def api_telegram_simulate_link(payload: Dict[str, Any], request: Request):
 @app.post("/api/v1/alerts/telegram/test-ping")
 def api_telegram_test(request: Request):
     user = get_current_user(request) or CURRENT_USER
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_TELEGRAM_BOT_TOKEN
+    bot_token = get_telegram_bot_token()
+    if not bot_token:
+        raise HTTPException(status_code=400, detail="Telegram bot token is not configured. Please set TELEGRAM_BOT_TOKEN.")
     chat_id = user.get("telegram_chat_id")
     if not chat_id and user.get("email") in ("dirtbike000000@gmail.com", "tapise.utkarsh@gmail.com"):
         chat_id = "6856103038"
@@ -2101,7 +2148,8 @@ def api_submit_quota_order_utr(order_id: str, payload: SubmitUtrRequest, request
         save_billing_state(state)
         
     try:
-        if send_billing_telegram_alert:
+        admin_tg_token = os.environ.get("ADMIN_TELEGRAM_BOT_TOKEN")
+        if admin_tg_token and send_billing_telegram_alert:
             ord_copy = dict(target_ord)
             threading.Thread(target=send_billing_telegram_alert, args=(ord_copy,), daemon=True).start()
     except Exception:
@@ -2729,9 +2777,9 @@ def send_clip_to_telegram(clip_id: str, request: Request):
             if u.get("telegram_chat_id"):
                 chat_id = u["telegram_chat_id"]
                 break
-    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN") or DEFAULT_TELEGRAM_BOT_TOKEN
+    bot_token = get_telegram_bot_token()
     if not bot_token or not chat_id:
-        return {"ok": False, "message": "Telegram not connected. Please message @Vyzn_security_bot first.", "delivered": False}
+        return {"ok": False, "message": f"Telegram not connected. Please message @{get_telegram_bot_username()} first.", "delivered": False}
     clips = get_user_clips(user["email"])
     clip = next((c for c in clips if str(c.get("id")) == clip_id or str(c.get("clip_number")) == clip_id), None)
     cam_name = clip.get("camera_name", "Camera") if clip else "Camera"

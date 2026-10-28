@@ -132,8 +132,8 @@ class EdgeSettings(BaseSettings):
 
     # Alerts
     telegram_bot_token: Optional[str] = None
-    telegram_bot_username: Optional[str] = "Vyzn_security_bot"
-    telegram_chat_id: Optional[str] = "6856103038"
+    telegram_bot_username: Optional[str] = "Vyzn_security_alert_bot"
+    telegram_chat_id: Optional[str] = None
     telegram_webhook_secret: Optional[str] = None
     internal_alert_token: Optional[str] = None
 
