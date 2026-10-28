@@ -1263,31 +1263,31 @@ def get_telegram_bot_token() -> Optional[str]:
     """
     Safely retrieves the Telegram Bot Token without committing secrets to git.
     Order of precedence:
-    1. TELEGRAM_BOT_TOKEN environment variable (local .env or Vercel config)
-    2. VYZN_TELEGRAM_BOT_TOKEN environment variable
-    3. Authenticated Supabase cloud state (vyzn-cloud-state/billing_state.json)
+    1. Authenticated Supabase cloud state (vyzn-cloud-state/billing_state.json)
+    2. TELEGRAM_BOT_TOKEN environment variable (local .env or Vercel config)
+    3. VYZN_TELEGRAM_BOT_TOKEN environment variable
     """
-    tok = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
-    if tok and tok.strip():
-        return tok.strip()
     try:
         state = get_billing_state()
         if state and state.get("telegram_bot_token"):
             return str(state["telegram_bot_token"]).strip()
     except Exception:
         pass
+    tok = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
+    if tok and tok.strip():
+        return tok.strip()
     return None
 
 def get_telegram_bot_username() -> str:
-    tok_user = os.environ.get("TELEGRAM_BOT_USERNAME") or os.environ.get("VYZN_TELEGRAM_BOT_USERNAME")
-    if tok_user and tok_user.strip():
-        return tok_user.strip()
     try:
         state = get_billing_state()
         if state and state.get("telegram_bot_username"):
             return str(state["telegram_bot_username"]).strip()
     except Exception:
         pass
+    tok_user = os.environ.get("TELEGRAM_BOT_USERNAME") or os.environ.get("VYZN_TELEGRAM_BOT_USERNAME")
+    if tok_user and tok_user.strip() and tok_user.strip() != "Vyzn_security_bot":
+        return tok_user.strip()
     return DEFAULT_TELEGRAM_BOT_USERNAME
 
 @app.get("/api/telegram/config")
