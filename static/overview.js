@@ -294,6 +294,31 @@ let clipperCanvas = null;
 let clipperLastFrameData = null;
 let isRecordingClip = false;
 
+function showLiveAlertToast(msg, isSuccess = false) {
+  let toast = document.getElementById('live-alert-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'live-alert-toast';
+    toast.style.cssText = 'position: absolute; top: 16px; left: 50%; transform: translateX(-50%); z-index: 20; padding: 8px 16px; border-radius: 9999px; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); transition: all 250ms ease; pointer-events: none;';
+    const playerFrame = document.getElementById('live-player-frame');
+    if (playerFrame) playerFrame.appendChild(toast);
+  }
+  toast.style.display = 'flex';
+  if (isSuccess) {
+    toast.style.background = 'rgba(16, 185, 129, 0.95)';
+    toast.style.color = '#ffffff';
+    toast.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+  } else {
+    toast.style.background = 'rgba(239, 68, 68, 0.95)';
+    toast.style.color = '#ffffff';
+    toast.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+  }
+  toast.textContent = msg;
+  setTimeout(() => {
+    if (toast) toast.style.display = 'none';
+  }, 4500);
+}
+
 function startInBrowserClipper(stream, cam) {
   if (inBrowserClipperActive) return;
   inBrowserClipperActive = true;
@@ -305,18 +330,27 @@ function startInBrowserClipper(stream, cam) {
   }
   const ctx = clipperCanvas.getContext('2d', { willReadFrequently: true });
   const videoEl = document.getElementById('live-stream-video');
+  const streamImg = document.getElementById('live-stream-img');
 
   const checkMotionInterval = setInterval(async () => {
     const camId = cam.id || cam.camera_id;
-    if (!activeWebcamStream || activeCameraId !== camId) {
+    if (activeCameraId !== camId) {
       clearInterval(checkMotionInterval);
       inBrowserClipperActive = false;
       return;
     }
-    if (!videoEl || videoEl.readyState < 2 || isRecordingClip) return;
+    if (isRecordingClip) return;
+
+    let sourceEl = null;
+    if (videoEl && videoEl.style.display !== 'none' && videoEl.readyState >= 2) {
+      sourceEl = videoEl;
+    } else if (streamImg && streamImg.style.display !== 'none' && streamImg.complete && streamImg.naturalWidth > 0) {
+      sourceEl = streamImg;
+    }
+    if (!sourceEl) return;
 
     try {
-      ctx.drawImage(videoEl, 0, 0, 64, 36);
+      ctx.drawImage(sourceEl, 0, 0, 64, 36);
       const imgData = ctx.getImageData(0, 0, 64, 36);
       const data = imgData.data;
 
@@ -327,35 +361,109 @@ function startInBrowserClipper(stream, cam) {
           const diff = Math.abs(data[i] - clipperLastFrameData[i]) +
                        Math.abs(data[i + 1] - clipperLastFrameData[i + 1]) +
                        Math.abs(data[i + 2] - clipperLastFrameData[i + 2]);
-          if (diff > 50) diffPixels++;
+          if (diff > 22) diffPixels++;
         }
         const motionRatio = diffPixels / totalPixels;
 
-        // Trigger recording on real motion activity (> 3%)
-        if (motionRatio > 0.03 && !isRecordingClip) {
-          const score = Math.min(96, Math.max(72, Math.round(68 + motionRatio * 160)));
-          triggerWebcamClipRecord(stream, cam, score, motionRatio);
+        // Trigger recording on real motion activity (> 1.2% pixels changed)
+        if (motionRatio > 0.012 && !isRecordingClip) {
+          const score = Math.min(98, Math.max(72, Math.round(70 + motionRatio * 220)));
+          triggerWebcamClipRecord(stream, cam, score, motionRatio, sourceEl);
         }
       }
       clipperLastFrameData = data;
     } catch (e) {}
-  }, 350);
+  }, 250);
 }
 
-async function triggerWebcamClipRecord(stream, cam, score, motionRatio) {
+async function triggerWebcamClipRecord(stream, cam, score, motionRatio, sourceElOverride) {
   if (isRecordingClip) return;
   isRecordingClip = true;
 
+  const camId = cam.id || cam.camera_id;
+  const camName = cam.name || 'Camera 1';
+  const clipId = `clip_${Date.now()}`;
+  const clipNum = Math.floor(Math.random() * 9000) + 1000;
+  const nowIso = new Date().toISOString();
+
+  // 1. Capture instant high-res snapshot
+  let thumbDataUrl = '';
   try {
     const videoEl = document.getElementById('live-stream-video');
-    let thumbDataUrl = '';
-    if (videoEl && videoEl.videoWidth > 0) {
+    const streamImg = document.getElementById('live-stream-img');
+    const sourceEl = sourceElOverride || (videoEl && videoEl.style.display !== 'none' && videoEl.readyState >= 2 ? videoEl : streamImg);
+    if (sourceEl) {
       const snapCanvas = document.createElement('canvas');
       snapCanvas.width = 640;
       snapCanvas.height = 360;
       const sCtx = snapCanvas.getContext('2d');
-      sCtx.drawImage(videoEl, 0, 0, 640, 360);
-      thumbDataUrl = snapCanvas.toDataURL('image/jpeg', 0.88);
+      sCtx.drawImage(sourceEl, 0, 0, 640, 360);
+      thumbDataUrl = snapCanvas.toDataURL('image/jpeg', 0.82);
+    }
+  } catch (e) {
+    console.warn('Snapshot capture error:', e);
+  }
+
+  // 2. DISPATCH IMMEDIATE ALERT (0s delay as soon as score >= 70)
+  if (score >= 70) {
+    showLiveAlertToast(`🚨 Instant Alert Sent (Score ${score}) • Recording footage clip...`);
+    fetch('/api/v1/alerts/ingress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        event_id: clipId,
+        camera_id: camId,
+        camera_name: camName,
+        description: `Movement activity detected on ${camName} (Score ${score})`,
+        score: score,
+        tier: 'alert',
+        stage: 'triggered',
+        clip_number: clipNum,
+        thumbnail: thumbDataUrl
+      })
+    }).catch(e => console.warn('Instant alert ingress error:', e));
+  }
+
+  // Also sync snapshot to server for this camera
+  if (thumbDataUrl) {
+    try {
+      const bin = atob(thumbDataUrl.split(',')[1]);
+      const u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      fetch(`/api/cameras/${encodeURIComponent(camId)}/snapshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'image/jpeg' },
+        body: u8.buffer
+      }).catch(() => {});
+    } catch (_) {}
+  }
+
+  // 3. Start MediaRecorder for 6 seconds
+  try {
+    let recordStream = stream;
+    if (!recordStream) {
+      const videoEl = document.getElementById('live-stream-video');
+      const streamImg = document.getElementById('live-stream-img');
+      const srcEl = (videoEl && videoEl.style.display !== 'none' && videoEl.readyState >= 2 ? videoEl : streamImg);
+      if (srcEl) {
+        const streamCanvas = document.createElement('canvas');
+        streamCanvas.width = 640;
+        streamCanvas.height = 360;
+        const scCtx = streamCanvas.getContext('2d');
+        if (typeof streamCanvas.captureStream === 'function') {
+          recordStream = streamCanvas.captureStream(25);
+          const drawFrameInterval = setInterval(() => {
+            if (!isRecordingClip) { clearInterval(drawFrameInterval); return; }
+            try { scCtx.drawImage(srcEl, 0, 0, 640, 360); } catch (_) {}
+          }, 40);
+        }
+      }
+    }
+
+    if (!recordStream) {
+      await finalizeClipRecord(null, cam, clipId, clipNum, score, nowIso, thumbDataUrl);
+      return;
     }
 
     let mimeType = 'video/webm;codecs=vp8';
@@ -369,7 +477,7 @@ async function triggerWebcamClipRecord(stream, cam, score, motionRatio) {
       }
     }
 
-    const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2000000 });
+    const rec = new MediaRecorder(recordStream, { mimeType, videoBitsPerSecond: 2000000 });
     const chunks = [];
     rec.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) chunks.push(e.data);
@@ -378,77 +486,11 @@ async function triggerWebcamClipRecord(stream, cam, score, motionRatio) {
     rec.onstop = async () => {
       try {
         const blob = new Blob(chunks, { type: mimeType });
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const videoDataUrl = reader.result;
-          const clipId = `clip_${Date.now()}`;
-          const clipNum = Math.floor(Math.random() * 9000) + 1000;
-          const nowIso = new Date().toISOString();
-
-          const clipRecord = {
-            id: clipId,
-            clip_id: clipId,
-            clip_number: clipNum,
-            camera_id: cam.id || cam.camera_id,
-            camera_name: cam.name || 'Camera 1',
-            score: score,
-            importance_score: score,
-            tier: score >= 70 ? 'alert' : 'review',
-            summary: `Person/motion detected on ${cam.name || 'Camera 1'}`,
-            description: `Movement activity in camera field of view (Score: ${score}).`,
-            duration_sec: 6.0,
-            fps: 25.0,
-            created_at: nowIso,
-            start_time: nowIso,
-            end_time: nowIso,
-            status: 'raw',
-            thumbnail_url: thumbDataUrl,
-            poster_url: thumbDataUrl,
-            preview_url: thumbDataUrl,
-            video_url: videoDataUrl,
-            video_data_url: videoDataUrl,
-            preview_base64: thumbDataUrl,
-            urls: {
-              thumb: thumbDataUrl,
-              poster: thumbDataUrl,
-              preview: thumbDataUrl,
-              video: videoDataUrl
-            }
-          };
-
-          // 1. Sync clip to backend
-          await fetch('/api/clips/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ clips: [clipRecord] })
-          }).catch(() => {});
-
-          // 2. Dispatch real-time Telegram alert for score >= 70
-          if (score >= 70) {
-            fetch('/api/v1/alerts/ingress', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({
-                event_id: clipId,
-                camera_id: cam.id || cam.camera_id,
-                camera_name: cam.name,
-                description: `Activity detected on ${cam.name} (Score ${score})`,
-                score: score,
-                tier: 'alert'
-              })
-            }).catch(() => {});
-          }
-
-          // 3. Refresh flags in Overview
-          loadFlags();
-        };
-        reader.readAsDataURL(blob);
+        await finalizeClipRecord(blob, cam, clipId, clipNum, score, nowIso, thumbDataUrl);
       } catch (err) {
         console.warn('Clip finalize error:', err);
       } finally {
-        setTimeout(() => { isRecordingClip = false; }, 4000);
+        setTimeout(() => { isRecordingClip = false; }, 3000);
       }
     };
 
@@ -459,8 +501,87 @@ async function triggerWebcamClipRecord(stream, cam, score, motionRatio) {
     }, 6000);
   } catch (err) {
     console.warn('triggerWebcamClipRecord error:', err);
-    isRecordingClip = false;
+    await finalizeClipRecord(null, cam, clipId, clipNum, score, nowIso, thumbDataUrl);
+    setTimeout(() => { isRecordingClip = false; }, 3000);
   }
+}
+
+async function finalizeClipRecord(blob, cam, clipId, clipNum, score, nowIso, thumbDataUrl) {
+  const camId = cam.id || cam.camera_id;
+  const camName = cam.name || 'Camera 1';
+  let localBlobUrl = '';
+  if (blob) {
+    try {
+      localBlobUrl = URL.createObjectURL(blob);
+      window.__vyzn_local_clips = window.__vyzn_local_clips || {};
+      window.__vyzn_local_clips[clipId] = localBlobUrl;
+    } catch (_) {}
+  }
+
+  const clipRecord = {
+    id: clipId,
+    clip_id: clipId,
+    clip_number: clipNum,
+    camera_id: camId,
+    camera_name: camName,
+    score: score,
+    importance_score: score,
+    tier: score >= 70 ? 'alert' : 'review',
+    summary: `Person/motion detected on ${camName}`,
+    description: `Movement activity in camera field of view (Score: ${score}).`,
+    duration_sec: 6.0,
+    durationSec: 6.0,
+    fps: 25.0,
+    created_at: nowIso,
+    start_time: nowIso,
+    end_time: nowIso,
+    status: 'raw',
+    thumbnail_url: thumbDataUrl,
+    thumbnailUrl: thumbDataUrl,
+    poster_url: thumbDataUrl,
+    preview_url: thumbDataUrl,
+    video_url: localBlobUrl || `/api/clips/${clipId}/video`,
+    video_blob_url: localBlobUrl,
+    urls: {
+      thumb: thumbDataUrl,
+      poster: thumbDataUrl,
+      preview: thumbDataUrl,
+      video: localBlobUrl || `/api/clips/${clipId}/video`
+    }
+  };
+
+  // 1. Sync lightweight metadata to backend (compact ~30KB with thumbnail)
+  await fetch('/api/clips/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ clips: [clipRecord] })
+  }).catch(e => console.warn('Clip sync error:', e));
+
+  // 2. DISPATCH SECOND ALERT: Clip Completed
+  if (score >= 70) {
+    fetch('/api/v1/alerts/ingress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        event_id: clipId,
+        camera_id: camId,
+        camera_name: camName,
+        description: `Clip #${clipNum} completed (6.0s at 25 FPS). Saved to VYZN Dashboard.`,
+        score: score,
+        tier: 'alert',
+        stage: 'completed',
+        clip_number: clipNum,
+        duration_sec: 6.0,
+        thumbnail: thumbDataUrl
+      })
+    }).catch(e => console.warn('Clip completed ingress error:', e));
+  }
+
+  // 3. Visual feedback & refresh
+  showLiveAlertToast(`✓ Clip #${clipNum} completed & saved to Clips page`, true);
+  loadFlags();
 }
 
 function switchActiveCamera(cid) {
@@ -579,6 +700,7 @@ async function startLiveStream(cid) {
         clearTimeout(stalledTimer);
         stalledTimer = null;
       }
+      startInBrowserClipper(null, cam);
     };
 
     streamImg.onerror = () => {
