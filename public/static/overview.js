@@ -348,7 +348,8 @@ async function triggerWebcamClipRecord(stream, cam, score, motionRatio, sourceEl
         tier: 'alert',
         stage: 'triggered',
         clip_number: clipNum,
-        thumbnail: thumbDataUrl
+        thumbnail: thumbDataUrl,
+        owner_email: (currentUser && currentUser.email) || 'tapise.utkarsh@gmail.com'
       })
     }).catch(e => console.warn('Instant alert ingress error:', e));
   }
@@ -502,7 +503,8 @@ async function finalizeClipRecord(blob, cam, clipId, clipNum, score, nowIso, thu
         stage: 'completed',
         clip_number: clipNum,
         duration_sec: 6.0,
-        thumbnail: thumbDataUrl
+        thumbnail: thumbDataUrl,
+        owner_email: (currentUser && currentUser.email) || 'tapise.utkarsh@gmail.com'
       })
     }).catch(e => console.warn('Clip completed ingress error:', e));
   }

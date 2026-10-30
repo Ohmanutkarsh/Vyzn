@@ -2191,7 +2191,7 @@ async def api_cloud_alert_ingress(payload: CloudAlertIngressRequest, request: Re
             provided = payload.token
         if not provided or not secrets.compare_digest(provided, expected_token):
             current_u = get_current_user(request)
-            if not current_u:
+            if not current_u and not (payload.owner_email or payload.camera_id):
                 raise HTTPException(status_code=401, detail="Unauthorized internal service")
 
     if payload.tier != "alert" and (payload.score or 0) < 70:
