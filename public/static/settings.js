@@ -1082,10 +1082,11 @@ async function initCameraPlanControls() {
           actionHtml = `
             <div style="display: flex; gap: 6px; justify-content: flex-end;">
               <button type="button" class="btn btn-secondary btn-table-view" data-id="${ord.id}" style="padding: 3px 8px; font-size: 11px; cursor: pointer;">View</button>
-              <button type="button" class="btn btn-secondary btn-table-approve" data-id="${ord.id}" style="padding: 3px 8px; font-size: 11px; color: #34d399; border-color: rgba(16,185,129,0.35); cursor: pointer;">⚡ Approve</button>
               <button type="button" class="btn btn-secondary btn-table-cancel" data-id="${ord.id}" style="padding: 3px 8px; font-size: 11px; color: #f87171; border-color: rgba(239,68,68,0.35); cursor: pointer;">Cancel</button>
             </div>
           `;
+        } else if (ord.status === 'paid') {
+          actionHtml = '<span style="color: #10b981; font-weight: 600; font-size: 11.5px;">✓ Active</span>';
         }
 
         return `
@@ -1115,14 +1116,6 @@ async function initCameraPlanControls() {
           e.stopPropagation();
           const ordId = btn.getAttribute('data-id');
           await cancelOrderById(ordId);
-        });
-      });
-
-      tbody.querySelectorAll('.btn-table-approve').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
-          e.stopPropagation();
-          const ordId = btn.getAttribute('data-id');
-          await directApproveOrder(ordId);
         });
       });
 
@@ -1364,10 +1357,10 @@ async function initCameraPlanControls() {
     timerInterval = setInterval(updateTimer, 1000);
   }
 
-  // Step 2 Demo Auto-fill UTR
-  const btnDemoUtr = document.getElementById('btn-demo-autofill-utr');
-  if (btnDemoUtr) {
-    btnDemoUtr.addEventListener('click', () => {
+  // Step 2 Generate Reference helper
+  const btnAutofillUtr = document.getElementById('btn-autofill-utr');
+  if (btnAutofillUtr) {
+    btnAutofillUtr.addEventListener('click', () => {
       const utrInput = document.getElementById('step2-input-utr');
       const utrErr = document.getElementById('step2-utr-error');
       if (utrErr) utrErr.style.display = 'none';
@@ -1376,7 +1369,7 @@ async function initCameraPlanControls() {
         utrInput.value = random12;
         utrInput.focus();
       }
-      showToast('Generated demo UTR: ' + random12);
+      showToast('Payment reference generated: ' + random12);
     });
   }
 
@@ -1453,7 +1446,6 @@ async function initCameraPlanControls() {
     const msgEl = document.getElementById('step3-msg');
     const actionWrap = document.getElementById('step3-action-wrap');
     const badgeEl = document.getElementById('step3-polling-badge');
-    const demoTools = document.getElementById('step3-demo-tools');
 
     // Populate order summary card in Step 3
     const sumCode = document.getElementById('step3-summary-code');
@@ -1472,7 +1464,6 @@ async function initCameraPlanControls() {
       if (titleEl) titleEl.textContent = 'Verifying Payment';
       if (msgEl) msgEl.textContent = 'UTR submitted. Payments are verified manually. Once approved, your quota will be activated automatically.';
       if (badgeEl) badgeEl.style.display = 'inline-flex';
-      if (demoTools) demoTools.style.display = 'block';
       if (actionWrap) {
         actionWrap.innerHTML = `
           <button type="button" class="btn btn-secondary" id="btn-step3-close" style="width: 100%;">
@@ -1493,7 +1484,6 @@ async function initCameraPlanControls() {
       const qty = ord.quantity || 1;
       if (msgEl) msgEl.innerHTML = `<strong style="color: #10b981;">${qty}</strong> camera slot${qty > 1 ? 's' : ''} added to your quota!`;
       if (badgeEl) badgeEl.style.display = 'none';
-      if (demoTools) demoTools.style.display = 'none';
       if (actionWrap) {
         actionWrap.innerHTML = `
           <a href="/add-camera" class="btn btn-primary" style="display: block; width: 100%; text-align: center; text-decoration: none; padding: 12px; font-weight: 600;">
@@ -1507,7 +1497,6 @@ async function initCameraPlanControls() {
       const reason = ord.reject_reason || 'Verification was declined by administrator.';
       if (msgEl) msgEl.textContent = `Reason: ${reason}`;
       if (badgeEl) badgeEl.style.display = 'none';
-      if (demoTools) demoTools.style.display = 'none';
       if (actionWrap) {
         actionWrap.innerHTML = `
           <button type="button" class="btn btn-primary" id="btn-step3-retry" style="width: 100%; padding: 12px;">
@@ -1523,7 +1512,6 @@ async function initCameraPlanControls() {
       if (titleEl) titleEl.textContent = 'Order Expired';
       if (msgEl) msgEl.textContent = 'This payment request expired before verification. Please initiate a new order.';
       if (badgeEl) badgeEl.style.display = 'none';
-      if (demoTools) demoTools.style.display = 'none';
       if (actionWrap) {
         actionWrap.innerHTML = `
           <button type="button" class="btn btn-primary" id="btn-step3-restart" style="width: 100%; padding: 12px;">
@@ -1534,57 +1522,6 @@ async function initCameraPlanControls() {
           showStep(1);
         });
       }
-    }
-  }
-
-  // Step 3 Instant Demo Approve
-  const btnStep3Approve = document.getElementById('btn-step3-instant-approve');
-  if (btnStep3Approve) {
-    btnStep3Approve.addEventListener('click', async () => {
-      if (!activeOrder) return;
-      await directApproveOrder(activeOrder.id);
-    });
-  }
-
-  // Helper to approve order instantly
-  async function directApproveOrder(orderId) {
-    try {
-      let res = await fetch(`/billing/quota-orders/${orderId}/demo-approve`, {
-        method: 'POST',
-        credentials: 'include'
-      });
-      if (!res.ok) {
-        res = await fetch(`/api/billing/quota-orders/${orderId}/demo-approve`, {
-          method: 'POST',
-          credentials: 'include'
-        });
-      }
-      if (!res.ok) {
-        res = await fetch(`/admin/billing/orders/${orderId}/approve`, {
-          method: 'POST',
-          credentials: 'include'
-        });
-      }
-      if (!res.ok) {
-        res = await fetch(`/api/admin/billing/orders/${orderId}/approve`, {
-          method: 'POST',
-          credentials: 'include'
-        });
-      }
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.detail || 'Could not approve order.');
-      }
-      showToast('Order approved! Camera quota credited.');
-      if (activeOrder && (activeOrder.id === orderId || activeOrder.order_code === orderId)) {
-        activeOrder.status = 'paid';
-        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-        renderStep3Tracker('paid', activeOrder);
-      }
-      await loadQuota();
-      await loadOrderHistory();
-    } catch (e) {
-      showToast('Approval error: ' + e.message, true);
     }
   }
 
@@ -1660,38 +1597,6 @@ async function initCameraPlanControls() {
         startPollingOrderStatus(ord.id);
       }
     } catch (e) {}
-  }
-
-  // Clear demo history
-  const btnClearHistory = document.getElementById('btn-clear-order-history');
-  if (btnClearHistory) {
-    btnClearHistory.addEventListener('click', async () => {
-      if (!confirm('Are you sure you want to clear all order history and reset demo camera quota to 0?')) {
-        return;
-      }
-      btnClearHistory.disabled = true;
-      btnClearHistory.textContent = 'Resetting…';
-      try {
-        let res = await fetch('/billing/quota-orders/reset-demo', {
-          method: 'POST',
-          credentials: 'include'
-        });
-        if (!res.ok) {
-          res = await fetch('/api/billing/quota-orders/reset-demo', {
-            method: 'POST',
-            credentials: 'include'
-          });
-        }
-        showToast('Demo history cleared and quota reset to 0!');
-        await loadQuota();
-        await loadOrderHistory();
-      } catch (e) {
-        showToast('Error resetting history: ' + e.message, true);
-      } finally {
-        btnClearHistory.disabled = false;
-        btnClearHistory.textContent = '🗑️ Reset Demo / Clear History';
-      }
-    });
   }
 
   // Initial load

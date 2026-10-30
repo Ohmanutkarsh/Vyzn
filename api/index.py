@@ -2647,6 +2647,64 @@ def api_admin_clear_history(request: Request):
 
     return {"ok": True, "message": "All order history cleared and demo reset!"}
 
+def send_admin_billing_telegram_alert_sync(order: Dict[str, Any]) -> bool:
+    """
+    Directly and synchronously sends the Telegram approval alert to @Vyzn_admin_bot
+    with inline Approve/Reject buttons without relying on threads.
+    """
+    bot_token = get_admin_telegram_bot_token()
+    chat_id = get_admin_telegram_chat_id()
+    if not bot_token or not chat_id:
+        return False
+
+    amount_rupees = order.get("amount_paise", 0) / 100.0
+    order_id = str(order.get("id"))
+    order_code = order.get("order_code", "VYZ-????")
+    tenant = order.get("user_email") or order.get("tenant_id") or "Unknown"
+    qty = order.get("quantity", 1)
+    utr = order.get("utr", "N/A")
+    sub_time = order.get("submitted_at") or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    text = (
+        "💳 *New VYZN Camera Quota Payment Submitted*\n\n"
+        f"• *Order Code*: `{order_code}`\n"
+        f"• *Tenant / Account*: `{tenant}`\n"
+        f"• *Cameras Requested*: *+{qty}* camera(s)\n"
+        f"• *Amount*: *₹{amount_rupees:,.2f}*\n"
+        f"• *12-Digit UTR*: `{utr}`\n"
+        f"• *Submitted At*: {sub_time}\n\n"
+        "⚠️ *Manual Verification Required:*\n"
+        f"_Match amount (₹{amount_rupees:,.2f}), UTR (`{utr}`), and order code in your UPI app before approving._"
+    )
+
+    inline_keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": f"✅ Approve (+{qty} cams)", "callback_data": f"admin_approve_{order_id}"},
+                {"text": "❌ Reject", "callback_data": f"admin_reject_{order_id}"}
+            ],
+            [
+                {"text": "📊 Open Admin Console", "url": "https://vyzn-security.vercel.app/admin/billing"}
+            ]
+        ]
+    }
+
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={
+                "chat_id": str(chat_id),
+                "text": text,
+                "parse_mode": "Markdown",
+                "reply_markup": inline_keyboard
+            },
+            timeout=5.0
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        print(f"[AdminBot] Telegram alert error: {e}")
+        return False
+
 @app.post("/billing/quota-orders/{order_id}/submit-utr")
 @app.post("/api/billing/quota-orders/{order_id}/submit-utr")
 def api_submit_quota_order_utr(order_id: str, payload: SubmitUtrRequest, request: Request):
@@ -2667,7 +2725,7 @@ def api_submit_quota_order_utr(order_id: str, payload: SubmitUtrRequest, request
         
         target_ord = None
         for o in state.get("orders", []):
-            if o.get("id") == order_id:
+            if o.get("id") == order_id or o.get("order_code") == order_id:
                 target_ord = o
                 break
                 
@@ -2678,6 +2736,10 @@ def api_submit_quota_order_utr(order_id: str, payload: SubmitUtrRequest, request
             raise HTTPException(status_code=403, detail="Permission denied")
             
         if target_ord.get("status") == "submitted":
+            try:
+                send_admin_billing_telegram_alert_sync(target_ord)
+            except Exception:
+                pass
             return target_ord
             
         if target_ord.get("status") != "awaiting_payment":
@@ -2714,14 +2776,10 @@ def api_submit_quota_order_utr(order_id: str, payload: SubmitUtrRequest, request
         save_billing_state(state)
         
     try:
-        admin_tg_token = get_admin_telegram_bot_token()
-        if admin_tg_token and send_billing_telegram_alert:
-            ord_copy = dict(target_ord)
-            threading.Thread(target=send_billing_telegram_alert, args=(ord_copy,), daemon=True).start()
-    except Exception:
-        pass
+        send_admin_billing_telegram_alert_sync(target_ord)
+    except Exception as e:
+        print(f"[AdminBot] Synchronous alert dispatch error: {e}")
 
-        
     return target_ord
 
 @app.get("/admin/billing", response_class=HTMLResponse)
