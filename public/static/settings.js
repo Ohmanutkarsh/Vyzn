@@ -997,9 +997,17 @@ async function initCameraPlanControls() {
   // Load and display Quota
   async function loadQuota() {
     try {
-      let res = await fetch('/billing/quota', { credentials: 'include' });
+      let res = await fetch(`/billing/quota?t=${Date.now()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
       if (!res.ok) {
-        res = await fetch('/api/billing/quota', { credentials: 'include' });
+        res = await fetch(`/api/billing/quota?t=${Date.now()}`, {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
       }
       if (!res.ok) return;
       const data = await res.json();
@@ -1040,9 +1048,17 @@ async function initCameraPlanControls() {
     if (!tbody) return;
 
     try {
-      let res = await fetch('/billing/quota-orders', { credentials: 'include' });
+      let res = await fetch(`/billing/quota-orders?t=${Date.now()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
       if (!res.ok) {
-        res = await fetch('/api/billing/quota-orders', { credentials: 'include' });
+        res = await fetch(`/api/billing/quota-orders?t=${Date.now()}`, {
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
       }
       if (!res.ok) {
         tbody.innerHTML = '<tr><td colspan="7" style="padding: 14px 10px; text-align: center; color: var(--text-3);">Could not load orders.</td></tr>';

@@ -2437,7 +2437,15 @@ def api_get_billing_quota(request: Request):
     user = get_current_user(request) or CURRENT_USER
     tenant_id = user.get("id") or user.get("email")
     email = user.get("email")
-    return get_tenant_billing_quota(tenant_id, email)
+    quota = get_tenant_billing_quota(tenant_id, email)
+    return JSONResponse(
+        content=quota,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
 
 @app.post("/billing/quota-orders")
 @app.post("/api/billing/quota-orders")

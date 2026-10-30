@@ -39,22 +39,30 @@ document.addEventListener('DOMContentLoaded', async () => {
   const titleEl = document.getElementById('page-title-text');
   if (titleEl) titleEl.textContent = 'Add camera';
 
+  await loadCameraQuota();
   attachStep1Events();
   attachStep2Events();
   attachStep3Events();
   attachStepperNavigation();
-  loadCameraQuota();
 
   window.runConnectionTest = runConnectionTest;
 });
 
-let currentQuota = { purchased: 0, used: 0, available: 0 };
+let currentQuota = null;
 
 async function loadCameraQuota() {
   try {
-    let res = await fetch('/billing/quota', { credentials: 'include' });
+    let res = await fetch(`/billing/quota?t=${Date.now()}`, {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' }
+    });
     if (!res.ok) {
-      res = await fetch('/api/billing/quota', { credentials: 'include' });
+      res = await fetch(`/api/billing/quota?t=${Date.now()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      });
     }
     if (!res.ok) {
       console.warn('Could not load camera quota from server');
