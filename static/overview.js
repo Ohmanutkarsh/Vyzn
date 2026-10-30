@@ -216,78 +216,6 @@ async function checkEdgeServer() {
   return edgeBaseUrl;
 }
 
-function stopCurrentWebcamStream() {
-  if (currentStreamTrack) {
-    try {
-      currentStreamTrack.getTracks().forEach(t => t.stop());
-    } catch (e) {}
-    currentStreamTrack = null;
-  }
-  const videoEl = document.getElementById('live-stream-video');
-  if (videoEl) {
-    videoEl.srcObject = null;
-    videoEl.style.display = 'none';
-  }
-}
-
-async function activateBrowserWebcam(cam, cid) {
-  const videoEl = document.getElementById('live-stream-video');
-  const streamImg = document.getElementById('live-stream-img');
-  const connectingOverlay = document.getElementById('player-connecting-overlay');
-  const offlineOverlay = document.getElementById('player-offline-overlay');
-  const statusBadge = document.getElementById('player-status-badge');
-  const pulseDot = document.getElementById('live-pulse-dot');
-
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    return false;
-  }
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 20, max: 20 }
-      },
-      audio: false
-    });
-
-    if (activeCameraId !== cid) {
-      stream.getTracks().forEach(t => t.stop());
-      return false;
-    }
-
-    currentStreamTrack = stream;
-    if (videoEl) {
-      videoEl.srcObject = stream;
-      videoEl.style.display = 'block';
-      if (streamImg) streamImg.style.display = 'none';
-
-      const markLive = () => {
-        if (connectingOverlay) connectingOverlay.style.display = 'none';
-        if (offlineOverlay) offlineOverlay.style.display = 'none';
-        if (statusBadge) statusBadge.textContent = 'Live';
-        if (pulseDot) pulseDot.style.display = 'inline-block';
-        if (stalledTimer) {
-          clearTimeout(stalledTimer);
-          stalledTimer = null;
-        }
-      };
-
-      videoEl.onloadedmetadata = () => {
-        videoEl.play().then(markLive).catch(markLive);
-      };
-      if (videoEl.readyState >= 1) {
-        videoEl.play().then(markLive).catch(markLive);
-      }
-    }
-    return true;
-  } catch (err) {
-    console.warn('Browser webcam getUserMedia fallback triggered:', err);
-    return false;
-  }
-}
-
 let activeWebcamStream = null;
 let inBrowserClipperActive = false;
 let clipperCanvas = null;
@@ -588,7 +516,6 @@ async function finalizeClipRecord(blob, cam, clipId, clipNum, score, nowIso, thu
 
 function switchActiveCamera(cid) {
   if (cid === activeCameraId) return;
-  stopCurrentWebcamStream();
   activeCameraId = cid;
   renderPicker();
   renderStrip();
@@ -599,8 +526,6 @@ function switchActiveCamera(cid) {
 async function startLiveStream(cid) {
   const cam = camerasList.find(c => (c.id || c.camera_id) === cid);
   if (!cam) return;
-
-  stopCurrentWebcamStream();
 
   const nameEl = document.getElementById('player-camera-name');
   if (nameEl) nameEl.textContent = cam.name;
@@ -617,20 +542,54 @@ async function startLiveStream(cid) {
   if (offlineOverlay) offlineOverlay.style.display = 'none';
   if (stalledTimer) clearTimeout(stalledTimer);
 
-  // Always start connecting live stream immediately upon entering website
+  // Connecting overlay while establishing stream
   if (connectingOverlay) connectingOverlay.style.display = 'flex';
   if (statusBadge) statusBadge.textContent = 'Connecting...';
   if (pulseDot) pulseDot.style.display = 'none';
 
+  const isWebcam = cam.rtsp_url === '0' || cam.rtsp_url === 'webcam' || String(cam.rtsp_url || '').toLowerCase().includes('webcam');
+
+  if (isWebcam) {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        if (connectingOverlay) connectingOverlay.style.display = 'flex';
+        if (statusBadge) statusBadge.textContent = 'Connecting...';
+
+        if (activeWebcamStream) {
+          try { activeWebcamStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+          activeWebcamStream = null;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 25, max: 30 } },
+          audio: false
+        });
+        activeWebcamStream = stream;
+
+        if (videoEl) {
+          videoEl.srcObject = stream;
+          videoEl.style.display = 'block';
+          if (streamImg) streamImg.style.display = 'none';
+          if (connectingOverlay) connectingOverlay.style.display = 'none';
+          if (offlineOverlay) offlineOverlay.style.display = 'none';
+          if (statusBadge) statusBadge.textContent = 'Live';
+          if (pulseDot) pulseDot.style.display = 'inline-block';
+          await videoEl.play().catch(e => console.warn('Video play error:', e));
+
+          startInBrowserClipper(stream, cam);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('getUserMedia webcam error, falling back to stream:', err);
+    }
+  }
+
   if (videoEl) videoEl.style.display = 'none';
   if (streamImg) streamImg.style.display = 'block';
 
-  const isWebcam = String(cam.rtsp_url) === '0' || cam.source_type === 'webcam' || (cam.name && cam.name.toLowerCase().includes('webcam'));
-  const isDirectHttp = cam.rtsp_url && (cam.rtsp_url.startsWith('http://') || cam.rtsp_url.startsWith('https://'));
-
   const edge = await checkEdgeServer();
 
-  // Find corresponding local edge camera if ID differs (e.g. cloud assigned cam_81559 while local edge has cam_camera_1_...)
   let localCid = cid;
   if (edge && Array.isArray(edgeCameras) && edgeCameras.length > 0) {
     const match = edgeCameras.find(c => (c.id || c.camera_id) === cid)
@@ -641,21 +600,12 @@ async function startLiveStream(cid) {
     }
   }
 
-  // If this is a hardware webcam, try direct browser webcam first for zero-latency 20 fps authentic video
-  if (isWebcam) {
-    const started = await activateBrowserWebcam(cam, cid);
-    if (started) return;
-  }
-
   const streamCandidates = [];
   if (edge) {
     streamCandidates.push(`${edge}/api/cameras/${localCid}/stream?t=${Date.now()}`);
     if (localCid !== cid) {
       streamCandidates.push(`${edge}/api/cameras/${cid}/stream?t=${Date.now()}`);
     }
-  }
-  if (isDirectHttp) {
-    streamCandidates.push(cam.rtsp_url);
   }
   streamCandidates.push(`/api/cameras/${cid}/stream?t=${Date.now()}`);
 
@@ -667,11 +617,6 @@ async function startLiveStream(cid) {
         const nextUrl = streamCandidates[candidateIdx++];
         streamImg.src = nextUrl;
       } else {
-        if (isWebcam) {
-          const started = await activateBrowserWebcam(cam, cid);
-          if (started) return;
-        }
-
         if (connectingOverlay) connectingOverlay.style.display = 'none';
         if (offlineOverlay) {
           offlineOverlay.style.display = 'flex';
@@ -683,13 +628,14 @@ async function startLiveStream(cid) {
         if (cam.snapshot_url) {
           streamImg.src = `${cam.snapshot_url}?t=${Date.now()}`;
         }
-        // Retry reconnecting automatically after 4 seconds if page is visible
+        // Retry reconnecting automatically after 2 seconds
         if (stalledTimer) clearTimeout(stalledTimer);
         stalledTimer = setTimeout(() => {
-          if (activeCameraId === cid && document.visibilityState === 'visible') {
-            startLiveStream(cid);
+          if (activeCameraId === cid) {
+            candidateIdx = 0;
+            tryNextCandidate();
           }
-        }, 4000);
+        }, 2000);
       }
     };
 
@@ -714,15 +660,12 @@ async function startLiveStream(cid) {
 }
 
 function handleVisibilityChange() {
-  const streamImg = document.getElementById('live-stream-img');
-
-  if (document.visibilityState === 'hidden') {
-    // Drop stream immediately to save bandwidth & CPU
-    if (streamImg) streamImg.src = '';
-    stopCurrentWebcamStream();
-  } else {
-    // Tab active again: resume stream
-    if (activeCameraId) startLiveStream(activeCameraId);
+  // Keep live feed persistent across page navigation and tab changes without disconnecting
+  if (document.visibilityState === 'visible' && activeCameraId) {
+    const streamImg = document.getElementById('live-stream-img');
+    if (!streamImg || !streamImg.src || streamImg.src === '' || streamImg.complete === false) {
+      startLiveStream(activeCameraId);
+    }
   }
 }
 

@@ -24,9 +24,15 @@
     <main class="shell-content" id="main-content">
 
       <!-- Page Header -->
-      <div class="clips-page-header">
-        <h1 class="clips-page-title" id="clips-title">Important clips</h1>
-        <span class="clips-count-badge" id="clips-summary-badge">Loading…</span>
+      <div class="clips-page-header" style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <h1 class="clips-page-title" id="clips-title" style="margin: 0;">Important clips</h1>
+          <span class="clips-count-badge" id="clips-summary-badge">Loading…</span>
+        </div>
+        <button type="button" class="btn btn-secondary" id="btn-delete-all-clips" title="Purge all historical clips from cloud and storage" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.35); font-size: 13px; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 6px; cursor: pointer;">
+          <span>🗑️</span>
+          <span>Delete All Clips</span>
+        </button>
       </div>
 
       <!-- Mobile Filters Trigger Button -->

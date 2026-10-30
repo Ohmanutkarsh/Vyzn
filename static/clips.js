@@ -32,17 +32,121 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadCamerasList();
   readFiltersFromUrl();
   bindFilterEvents();
+  bindDeleteAllButton();
   await loadClips();
 
   // Check if deep link opened specific clip: /clips/:id
   checkDeepLink();
 });
 
+function showToast(message, isError = false) {
+  let toast = document.getElementById('toast-notification');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast-notification';
+    toast.style.cssText = 'position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; background: #18181b; border: 1px solid var(--action); border-radius: 8px; color: #fff; z-index: 9999; font-size: 14px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: none;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.style.borderColor = isError ? '#ef4444' : 'var(--action)';
+  toast.style.color = isError ? '#ef4444' : '#fff';
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 3500);
+}
+
+function bindDeleteAllButton() {
+  const btn = document.getElementById('btn-delete-all-clips');
+  if (!btn) return;
+  btn.onclick = async () => {
+    const confirmed = window.confirm('Are you sure you want to delete all clips? This will permanently delete all clips from cloud and local storage.');
+    if (!confirmed) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Deleting…';
+
+    try {
+      const edge = (typeof window !== 'undefined' && window.__vyzn_edge_url) || '';
+      if (edge) {
+        fetch(`${edge}/api/clips/purge-all`, {
+          method: 'POST',
+          headers: { 'X-Security-Pin': '202600' },
+          mode: 'cors'
+        }).catch(() => {});
+      }
+
+      const res = await fetch('/api/clips/purge-all', {
+        method: 'POST',
+        headers: { 'X-Security-Pin': '202600' },
+        credentials: 'include'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        if (typeof window !== 'undefined') {
+          window.__vyzn_local_clips = {};
+        }
+        showToast(data.message || 'All clips deleted successfully.');
+        await loadClips();
+      } else {
+        showToast(data.detail || 'Failed to delete clips.', true);
+      }
+    } catch (err) {
+      showToast('Network error while deleting clips.', true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>🗑️</span><span>Delete All Clips</span>';
+    }
+  };
+}
+
+let edgeBaseUrl = null;
+
+async function checkEdgeServer() {
+  if (edgeBaseUrl !== null) return edgeBaseUrl;
+  if (window.location.protocol === 'https:') {
+    edgeBaseUrl = '';
+    return edgeBaseUrl;
+  }
+  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.port === '8000') {
+    edgeBaseUrl = '';
+    return edgeBaseUrl;
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch('http://127.0.0.1:8000/api/status', {
+      method: 'GET',
+      mode: 'cors',
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.ok) {
+      edgeBaseUrl = 'http://127.0.0.1:8000';
+      return edgeBaseUrl;
+    }
+  } catch (e) {}
+  edgeBaseUrl = '';
+  return edgeBaseUrl;
+}
+
 /**
  * Loads cameras to populate the filter dropdowns.
  */
 async function loadCamerasList() {
   try {
+    const edge = await checkEdgeServer();
+    if (edge) {
+      try {
+        const edgeRes = await fetch(`${edge}/api/cameras`, { mode: 'cors' });
+        if (edgeRes.ok) {
+          const edgeCams = await edgeRes.json();
+          if (Array.isArray(edgeCams) && edgeCams.length > 0) {
+            allCameras = edgeCams;
+            populateCameraDropdowns();
+            return;
+          }
+        }
+      } catch (e) {}
+    }
     const res = await fetch('/api/cameras');
     if (res.ok) {
       allCameras = await res.json();
@@ -327,10 +431,51 @@ async function loadClips() {
   }
 
   try {
-    const res = await fetch(`/api/clips?${params.toString()}`, { credentials: 'include' });
-    if (!res.ok) throw new Error('Failed to load clips');
-    const data = await res.json();
+    const edge = await checkEdgeServer();
+    let data = null;
+    if (edge) {
+      try {
+        const edgeRes = await fetch(`${edge}/api/clips?${params.toString()}`, { mode: 'cors' });
+        if (edgeRes.ok) {
+          data = await edgeRes.json();
+          if (data && data.clips && data.clips.length > 0) {
+            // Sync to cloud in background
+            fetch('/api/clips/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ clips: data.clips })
+            }).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn('Edge clips fetch error:', e);
+      }
+    }
+
+    if (!data) {
+      const res = await fetch(`/api/clips?${params.toString()}`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load clips');
+      data = await res.json();
+    }
+
     loadedClips = data.clips || [];
+    if (edge) {
+      window.__vyzn_edge_url = edge;
+      loadedClips.forEach(clip => {
+        if (clip.thumbnailUrl && clip.thumbnailUrl.startsWith('/')) clip.thumbnailUrl = `${edge}${clip.thumbnailUrl}`;
+        if (clip.posterUrl && clip.posterUrl.startsWith('/')) clip.posterUrl = `${edge}${clip.posterUrl}`;
+        if (clip.previewUrl && clip.previewUrl.startsWith('/')) clip.previewUrl = `${edge}${clip.previewUrl}`;
+        if (clip.videoUrl && clip.videoUrl.startsWith('/')) clip.videoUrl = `${edge}${clip.videoUrl}`;
+        if (clip.urls) {
+          if (clip.urls.thumb && clip.urls.thumb.startsWith('/')) clip.urls.thumb = `${edge}${clip.urls.thumb}`;
+          if (clip.urls.poster && clip.urls.poster.startsWith('/')) clip.urls.poster = `${edge}${clip.urls.poster}`;
+          if (clip.urls.preview && clip.urls.preview.startsWith('/')) clip.urls.preview = `${edge}${clip.urls.preview}`;
+          if (clip.urls.video && clip.urls.video.startsWith('/')) clip.urls.video = `${edge}${clip.urls.video}`;
+        }
+      });
+    }
+
     const total = data.total !== undefined ? data.total : loadedClips.length;
 
     // In simple terms: update the camera dropdown so any cameras with existing clips can be selected
@@ -362,8 +507,7 @@ async function loadClips() {
 
     grid.innerHTML = loadedClips.map(clip => renderClipCard({ clip })).join('');
 
-    // Start managing inline video previews so visible clips auto-play up to 3 at once
-    initInlinePreviews(grid);
+    // Static poster thumbnails only on cards (no heavy inline decoders) to keep browser 100% smooth
 
     // Attach card click handlers to open drawer
     grid.querySelectorAll('.clip-card').forEach(card => {
@@ -385,113 +529,8 @@ async function loadClips() {
   }
 }
 
-// Global observer variable that monitors which preview videos are currently visible on screen
-let inlinePreviewObserver = null;
-
-// This function manages inline video playback so clips automatically play when visible on screen.
-// To keep the computer running fast and smooth, at most 3 videos can play at the same time.
 function initInlinePreviews(container) {
-  // Clean up any previous screen observer before setting up new clips
-  if (inlinePreviewObserver) {
-    inlinePreviewObserver.disconnect();
-  }
-
-  // Keeps track of the videos that are currently playing right now (max 3)
-  const activePlaying = new Set();
-  // Keeps track of all videos currently in view on the screen
-  const visibleVideos = [];
-
-  // Helper function to balance playback: stop out-of-view videos and start visible ones up to 3
-  const syncPlayback = () => {
-    // Stop any video that has scrolled out of view
-    for (const vid of Array.from(activePlaying)) {
-      if (!visibleVideos.includes(vid)) {
-        vid.pause();
-        vid.style.opacity = '0';
-        activePlaying.delete(vid);
-      }
-    }
-
-    // Play visible videos up to the 3-video maximum limit
-    for (const vid of visibleVideos) {
-      if (activePlaying.size >= 3) break;
-      if (!activePlaying.has(vid)) {
-        // Set video source URL right before playing to save bandwidth
-        if (!vid.src && vid.dataset.src) {
-          vid.src = vid.dataset.src;
-        }
-        vid.play().then(() => {
-          vid.style.opacity = '1';
-          activePlaying.add(vid);
-        }).catch(() => {
-          // Browser may block automatic playback; silently ignore
-        });
-      }
-    }
-  };
-
-  // Watch the screen to detect when clip cards appear or scroll away
-  inlinePreviewObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      const vid = entry.target;
-      if (entry.isIntersecting) {
-        if (!visibleVideos.includes(vid)) {
-          visibleVideos.push(vid);
-        }
-      } else {
-        const idx = visibleVideos.indexOf(vid);
-        if (idx !== -1) {
-          visibleVideos.splice(idx, 1);
-        }
-      }
-    });
-    syncPlayback();
-  }, {
-    root: null,
-    rootMargin: '50px',
-    threshold: 0.3 // Trigger when at least 30% of the clip is visible
-  });
-
-  // Find all inline preview videos in the gallery
-  const videoElements = container.querySelectorAll('.clip-inline-preview');
-  videoElements.forEach(vid => {
-    // Observe this video for screen visibility
-    inlinePreviewObserver.observe(vid);
-
-    // Track playback time to move the blue playhead marker across the bottom seek bar
-    const card = vid.closest('.clip-card');
-    const playhead = card ? card.querySelector('.clip-playhead-marker') : null;
-    if (playhead) {
-      vid.addEventListener('timeupdate', () => {
-        if (vid.duration > 0) {
-          const pct = (vid.currentTime / vid.duration) * 100;
-          playhead.style.left = `${pct}%`;
-        }
-      });
-    }
-
-    // Desktop hover support: preview plays immediately if user moves the mouse over the card
-    if (card) {
-      card.addEventListener('mouseenter', () => {
-        if (!vid.src && vid.dataset.src) vid.src = vid.dataset.src;
-        if (!activePlaying.has(vid)) {
-          // If already at 3 playing, pause the oldest one to make room
-          if (activePlaying.size >= 3) {
-            const oldest = activePlaying.values().next().value;
-            if (oldest) {
-              oldest.pause();
-              oldest.style.opacity = '0';
-              activePlaying.delete(oldest);
-            }
-          }
-          vid.play().then(() => {
-            vid.style.opacity = '1';
-            activePlaying.add(vid);
-          }).catch(() => {});
-        }
-      });
-    }
-  });
+  // Gallery uses static poster thumbnails only for 100% smooth scrolling and zero video decoder lag.
 }
 
 /**

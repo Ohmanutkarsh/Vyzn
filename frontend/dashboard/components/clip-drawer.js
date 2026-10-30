@@ -570,19 +570,45 @@ function renderDrawerContent(clip) {
 
   // In simple terms: immediately set the poster snapshot image so the preview is visible right away even before video buffers
   let posterUrl = clip.posterUrl || clip.thumbnailUrl || (clip.urls && clip.urls.poster) || `/api/clips/${encodeURIComponent(clip.id)}/poster.jpg`;
-  let videoSrc = clip.video_data_url || clip.video_url || clip.videoUrl || (clip.urls && clip.urls.video) || `/api/clips/${encodeURIComponent(clip.id)}/video`;
+  
+  let videoSrc = '';
+  if (clip.video_blob_url) {
+    videoSrc = clip.video_blob_url;
+  } else if (typeof window !== 'undefined' && window.__vyzn_local_clips && window.__vyzn_local_clips[clip.id]) {
+    videoSrc = window.__vyzn_local_clips[clip.id];
+  } else if (clip.video_data_url && clip.video_data_url.startsWith('data:video/')) {
+    try {
+      const parts = clip.video_data_url.split(',');
+      const mime = parts[0].match(/:(.*?);/)[1] || 'video/webm';
+      const bstr = atob(parts[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) u8arr[n] = bstr.charCodeAt(n);
+      const b = new Blob([u8arr], { type: mime });
+      videoSrc = URL.createObjectURL(b);
+      if (typeof window !== 'undefined') {
+        window.__vyzn_local_clips = window.__vyzn_local_clips || {};
+        window.__vyzn_local_clips[clip.id] = videoSrc;
+      }
+    } catch (_) {
+      videoSrc = clip.video_data_url;
+    }
+  } else {
+    videoSrc = clip.video_url || clip.videoUrl || (clip.urls && clip.urls.video) || `/api/clips/${encodeURIComponent(clip.id)}/video`;
+  }
+
   if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
     const edge = window.__vyzn_edge_url;
     if (posterUrl && posterUrl.startsWith('/api/')) posterUrl = `${edge}${posterUrl}`;
     if (videoSrc && videoSrc.startsWith('/api/')) videoSrc = `${edge}${videoSrc}`;
   }
   video.poster = posterUrl;
-  video.src = videoSrc;
-
-  // In simple terms: force the browser video engine to load metadata and show the first video frame
-  try {
-    video.load();
-  } catch (_) {}
+  if (video.src !== videoSrc) {
+    video.src = videoSrc;
+    try {
+      video.load();
+    } catch (_) {}
+  }
 
   // Start 3 seconds before trigger moment per spec Section 6.3
   const startMs = clip.startMs || Date.now();

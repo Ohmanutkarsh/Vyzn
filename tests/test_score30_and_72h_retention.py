@@ -100,9 +100,10 @@ def test_reaper_72h_full_footage_and_lifelong_clips(temp_env):
     os.utime(old_file, (past_ts, past_ts))
 
     # 2. Recent continuous footage (< 72 hours ago)
-    recent_footage_dir = tmp_path / "full_footage" / "cam1" / "2026-10-25"
+    recent_date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    recent_footage_dir = tmp_path / "full_footage" / "cam1" / recent_date_str
     recent_footage_dir.mkdir(parents=True, exist_ok=True)
-    recent_file = recent_footage_dir / "footage_20261025_000000.mp4"
+    recent_file = recent_footage_dir / f"footage_{recent_date_str.replace('-', '')}_000000.mp4"
     recent_file.write_bytes(b"continuous_recent_footage" * 100)
 
     # 3. Cut clip with score 45 (lifelong retention: expires_at_ms = None)

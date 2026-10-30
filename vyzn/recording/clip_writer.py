@@ -415,10 +415,10 @@ class ClipWriter:
             return ClipWriteResult(str(clip_path), str(thumb_path), [], 0.0, is_valid=False)
 
         n_frames = len(decoded_frames)
-        effective_fps = max(15.0, min(30.0, float(fps)))
+        effective_fps = max(1.0, min(60.0, float(fps)))
         if duration_sec is not None and duration_sec > 0.5 and n_frames > 0:
             calc_fps = n_frames / float(duration_sec)
-            if 15.0 <= calc_fps <= 35.0:
+            if 1.0 <= calc_fps <= 60.0:
                 out_fps = round(calc_fps, 2)
             else:
                 out_fps = effective_fps

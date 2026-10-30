@@ -32,11 +32,71 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadCamerasList();
   readFiltersFromUrl();
   bindFilterEvents();
+  bindDeleteAllButton();
   await loadClips();
 
   // Check if deep link opened specific clip: /clips/:id
   checkDeepLink();
 });
+
+function showToast(message, isError = false) {
+  let toast = document.getElementById('toast-notification');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'toast-notification';
+    toast.style.cssText = 'position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; background: #18181b; border: 1px solid var(--action); border-radius: 8px; color: #fff; z-index: 9999; font-size: 14px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: none;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.style.borderColor = isError ? '#ef4444' : 'var(--action)';
+  toast.style.color = isError ? '#ef4444' : '#fff';
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 3500);
+}
+
+function bindDeleteAllButton() {
+  const btn = document.getElementById('btn-delete-all-clips');
+  if (!btn) return;
+  btn.onclick = async () => {
+    const confirmed = window.confirm('Are you sure you want to delete all clips? This will permanently delete all clips from cloud and local storage.');
+    if (!confirmed) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Deleting…';
+
+    try {
+      const edge = (typeof window !== 'undefined' && window.__vyzn_edge_url) || '';
+      if (edge) {
+        fetch(`${edge}/api/clips/purge-all`, {
+          method: 'POST',
+          headers: { 'X-Security-Pin': '202600' },
+          mode: 'cors'
+        }).catch(() => {});
+      }
+
+      const res = await fetch('/api/clips/purge-all', {
+        method: 'POST',
+        headers: { 'X-Security-Pin': '202600' },
+        credentials: 'include'
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        if (typeof window !== 'undefined') {
+          window.__vyzn_local_clips = {};
+        }
+        showToast(data.message || 'All clips deleted successfully.');
+        await loadClips();
+      } else {
+        showToast(data.detail || 'Failed to delete clips.', true);
+      }
+    } catch (err) {
+      showToast('Network error while deleting clips.', true);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>🗑️</span><span>Delete All Clips</span>';
+    }
+  };
+}
 
 let edgeBaseUrl = null;
 

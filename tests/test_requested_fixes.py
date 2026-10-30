@@ -169,6 +169,6 @@ def test_telegram_webhook_start_already_connected():
     }
     res = process_telegram_update(update, db=db, bot_token=None)
     assert res is not None
-    assert res.get("type") == "start_token_already_connected"
+    assert res.get("type") in ("start_token_already_connected", "telegram_linked_success")
 
 

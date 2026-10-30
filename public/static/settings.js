@@ -716,11 +716,12 @@ async function initStorageControls() {
         }
       }
       if (data) {
+        const storedDir = data.storage_dir || localStorage.getItem('vyzn_storage_dir') || 'C:\\VyznFootage';
         if (inputFolder) {
-          inputFolder.value = data.storage_dir || '';
+          inputFolder.value = storedDir;
         }
         if (valPath) {
-          valPath.textContent = data.storage_dir || 'Default: ./data/clips';
+          valPath.textContent = storedDir;
         }
         if (valFree) {
           const used = data.disk_used_gb || 0;
@@ -789,6 +790,7 @@ async function initStorageControls() {
           throw new Error(data.detail || 'Failed to update storage folder.');
         }
 
+        localStorage.setItem('vyzn_storage_dir', dirVal);
         showToast('Storage folder updated successfully!');
         if (feedback) {
           feedback.style.color = '#10b981';
@@ -886,14 +888,15 @@ async function initStorageControls() {
         }
 
         // Strategy 4: Fallback prompt dialog
-        const cur = inputFolder ? inputFolder.value.trim() : 'C:\\Vyzn testing data';
+        const cur = inputFolder ? inputFolder.value.trim() : (localStorage.getItem('vyzn_storage_dir') || 'C:\\VyznFootage');
         const entered = window.prompt(
           'Select Storage Folder:\nEnter directory path for clips and continuous footage:',
-          cur || 'C:\\Vyzn testing data'
+          cur || 'C:\\VyznFootage'
         );
         if (entered && entered.trim()) {
           const cleaned = entered.trim();
           if (inputFolder) inputFolder.value = cleaned;
+          localStorage.setItem('vyzn_storage_dir', cleaned);
           showToast(`Storage path set to: ${cleaned}`);
           if (btnSave) btnSave.click();
         }
@@ -913,10 +916,12 @@ async function initStorageControls() {
         const relPath = file.webkitRelativePath || '';
         const folderName = relPath.split('/')[0] || relPath.split('\\')[0] || '';
         if (folderName) {
-          const currentDir = inputFolder.value.trim() || 'C:\\Vyzn testing data';
+          const currentDir = inputFolder.value.trim() || 'C:\\VyznFootage';
           const sep = currentDir.includes('\\') ? '\\' : '/';
           const baseParent = currentDir.includes(sep) ? currentDir.substring(0, currentDir.lastIndexOf(sep)) : 'C:';
-          inputFolder.value = `${baseParent}${sep}${folderName}`;
+          const finalPath = `${baseParent}${sep}${folderName}`;
+          inputFolder.value = finalPath;
+          localStorage.setItem('vyzn_storage_dir', finalPath);
           showToast(`Selected folder: ${folderName}`);
           if (btnSave) btnSave.click();
         }

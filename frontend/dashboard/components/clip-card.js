@@ -75,9 +75,15 @@ function renderTickTrack(clip, durSec) {
  */
 export function renderClipCard({ clip }) {
   // URLs for thumbnail snapshot, poster image, and inline short preview video
-  const thumbUrl = clip.thumbnailUrl || '/static/img/placeholder.jpg';
-  const posterUrl = clip.posterUrl || (clip.urls && clip.urls.poster) || thumbUrl;
-  const previewUrl = clip.previewUrl || (clip.urls && clip.urls.preview) || '';
+  let thumbUrl = clip.thumbnailUrl || '/static/img/placeholder.jpg';
+  let posterUrl = clip.posterUrl || (clip.urls && clip.urls.poster) || thumbUrl;
+  let previewUrl = clip.previewUrl || (clip.urls && clip.urls.preview) || '';
+  if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
+    const edge = window.__vyzn_edge_url;
+    if (thumbUrl && thumbUrl.startsWith('/api/')) thumbUrl = `${edge}${thumbUrl}`;
+    if (posterUrl && posterUrl.startsWith('/api/')) posterUrl = `${edge}${posterUrl}`;
+    if (previewUrl && previewUrl.startsWith('/api/')) previewUrl = `${edge}${previewUrl}`;
+  }
 
   // Calculate clip duration in minutes and seconds for the badge
   const durSec = clip.durationSec || Math.round((clip.endMs - clip.startMs) / 1000) || 15;
@@ -120,18 +126,7 @@ export function renderClipCard({ clip }) {
           ${badgeHtml}
           ${partBadge}
         </div>
-        <img class="clip-thumb-img" src="${escapeHtml(thumbUrl)}" alt="${escapeHtml(headline)}" loading="lazy" />
-        ${previewUrl ? `
-          <video class="clip-inline-preview"
-                 data-src="${escapeHtml(previewUrl)}"
-                 poster="${escapeHtml(posterUrl)}"
-                 muted
-                 loop
-                 playsinline
-                 preload="none"
-                 style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity 0.25s ease; z-index: 1;">
-          </video>
-        ` : ''}
+        <img class="clip-thumb-img" src="${escapeHtml(posterUrl || thumbUrl)}" alt="${escapeHtml(headline)}" loading="lazy" style="width: 100%; height: 100%; object-fit: cover;" />
         ${renderTickTrack(clip, durSec)}
         <span class="clip-duration-bottom-right" style="z-index: 3;">${durationStr}</span>
       </div>
