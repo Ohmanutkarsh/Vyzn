@@ -284,8 +284,13 @@
 
           <!-- Order History Table -->
           <div style="margin-top: 20px;">
-            <div style="font-size: 14px; font-weight: 600; color: var(--text-1, #ffffff); margin-bottom: 10px;">
-              Quota Order History
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+              <div style="font-size: 14px; font-weight: 600; color: var(--text-1, #ffffff);">
+                Quota Order History
+              </div>
+              <button type="button" class="btn btn-secondary" id="btn-clear-order-history" style="font-size: 11.5px; padding: 4px 10px; border-color: rgba(239, 68, 68, 0.4); color: #f87171;" title="Wipe test orders and reset demo quota to 0">
+                🗑️ Reset Demo / Clear History
+              </button>
             </div>
             <div style="overflow-x: auto;">
               <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: left;">
@@ -297,11 +302,12 @@
                     <th style="padding: 8px 10px;">Amount</th>
                     <th style="padding: 8px 10px;">Status</th>
                     <th style="padding: 8px 10px;">UTR Reference</th>
+                    <th style="padding: 8px 10px; text-align: right;">Action</th>
                   </tr>
                 </thead>
                 <tbody id="tbody-quota-orders">
                   <tr>
-                    <td colspan="6" style="padding: 16px 10px; text-align: center; color: var(--text-3, #71717a);">Loading order history…</td>
+                    <td colspan="7" style="padding: 16px 10px; text-align: center; color: var(--text-3, #71717a);">Loading order history…</td>
                   </tr>
                 </tbody>
               </table>
@@ -343,6 +349,16 @@
 
               <div id="plan-step1-error" style="color: #ef4444; font-size: 12px; margin-bottom: 12px; display: none;"></div>
 
+              <!-- Conflict / Open Order Quick Actions -->
+              <div id="plan-step1-conflict-actions" style="display: none; margin-bottom: 14px; gap: 8px; flex-direction: column;">
+                <button type="button" class="btn btn-primary" id="btn-step1-resume-open" style="width: 100%; padding: 10px; font-size: 13px;">
+                  👁️ Resume Open Order
+                </button>
+                <button type="button" class="btn btn-secondary" id="btn-step1-cancel-open" style="width: 100%; padding: 10px; font-size: 13px; border-color: rgba(239, 68, 68, 0.4); color: #f87171;">
+                  ❌ Cancel Open Order & Start Fresh
+                </button>
+              </div>
+
               <button type="button" class="btn btn-primary" id="btn-proceed-order" style="width: 100%; padding: 12px; font-size: 14px; font-weight: 600;">
                 Proceed to Payment →
               </button>
@@ -383,6 +399,17 @@
                 ℹ️ <strong>Payments are verified manually.</strong> Proof of payment is the 12-digit UPI reference (UTR) only. Screenshots are not accepted.
               </div>
 
+              <!-- Demo Mode Fast Helper -->
+              <div style="margin-bottom: 14px; padding: 10px 12px; background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+                <div>
+                  <div style="font-size: 12px; font-weight: 600; color: #c084fc;">🧪 Testing / Demo Mode</div>
+                  <div style="font-size: 11px; color: #d8b4fe;">Don't want to make a real UPI payment?</div>
+                </div>
+                <button type="button" id="btn-demo-autofill-utr" class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; background: rgba(168, 85, 247, 0.18); border-color: #a855f7; color: #f3e8ff; cursor: pointer;">
+                  ✨ Auto-fill Demo UTR
+                </button>
+              </div>
+
               <!-- UTR Input Form -->
               <div style="margin-bottom: 14px;">
                 <label for="step2-input-utr" style="font-size: 12px; font-weight: 600; color: var(--text-1, #ffffff); display: block; margin-bottom: 6px;">
@@ -398,6 +425,10 @@
               <button type="button" class="btn btn-primary" id="btn-submit-utr" style="width: 100%; padding: 12px; font-size: 14px; font-weight: 600;">
                 Submit UTR for Verification
               </button>
+
+              <button type="button" class="btn btn-secondary" id="btn-step2-cancel-order" style="width: 100%; margin-top: 8px; padding: 9px; font-size: 12.5px; border-color: rgba(255,255,255,0.12); color: var(--text-2); cursor: pointer;">
+                Cancel This Order
+              </button>
             </div>
 
             <!-- Modal Step 3: Order Status Live Tracker -->
@@ -410,16 +441,55 @@
                 UTR submitted. Payments are verified manually. Once approved, your quota will be activated automatically.
               </p>
 
+              <!-- Order Details Summary Box -->
+              <div id="step3-order-summary-box" style="margin-bottom: 16px; padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--border-subtle, #27272a); border-radius: 8px; text-align: left; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <span style="color: var(--text-3);">Order:</span>
+                  <span id="step3-summary-code" style="font-weight: 600; font-family: monospace; color: #ffffff;">—</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <span style="color: var(--text-3);">Plan Quantity:</span>
+                  <span id="step3-summary-qty" style="color: #ffffff;">—</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                  <span style="color: var(--text-3);">Amount:</span>
+                  <span id="step3-summary-amount" style="font-weight: 600; color: #10b981;">—</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                  <span style="color: var(--text-3);">Submitted UTR:</span>
+                  <span id="step3-summary-utr" style="font-family: monospace; color: #93c5fd;">—</span>
+                </div>
+              </div>
+
               <!-- Live Polling Indicator -->
-              <div id="step3-polling-badge" style="font-size: 11px; color: var(--text-3, #71717a); display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 9999px; background: var(--bg-2, rgba(255,255,255,0.05)); margin-bottom: 20px;">
+              <div id="step3-polling-badge" style="font-size: 11px; color: var(--text-3, #71717a); display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 9999px; background: var(--bg-2, rgba(255,255,255,0.05)); margin-bottom: 16px;">
                 <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #3b82f6;"></span>
                 <span>Checking status in real-time…</span>
               </div>
 
+              <!-- Demo Approve Box & Telegram link -->
+              <div id="step3-demo-tools" style="margin-bottom: 16px; padding: 12px; background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 8px; text-align: left;">
+                <div style="font-size: 12px; font-weight: 600; color: #34d399; margin-bottom: 4px;">🧪 Demo Approval Tools</div>
+                <div style="font-size: 11px; color: #a1a1aa; margin-bottom: 10px;">
+                  In production, payments are approved manually via <strong>@Vyzn_admin_bot</strong> on Telegram. For demo/testing, click below to approve instantly:
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  <button type="button" class="btn btn-primary" id="btn-step3-instant-approve" style="width: 100%; padding: 10px; font-size: 13px; background: #059669; border-color: #10b981; cursor: pointer;">
+                    ⚡ Instant Demo Approve
+                  </button>
+                  <a href="https://t.me/Vyzn_admin_bot" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="width: 100%; padding: 8px; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none;">
+                    ✈️ Open @Vyzn_admin_bot on Telegram
+                  </a>
+                </div>
+              </div>
+
               <!-- Action buttons depending on state -->
-              <div id="step3-action-wrap">
+              <div id="step3-action-wrap" style="display: flex; flex-direction: column; gap: 8px;">
                 <button type="button" class="btn btn-secondary" id="btn-step3-close" style="width: 100%;">
                   Close & Wait for Approval
+                </button>
+                <button type="button" class="btn btn-secondary" id="btn-step3-cancel-order" style="width: 100%; font-size: 12px; border-color: rgba(239, 68, 68, 0.35); color: #f87171; cursor: pointer;">
+                  Cancel Order
                 </button>
               </div>
             </div>

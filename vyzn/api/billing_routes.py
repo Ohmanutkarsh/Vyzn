@@ -158,6 +158,18 @@ def submit_utr_endpoint(
     )
 
 
+@router.post("/billing/quota-orders/{order_id}/cancel")
+def cancel_order_endpoint(
+    order_id: str,
+    request: Request,
+    billing: BillingService = Depends(get_billing_service)
+):
+    """Cancels an open order."""
+    tenant_id, user = resolve_tenant_and_user(request)
+    actor = str(user.get("email") or user.get("id") or tenant_id or "user") if user else "user"
+    return billing.cancel_order(order_id=order_id, actor=actor)
+
+
 # ==============================================================================
 # Admin Verification Endpoints
 # ==============================================================================
@@ -182,6 +194,18 @@ def list_pending_orders_endpoint(
 ):
     """Lists all pending orders awaiting manual approval (status = 'submitted')."""
     return billing.list_pending_orders()
+
+
+@router.post("/billing/quota-orders/{order_id}/demo-approve")
+def demo_approve_order_endpoint(
+    order_id: str,
+    request: Request,
+    billing: BillingService = Depends(get_billing_service)
+):
+    """Demo approve quota order for testing."""
+    tenant_id, user = resolve_tenant_and_user(request)
+    actor = str((user or {}).get("email") or (user or {}).get("id") or "demo_admin")
+    return billing.approve_order(order_id=order_id, admin_user=actor)
 
 
 @router.post("/admin/billing/orders/{order_id}/approve")

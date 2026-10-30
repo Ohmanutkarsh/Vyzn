@@ -2544,11 +2544,108 @@ def api_get_quota_order(order_id: str, request: Request):
     state = get_billing_state()
     expire_stale_orders(state)
     for o in state.get("orders", []):
-        if o.get("id") == order_id:
+        if o.get("id") == order_id or o.get("order_code") == order_id:
             if o.get("tenant_id") not in (tenant_id, email) and o.get("user_email") != email and not is_admin_check(user):
                 raise HTTPException(status_code=403, detail="Permission denied")
             return o
     raise HTTPException(status_code=404, detail="Order not found")
+
+@app.post("/billing/quota-orders/{order_id}/cancel")
+@app.post("/api/billing/quota-orders/{order_id}/cancel")
+def api_cancel_quota_order(order_id: str, request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    email = user.get("email")
+    
+    with _BILLING_LOCK:
+        state = get_billing_state()
+        target_ord = None
+        for o in state.get("orders", []):
+            if o.get("id") == order_id or o.get("order_code") == order_id:
+                target_ord = o
+                break
+                
+        if not target_ord:
+            raise HTTPException(status_code=404, detail="Order not found")
+            
+        if target_ord.get("tenant_id") not in (tenant_id, email) and target_ord.get("user_email") != email and not is_admin_check(user):
+            raise HTTPException(status_code=403, detail="Permission denied")
+            
+        if target_ord.get("status") == "paid":
+            raise HTTPException(status_code=400, detail="Paid orders cannot be cancelled")
+            
+        target_ord["status"] = "cancelled"
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        target_ord["cancelled_at"] = now_iso
+        
+        state.setdefault("audits", []).append({
+            "id": f"aud_{secrets.token_hex(6)}",
+            "order_id": target_ord.get("id"),
+            "actor": email or tenant_id,
+            "action": "cancelled",
+            "detail": f"Cancelled order {target_ord.get('order_code')}",
+            "created_at": now_iso
+        })
+        save_billing_state(state)
+        
+    return {"ok": True, "status": "cancelled", "order": target_ord}
+
+@app.post("/billing/quota-orders/cancel-open")
+@app.post("/api/billing/quota-orders/cancel-open")
+def api_cancel_open_quota_orders(request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    email = user.get("email")
+    
+    cancelled = []
+    with _BILLING_LOCK:
+        state = get_billing_state()
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        for o in state.get("orders", []):
+            if (o.get("tenant_id") in (tenant_id, email) or o.get("user_email") == email) and o.get("status") in ("awaiting_payment", "submitted"):
+                o["status"] = "cancelled"
+                o["cancelled_at"] = now_iso
+                cancelled.append(o.get("order_code"))
+                state.setdefault("audits", []).append({
+                    "id": f"aud_{secrets.token_hex(6)}",
+                    "order_id": o.get("id"),
+                    "actor": email or tenant_id,
+                    "action": "cancelled",
+                    "detail": f"Cancelled open order {o.get('order_code')}",
+                    "created_at": now_iso
+                })
+        if cancelled:
+            save_billing_state(state)
+            
+    return {"ok": True, "cancelled_orders": cancelled}
+
+@app.post("/admin/billing/clear-history")
+@app.post("/api/admin/billing/clear-history")
+@app.post("/billing/quota-orders/reset-demo")
+@app.post("/api/billing/quota-orders/reset-demo")
+def api_admin_clear_history(request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    email = user.get("email")
+
+    with _BILLING_LOCK:
+        state = get_billing_state()
+        state["orders"] = []
+        state["audits"] = []
+        quotas = state.get("quotas", {})
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        if email and email in quotas:
+            quotas[email] = {"purchased": 0, "created_at": now_iso, "updated_at": now_iso}
+        if tenant_id and tenant_id in quotas:
+            quotas[tenant_id] = {"purchased": 0, "created_at": now_iso, "updated_at": now_iso}
+        state["quotas"] = quotas
+        save_billing_state(state)
+        if email:
+            sync_quota_to_supabase_table(email, 0)
+        if tenant_id and tenant_id != email:
+            sync_quota_to_supabase_table(tenant_id, 0)
+
+    return {"ok": True, "message": "All order history cleared and demo reset!"}
 
 @app.post("/billing/quota-orders/{order_id}/submit-utr")
 @app.post("/api/billing/quota-orders/{order_id}/submit-utr")
@@ -2646,18 +2743,93 @@ def api_admin_billing_pending(request: Request):
     pending = [o for o in state.get("orders", []) if o.get("status") == "submitted"]
     return sorted(pending, key=lambda x: x.get("submitted_at") or x.get("created_at") or "", reverse=True)
 
+@app.post("/billing/quota-orders/{order_id}/demo-approve")
+@app.post("/api/billing/quota-orders/{order_id}/demo-approve")
+def api_demo_approve_order(order_id: str, request: Request):
+    user = get_current_user(request) or CURRENT_USER
+    tenant_id = user.get("id") or user.get("email")
+    email = user.get("email")
+    is_admin = is_admin_check(user)
+
+    with _BILLING_LOCK:
+        state = get_billing_state()
+        target_ord = None
+        for o in state.get("orders", []):
+            if o.get("id") == order_id or o.get("order_code") == order_id:
+                target_ord = o
+                break
+
+        if not target_ord:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        if not is_admin and target_ord.get("tenant_id") not in (tenant_id, email) and target_ord.get("user_email") != email:
+            raise HTTPException(status_code=403, detail="Own order or admin required")
+
+        if target_ord.get("status") == "paid":
+            return {"ok": True, "already_approved": True, "order": target_ord}
+
+        if target_ord.get("status") != "submitted":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only submitted orders can be approved (current: '{target_ord.get('status')}')."
+            )
+
+        now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        target_ord["status"] = "paid"
+        target_ord["verified_by"] = user.get("email") or "demo_admin"
+        target_ord["verified_at"] = now_iso
+
+        tenant_id = target_ord.get("tenant_id")
+        user_email = (target_ord.get("user_email") or tenant_id or "").strip().lower()
+        quotas = state.setdefault("quotas", {})
+
+        q = quotas.get(user_email) or (quotas.get(tenant_id) if tenant_id else None)
+        if not q:
+            used = len(get_user_cameras(user_email))
+            q = {"purchased": used, "created_at": now_iso, "updated_at": now_iso}
+
+        qty = int(target_ord.get("quantity", 1))
+        q["purchased"] = int(q.get("purchased", 0)) + qty
+        q["updated_at"] = now_iso
+        quotas[user_email] = q
+        if tenant_id and tenant_id != user_email:
+            quotas[tenant_id] = q
+
+        state["quotas"] = quotas
+        state.setdefault("audits", []).append({
+            "id": f"aud_{secrets.token_hex(6)}",
+            "order_id": target_ord.get("id"),
+            "actor": user.get("email") or "demo_admin",
+            "action": "approved",
+            "detail": f"Demo approved order {target_ord.get('order_code')}, credited {qty} cameras (UTR: {target_ord.get('utr')})",
+            "created_at": now_iso
+        })
+        save_billing_state(state)
+        sync_quota_to_supabase_table(user_email, q["purchased"])
+        if tenant_id and tenant_id != user_email:
+            sync_quota_to_supabase_table(tenant_id, q["purchased"])
+
+        used_count = len(get_user_cameras(user_email))
+        available_count = max(q["purchased"] - used_count, 0)
+        return {
+            "ok": True,
+            "order": target_ord,
+            "purchased": q["purchased"],
+            "available": available_count
+        }
+
 @app.post("/admin/billing/orders/{order_id}/approve")
 @app.post("/api/admin/billing/orders/{order_id}/approve")
 def api_admin_billing_approve(order_id: str, request: Request):
     user = get_current_user(request) or CURRENT_USER
     if not is_admin_check(user):
         raise HTTPException(status_code=403, detail="Admin privileges required")
-        
+    
     with _BILLING_LOCK:
         state = get_billing_state()
         target_ord = None
         for o in state.get("orders", []):
-            if o.get("id") == order_id:
+            if o.get("id") == order_id or o.get("order_code") == order_id:
                 target_ord = o
                 break
                 
@@ -2728,7 +2900,7 @@ def api_admin_billing_reject(order_id: str, payload: RejectOrderRequest, request
         state = get_billing_state()
         target_ord = None
         for o in state.get("orders", []):
-            if o.get("id") == order_id:
+            if o.get("id") == order_id or o.get("order_code") == order_id:
                 target_ord = o
                 break
                 

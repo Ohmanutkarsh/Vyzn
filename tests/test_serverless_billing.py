@@ -210,3 +210,55 @@ async def test_admin_telegram_bot_rejection_and_commands():
         }
         res = await ai.api_telegram_admin_webhook(MockWebhookReq(cmd_payload))
         assert res.get("ok") is True
+
+
+def test_order_cancellation_and_demo_mode():
+    unique_email = f"demo_user_{secrets.token_hex(4)}@vyzn.ai"
+    tok = ai.create_session_token(unique_email)
+
+    class UserReq:
+        cookies = {"vyzn_session": tok}
+        headers = {}
+
+    # 1. Create order
+    ord1 = ai.api_create_quota_order(ai.QuotaOrderCreateRequest(quantity=2), UserReq())
+    assert ord1["status"] == "awaiting_payment"
+
+    # 2. Duplicate order is blocked
+    with pytest.raises(HTTPException) as exc:
+        ai.api_create_quota_order(ai.QuotaOrderCreateRequest(quantity=1), UserReq())
+    assert exc.value.status_code == 409
+
+    # 3. Cancel order
+    cancel_res = ai.api_cancel_quota_order(ord1["id"], UserReq())
+    assert cancel_res["ok"] is True
+    assert cancel_res["status"] == "cancelled"
+
+    # 4. Now user can create a new order immediately
+    ord2 = ai.api_create_quota_order(ai.QuotaOrderCreateRequest(quantity=3), UserReq())
+    assert ord2["status"] == "awaiting_payment"
+
+    # 5. Cancel all open orders
+    cancel_open_res = ai.api_cancel_open_quota_orders(UserReq())
+    assert cancel_open_res["ok"] is True
+    assert ord2["order_code"] in cancel_open_res["cancelled_orders"]
+
+    # 6. Create order, submit demo UTR, and demo approve
+    ord3 = ai.api_create_quota_order(ai.QuotaOrderCreateRequest(quantity=2), UserReq())
+    demo_utr = f"{secrets.randbelow(900000000000) + 100000000000}"
+    ai.api_submit_quota_order_utr(ord3["id"], ai.SubmitUtrRequest(utr=demo_utr), UserReq())
+
+    demo_appr = ai.api_demo_approve_order(ord3["id"], UserReq())
+    assert demo_appr["ok"] is True
+    assert demo_appr["purchased"] == 2
+    assert demo_appr["available"] == 2
+
+    # 7. Reset demo / clear history
+    reset_res = ai.api_admin_clear_history(UserReq())
+    assert reset_res["ok"] is True
+
+    # Quota reset to 0
+    quota_reset = ai.get_tenant_billing_quota("usr_" + unique_email, unique_email)
+    assert quota_reset["purchased"] == 0
+    assert quota_reset["available"] == 0
+

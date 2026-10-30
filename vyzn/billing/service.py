@@ -436,6 +436,33 @@ class BillingService:
             send_billing_telegram_alert(updated_order, settings=settings)
             return updated_order
 
+    def cancel_order(self, order_id: str, actor: str) -> Dict[str, Any]:
+        """Cancels an awaiting_payment or submitted order."""
+        with _BILLING_LOCK:
+            conn = self.db.get_raw_connection()
+            try:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, tenant_id, status, order_code FROM quota_orders WHERE id = ? OR order_code = ?",
+                    (order_id, order_id)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+                o_id, tenant_id, status_val, code = row
+                if status_val == "paid":
+                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Paid orders cannot be cancelled")
+                now_iso = datetime.now(timezone.utc).isoformat()
+                conn.execute("UPDATE quota_orders SET status = 'cancelled' WHERE id = ?", (o_id,))
+                conn.execute(
+                    "INSERT INTO payment_audit (order_id, actor, action, detail, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (o_id, actor, "ORDER_CANCELLED", f"Cancelled order {code}", now_iso)
+                )
+                conn.commit()
+                return {"id": o_id, "order_code": code, "status": "cancelled"}
+            finally:
+                conn.close()
+
     def approve_order(self, order_id: str, admin_user: str) -> Dict[str, Any]:
         """
         Approves a submitted order in ONE atomic transaction:
@@ -450,8 +477,8 @@ class BillingService:
         try:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, tenant_id, quantity, status, order_code, amount_paise FROM quota_orders WHERE id = ?",
-                (order_id,)
+                "SELECT id, tenant_id, quantity, status, order_code, amount_paise FROM quota_orders WHERE id = ? OR order_code = ?",
+                (order_id, order_id)
             )
             row = cursor.fetchone()
             if not row:
@@ -470,7 +497,7 @@ class BillingService:
                 # 1. Update order status to paid
                 conn.execute(
                     "UPDATE quota_orders SET status = 'paid', verified_by = ?, verified_at = ? WHERE id = ? AND status = 'submitted'",
-                    (admin_user, now_iso, order_id)
+                    (admin_user, now_iso, o_id)
                 )
                 if cursor.rowcount == 0:
                     raise HTTPException(
