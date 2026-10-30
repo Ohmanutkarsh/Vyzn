@@ -570,7 +570,7 @@ function renderDrawerContent(clip) {
 
   // In simple terms: immediately set the poster snapshot image so the preview is visible right away even before video buffers
   let posterUrl = clip.posterUrl || clip.thumbnailUrl || (clip.urls && clip.urls.poster) || `/api/clips/${encodeURIComponent(clip.id)}/poster.jpg`;
-  let videoSrc = clip.videoUrl || `/api/clips/${encodeURIComponent(clip.id)}/video`;
+  let videoSrc = clip.video_data_url || clip.video_url || clip.videoUrl || (clip.urls && clip.urls.video) || `/api/clips/${encodeURIComponent(clip.id)}/video`;
   if (typeof window !== 'undefined' && window.__vyzn_edge_url) {
     const edge = window.__vyzn_edge_url;
     if (posterUrl && posterUrl.startsWith('/api/')) posterUrl = `${edge}${posterUrl}`;

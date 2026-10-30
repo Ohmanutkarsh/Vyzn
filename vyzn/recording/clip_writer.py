@@ -374,7 +374,7 @@ class ClipWriter:
         camera_id: str,
         event_group_id: str,
         frames: List[np.ndarray | bytes],
-        fps: float = 4.0,
+        fps: float = 20.0,
         thumb_frame: Optional[np.ndarray] = None,
         peak_idx: Optional[int] = None,
         duration_sec: Optional[float] = None
@@ -415,10 +415,10 @@ class ClipWriter:
             return ClipWriteResult(str(clip_path), str(thumb_path), [], 0.0, is_valid=False)
 
         n_frames = len(decoded_frames)
-        effective_fps = max(10.0, min(30.0, float(fps)))
+        effective_fps = max(15.0, min(30.0, float(fps)))
         if duration_sec is not None and duration_sec > 0.5 and n_frames > 0:
             calc_fps = n_frames / float(duration_sec)
-            if 10.0 <= calc_fps <= 35.0:
+            if 15.0 <= calc_fps <= 35.0:
                 out_fps = round(calc_fps, 2)
             else:
                 out_fps = effective_fps
@@ -590,7 +590,7 @@ class ClipWriter:
 
         if not success:
             # Fallback to OpenCV VideoWriter
-            self._fallback_cv2_write(clip_path, decoded_frames, fps, (w, h))
+            self._fallback_cv2_write(clip_path, decoded_frames, out_fps, (w, h))
             canon_path = event_dir / "clip.mp4"
             if not canon_path.exists() and clip_path.exists():
                 try:
@@ -624,9 +624,10 @@ class ClipWriter:
         w, h = size
         even_w = w - (w % 2)
         even_h = h - (h % 2)
+        safe_fps = max(15.0, float(fps))
         tmp_cv2 = output_path.with_suffix(".cv2.mp4")
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(str(tmp_cv2), fourcc, fps, (even_w, even_h))
+        out = cv2.VideoWriter(str(tmp_cv2), fourcc, safe_fps, (even_w, even_h))
         for f in frames:
             if f.shape[:2] != (even_h, even_w):
                 f = cv2.resize(f, (even_w, even_h))

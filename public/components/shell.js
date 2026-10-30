@@ -39,23 +39,37 @@ export async function enforceAuth() {
 }
 
 export async function initShell({ activePage = 'overview' } = {}) {
-  // Enforce authentication on all protected pages
-  const user = await enforceAuth();
-  if (!user) return;
-
-  // Apply saved theme
+  // Apply saved theme immediately
   const savedTheme = localStorage.getItem('vyzn_theme') || 'dark';
   document.documentElement.setAttribute('data-theme', savedTheme);
 
-  // Render shell elements with user state
-  renderSidebar(activePage, user);
-  renderHeader(activePage, user);
-  renderBottomNav(activePage);
-  attachShellEvents(user);
+  // Fast optimistic render from localStorage cache for instant page switching
+  const cachedRaw = localStorage.getItem('vyzn_user');
+  let cachedUser = null;
+  if (cachedRaw) {
+    try {
+      cachedUser = JSON.parse(cachedRaw);
+      renderSidebar(activePage, cachedUser);
+      renderHeader(activePage, cachedUser);
+      renderBottomNav(activePage);
+      attachShellEvents(cachedUser);
+    } catch (_) {}
+  }
+
+  // Validate session in background or foreground
+  const freshUser = await enforceAuth();
+  if (!freshUser) return;
+
+  if (!cachedUser || cachedUser.email !== freshUser.email || cachedUser.role !== freshUser.role) {
+    renderSidebar(activePage, freshUser);
+    renderHeader(activePage, freshUser);
+    renderBottomNav(activePage);
+    attachShellEvents(freshUser);
+  }
 
   // Initial poll for header status pill
   pollShellStatus();
-  setInterval(pollShellStatus, 10000);
+  setInterval(pollShellStatus, 15000);
 }
 
 function renderSidebar(activePage, user = {}) {

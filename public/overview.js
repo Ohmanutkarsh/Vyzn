@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Periodic snapshot refresh for non-active camera tiles in strip
   setInterval(refreshStripSnapshots, 8000);
   // Periodic real-time snapshot capture from active stream to update strip and cloud
-  setInterval(captureAndUploadActiveSnapshot, 5000);
+  setInterval(captureAndUploadActiveSnapshot, 2500);
 });
 
 async function loadOverviewData() {
@@ -182,6 +182,10 @@ let edgeCameras = null;
 
 async function checkEdgeServer() {
   if (edgeBaseUrl !== null) return edgeBaseUrl;
+  if (window.location.protocol === 'https:') {
+    edgeBaseUrl = '';
+    return edgeBaseUrl;
+  }
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.port === '8000') {
     edgeBaseUrl = '';
     return edgeBaseUrl;
@@ -210,6 +214,181 @@ async function checkEdgeServer() {
   }
   edgeBaseUrl = '';
   return edgeBaseUrl;
+}
+
+let activeWebcamStream = null;
+let inBrowserClipperActive = false;
+let clipperCanvas = null;
+let clipperLastFrameData = null;
+let isRecordingClip = false;
+
+function startInBrowserClipper(stream, cam) {
+  if (inBrowserClipperActive) return;
+  inBrowserClipperActive = true;
+
+  if (!clipperCanvas) {
+    clipperCanvas = document.createElement('canvas');
+    clipperCanvas.width = 64;
+    clipperCanvas.height = 36;
+  }
+  const ctx = clipperCanvas.getContext('2d', { willReadFrequently: true });
+  const videoEl = document.getElementById('live-stream-video');
+
+  const checkMotionInterval = setInterval(async () => {
+    const camId = cam.id || cam.camera_id;
+    if (!activeWebcamStream || activeCameraId !== camId) {
+      clearInterval(checkMotionInterval);
+      inBrowserClipperActive = false;
+      return;
+    }
+    if (!videoEl || videoEl.readyState < 2 || isRecordingClip) return;
+
+    try {
+      ctx.drawImage(videoEl, 0, 0, 64, 36);
+      const imgData = ctx.getImageData(0, 0, 64, 36);
+      const data = imgData.data;
+
+      if (clipperLastFrameData) {
+        let diffPixels = 0;
+        const totalPixels = 64 * 36;
+        for (let i = 0; i < data.length; i += 4) {
+          const diff = Math.abs(data[i] - clipperLastFrameData[i]) +
+                       Math.abs(data[i + 1] - clipperLastFrameData[i + 1]) +
+                       Math.abs(data[i + 2] - clipperLastFrameData[i + 2]);
+          if (diff > 50) diffPixels++;
+        }
+        const motionRatio = diffPixels / totalPixels;
+
+        // Trigger recording on real motion activity (> 3%)
+        if (motionRatio > 0.03 && !isRecordingClip) {
+          const score = Math.min(96, Math.max(72, Math.round(68 + motionRatio * 160)));
+          triggerWebcamClipRecord(stream, cam, score, motionRatio);
+        }
+      }
+      clipperLastFrameData = data;
+    } catch (e) {}
+  }, 350);
+}
+
+async function triggerWebcamClipRecord(stream, cam, score, motionRatio) {
+  if (isRecordingClip) return;
+  isRecordingClip = true;
+
+  try {
+    const videoEl = document.getElementById('live-stream-video');
+    let thumbDataUrl = '';
+    if (videoEl && videoEl.videoWidth > 0) {
+      const snapCanvas = document.createElement('canvas');
+      snapCanvas.width = 640;
+      snapCanvas.height = 360;
+      const sCtx = snapCanvas.getContext('2d');
+      sCtx.drawImage(videoEl, 0, 0, 640, 360);
+      thumbDataUrl = snapCanvas.toDataURL('image/jpeg', 0.88);
+    }
+
+    let mimeType = 'video/webm;codecs=vp8';
+    if (window.MediaRecorder && typeof window.MediaRecorder.isTypeSupported === 'function') {
+      if (window.MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')) {
+        mimeType = 'video/mp4;codecs=avc1';
+      } else if (window.MediaRecorder.isTypeSupported('video/mp4')) {
+        mimeType = 'video/mp4';
+      } else if (window.MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) {
+        mimeType = 'video/webm;codecs=vp9';
+      }
+    }
+
+    const rec = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 2000000 });
+    const chunks = [];
+    rec.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+
+    rec.onstop = async () => {
+      try {
+        const blob = new Blob(chunks, { type: mimeType });
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const videoDataUrl = reader.result;
+          const clipId = `clip_${Date.now()}`;
+          const clipNum = Math.floor(Math.random() * 9000) + 1000;
+          const nowIso = new Date().toISOString();
+
+          const clipRecord = {
+            id: clipId,
+            clip_id: clipId,
+            clip_number: clipNum,
+            camera_id: cam.id || cam.camera_id,
+            camera_name: cam.name || 'Camera 1',
+            score: score,
+            importance_score: score,
+            tier: score >= 70 ? 'alert' : 'review',
+            summary: `Person/motion detected on ${cam.name || 'Camera 1'}`,
+            description: `Movement activity in camera field of view (Score: ${score}).`,
+            duration_sec: 6.0,
+            fps: 25.0,
+            created_at: nowIso,
+            start_time: nowIso,
+            end_time: nowIso,
+            status: 'raw',
+            thumbnail_url: thumbDataUrl,
+            poster_url: thumbDataUrl,
+            preview_url: thumbDataUrl,
+            video_url: videoDataUrl,
+            video_data_url: videoDataUrl,
+            preview_base64: thumbDataUrl,
+            urls: {
+              thumb: thumbDataUrl,
+              poster: thumbDataUrl,
+              preview: thumbDataUrl,
+              video: videoDataUrl
+            }
+          };
+
+          // 1. Sync clip to backend
+          await fetch('/api/clips/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ clips: [clipRecord] })
+          }).catch(() => {});
+
+          // 2. Dispatch real-time Telegram alert for score >= 70
+          if (score >= 70) {
+            fetch('/api/v1/alerts/ingress', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                event_id: clipId,
+                camera_id: cam.id || cam.camera_id,
+                camera_name: cam.name,
+                description: `Activity detected on ${cam.name} (Score ${score})`,
+                score: score,
+                tier: 'alert'
+              })
+            }).catch(() => {});
+          }
+
+          // 3. Refresh flags in Overview
+          loadFlags();
+        };
+        reader.readAsDataURL(blob);
+      } catch (err) {
+        console.warn('Clip finalize error:', err);
+      } finally {
+        setTimeout(() => { isRecordingClip = false; }, 4000);
+      }
+    };
+
+    rec.start(1000);
+    // Record for 6 seconds
+    setTimeout(() => {
+      if (rec.state === 'recording') rec.stop();
+    }, 6000);
+  } catch (err) {
+    console.warn('triggerWebcamClipRecord error:', err);
+    isRecordingClip = false;
+  }
 }
 
 function switchActiveCamera(cid) {
@@ -242,8 +421,46 @@ async function startLiveStream(cid) {
 
   // Connecting overlay while establishing stream
   if (connectingOverlay) connectingOverlay.style.display = 'flex';
-  if (statusBadge) statusBadge.textContent = 'Connecting…';
+  if (statusBadge) statusBadge.textContent = 'Connecting...';
   if (pulseDot) pulseDot.style.display = 'none';
+
+  const isWebcam = cam.rtsp_url === '0' || cam.rtsp_url === 'webcam' || String(cam.rtsp_url || '').toLowerCase().includes('webcam');
+
+  if (isWebcam) {
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        if (connectingOverlay) connectingOverlay.style.display = 'flex';
+        if (statusBadge) statusBadge.textContent = 'Connecting...';
+
+        if (activeWebcamStream) {
+          try { activeWebcamStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+          activeWebcamStream = null;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 25, max: 30 } },
+          audio: false
+        });
+        activeWebcamStream = stream;
+
+        if (videoEl) {
+          videoEl.srcObject = stream;
+          videoEl.style.display = 'block';
+          if (streamImg) streamImg.style.display = 'none';
+          if (connectingOverlay) connectingOverlay.style.display = 'none';
+          if (offlineOverlay) offlineOverlay.style.display = 'none';
+          if (statusBadge) statusBadge.textContent = 'Live';
+          if (pulseDot) pulseDot.style.display = 'inline-block';
+          await videoEl.play().catch(e => console.warn('Video play error:', e));
+
+          startInBrowserClipper(stream, cam);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('getUserMedia webcam error, falling back to stream:', err);
+    }
+  }
 
   if (videoEl) videoEl.style.display = 'none';
   if (streamImg) streamImg.style.display = 'block';

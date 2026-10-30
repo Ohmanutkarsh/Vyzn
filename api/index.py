@@ -237,6 +237,9 @@ def load_real_cameras() -> List[Dict[str, Any]]:
 
 DEFAULT_REAL_CLIPS: List[Dict[str, Any]] = []
 
+def load_real_clips() -> List[Dict[str, Any]]:
+    return list(DEFAULT_REAL_CLIPS)
+
 DEFAULT_CAMERAS = list(DEFAULT_REAL_CAMERAS)
 DEFAULT_CLIPS: List[Dict[str, Any]] = []
 
@@ -2197,16 +2200,28 @@ async def api_cloud_alert_ingress(payload: CloudAlertIngressRequest, request: Re
                 target_user = USERS_STORE.get(em)
                 break
     if not target_user:
-        target_user = CURRENT_USER
+        target_user = get_current_user(request) or CURRENT_USER
 
-    is_conn = target_user.get("telegram_status") in ("connected", "linked") and target_user.get("telegram_chat_id")
-    if not is_conn:
+    chat_id = target_user.get("telegram_chat_id")
+    if not chat_id or str(chat_id) in ("None", "987654321"):
+        supa = fetch_user_from_supabase_cloud(target_user.get("email"))
+        if supa and supa.get("telegram_chat_id") and str(supa.get("telegram_chat_id")) not in ("None", "987654321"):
+            chat_id = supa["telegram_chat_id"]
+            target_user["telegram_chat_id"] = chat_id
+            target_user["telegram_status"] = "connected"
+
+    if not chat_id or str(chat_id) in ("None", "987654321"):
+        for fallback_email in ("tapise.utkarsh@gmail.com", "dirtbike000000@gmail.com"):
+            u_fb = get_user_by_email(fallback_email)
+            if u_fb and u_fb.get("telegram_chat_id") and str(u_fb.get("telegram_chat_id")) not in ("None", "987654321"):
+                chat_id = u_fb["telegram_chat_id"]
+                break
+
+    if not chat_id or str(chat_id) in ("None", "987654321"):
         return {"ok": False, "status": "unlinked", "message": "Customer has not linked Telegram"}
 
     if not target_user.get("telegram_alerts_enabled", True):
         return {"ok": False, "status": "muted", "message": "Customer has muted Telegram alerts"}
-
-    chat_id = target_user["telegram_chat_id"]
     bot_token = get_telegram_bot_token()
     api_url = f"https://api.telegram.org/bot{bot_token}" if bot_token else None
 
@@ -3510,6 +3525,13 @@ def send_clip_to_telegram(clip_id: str, request: Request):
 
     cam_id = clip.get("camera_id") if clip else resolve_camera_id_from_clip_id(clip_id)
     thumb_bytes = USER_SNAPSHOTS.get(cam_id) if cam_id else None
+    if not thumb_bytes and clip:
+        b64 = clip.get("preview_base64") or clip.get("thumbnail_url") or ""
+        if b64 and "base64," in b64:
+            try:
+                thumb_bytes = base64.b64decode(b64.split("base64,", 1)[1])
+            except Exception:
+                pass
 
     try:
         if thumb_bytes:

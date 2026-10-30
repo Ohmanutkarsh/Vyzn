@@ -746,9 +746,9 @@ class EdgePipeline:
 
         # Calculate exact duration in video timeline (PTS) seconds and true frame rate
         clip_dur = round(max(1.0, segment.end_pts - segment.start_pts), 1)
-        configured_fps = float(getattr(cam_config, "target_fps", getattr(cam_config, "capture_fps", 15.0)) or 15.0)
+        configured_fps = float(getattr(cam_config, "target_fps", getattr(cam_config, "capture_fps", 20.0)) or 20.0)
         measured_fps = round(len(frames) / clip_dur, 1) if clip_dur > 0 else configured_fps
-        fps = max(10.0, measured_fps if measured_fps >= 10.0 else configured_fps)
+        fps = max(15.0, measured_fps if measured_fps >= 15.0 else configured_fps)
         write_result = self.clip_writer.write_clip_from_frames(
             camera_id=camera_id,
             event_group_id=segment.event_group_id,
