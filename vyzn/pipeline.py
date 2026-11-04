@@ -88,7 +88,7 @@ class EdgePipeline:
         # ==============================================================================
         # STEP 3: TELEGRAM BOT ALERT NOTIFIER
         # ------------------------------------------------------------------------------
-        # Connects to the official Telegram Bot (@Vyzn_security_bot) using the bot token.
+        # Connects to the official Telegram Bot (@Vyzn_security_alert_bot) using the bot token.
         # Dispatcher has a 45-second cooldown to avoid repeatedly buzzing the user's phone.
         # ==============================================================================
         bot_token = self.settings.telegram_bot_token or os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("VYZN_TELEGRAM_BOT_TOKEN")
@@ -696,6 +696,13 @@ class EdgePipeline:
         cam_config: Optional[CameraConfig]
     ):
         """Processes finalized clip segment, writes fMP4 with faststart, generates forensic analysis, and indexes."""
+        score = getattr(segment, "score", segment.highest_score)
+        tier = getattr(segment, "tier", "review")
+        # Instruction rule: Never clip or save anything with score < 30!
+        if getattr(segment, "is_discarded", False) or score < 30 or tier == "low":
+            logger.info(f"Discarding event segment {segment.event_group_id}: score {score} < 30 (no clip saved)")
+            return
+
         camera_id = segment.camera_id
         frames = segment.frames
         if len(frames) < 3:
@@ -782,12 +789,9 @@ class EdgePipeline:
             sha256_hash = hashlib.sha256(f"{segment.event_group_id}:{start_time}".encode()).hexdigest()
 
         start_ms = int(start_dt.timestamp() * 1000)
-        # Retention Policy: Only 'low' tier clips expire after 72 hours.
-        # 'review' and 'alert' tiers are kept saved permanently (expires_at_ms = None).
-        if tier == "low":
-            expires_at_ms = start_ms + int(72 * 3600 * 1000)
-        else:
-            expires_at_ms = None
+        # Retention Policy: All cut clips (score >= 30) are kept lifelong (expires_at_ms = None).
+        # Continuous whole camera footage in full_footage/ is automatically purged after 72 hours.
+        expires_at_ms = None
         trigger_ms = start_ms + int(max(0.0, segment.trigger_pts - segment.start_pts) * 1000)
 
         # In simple terms: build the 'Why this clip was saved' checklist using real ground-truth facts.
@@ -965,7 +969,7 @@ class EdgePipeline:
         sm = self.state_machines.get(camera_id)
         if sm and sm.is_recording:
             seg = sm._close_active_clip(close_reason="manual_finalize")
-            if seg and not seg.is_discarded:
+            if seg and not seg.is_discarded and getattr(seg, "score", seg.highest_score) >= 30:
                 cam_cfg = next((c for c in self.settings.cameras if c.camera_id == camera_id), None)
                 self._handle_finalized_segment(seg, cam_cfg)
 

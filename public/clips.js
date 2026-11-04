@@ -4,7 +4,7 @@
  * desktop hover preview, and deep-link drawer opening.
  */
 
-import { initShell } from './components/shell.js';
+import { initShell, promptSecurityPin } from './components/shell.js';
 import { renderClipCard } from './components/clip-card.js';
 import { openClipDrawer, initClipDrawer } from './components/clip-drawer.js';
 import { t, initI18n } from './i18n.js';
@@ -33,56 +33,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   readFiltersFromUrl();
   bindFilterEvents();
   await loadClips();
+  attachPurgeHandler();
 
   // Check if deep link opened specific clip: /clips/:id
   checkDeepLink();
 });
-
-let edgeBaseUrl = null;
-
-async function checkEdgeServer() {
-  if (edgeBaseUrl !== null) return edgeBaseUrl;
-  if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.port === '8000') {
-    edgeBaseUrl = '';
-    return edgeBaseUrl;
-  }
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1200);
-    const res = await fetch('http://127.0.0.1:8000/api/status', {
-      method: 'GET',
-      mode: 'cors',
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-    if (res.ok) {
-      edgeBaseUrl = 'http://127.0.0.1:8000';
-      return edgeBaseUrl;
-    }
-  } catch (e) {}
-  edgeBaseUrl = '';
-  return edgeBaseUrl;
-}
 
 /**
  * Loads cameras to populate the filter dropdowns.
  */
 async function loadCamerasList() {
   try {
-    const edge = await checkEdgeServer();
-    if (edge) {
-      try {
-        const edgeRes = await fetch(`${edge}/api/cameras`, { mode: 'cors' });
-        if (edgeRes.ok) {
-          const edgeCams = await edgeRes.json();
-          if (Array.isArray(edgeCams) && edgeCams.length > 0) {
-            allCameras = edgeCams;
-            populateCameraDropdowns();
-            return;
-          }
-        }
-      } catch (e) {}
-    }
     const res = await fetch('/api/cameras');
     if (res.ok) {
       allCameras = await res.json();
@@ -367,51 +328,10 @@ async function loadClips() {
   }
 
   try {
-    const edge = await checkEdgeServer();
-    let data = null;
-    if (edge) {
-      try {
-        const edgeRes = await fetch(`${edge}/api/clips?${params.toString()}`, { mode: 'cors' });
-        if (edgeRes.ok) {
-          data = await edgeRes.json();
-          if (data && data.clips && data.clips.length > 0) {
-            // Sync to cloud in background
-            fetch('/api/clips/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ clips: data.clips })
-            }).catch(() => {});
-          }
-        }
-      } catch (e) {
-        console.warn('Edge clips fetch error:', e);
-      }
-    }
-
-    if (!data) {
-      const res = await fetch(`/api/clips?${params.toString()}`, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to load clips');
-      data = await res.json();
-    }
-
+    const res = await fetch(`/api/clips?${params.toString()}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to load clips');
+    const data = await res.json();
     loadedClips = data.clips || [];
-    if (edge) {
-      window.__vyzn_edge_url = edge;
-      loadedClips.forEach(clip => {
-        if (clip.thumbnailUrl && clip.thumbnailUrl.startsWith('/')) clip.thumbnailUrl = `${edge}${clip.thumbnailUrl}`;
-        if (clip.posterUrl && clip.posterUrl.startsWith('/')) clip.posterUrl = `${edge}${clip.posterUrl}`;
-        if (clip.previewUrl && clip.previewUrl.startsWith('/')) clip.previewUrl = `${edge}${clip.previewUrl}`;
-        if (clip.videoUrl && clip.videoUrl.startsWith('/')) clip.videoUrl = `${edge}${clip.videoUrl}`;
-        if (clip.urls) {
-          if (clip.urls.thumb && clip.urls.thumb.startsWith('/')) clip.urls.thumb = `${edge}${clip.urls.thumb}`;
-          if (clip.urls.poster && clip.urls.poster.startsWith('/')) clip.urls.poster = `${edge}${clip.urls.poster}`;
-          if (clip.urls.preview && clip.urls.preview.startsWith('/')) clip.urls.preview = `${edge}${clip.urls.preview}`;
-          if (clip.urls.video && clip.urls.video.startsWith('/')) clip.urls.video = `${edge}${clip.urls.video}`;
-        }
-      });
-    }
-
     const total = data.total !== undefined ? data.total : loadedClips.length;
 
     // In simple terms: update the camera dropdown so any cameras with existing clips can be selected
@@ -443,7 +363,8 @@ async function loadClips() {
 
     grid.innerHTML = loadedClips.map(clip => renderClipCard({ clip })).join('');
 
-    // Static poster thumbnails only on cards (no heavy inline decoders) to keep browser 100% smooth
+    // Start managing inline video previews so visible clips auto-play up to 3 at once
+    initInlinePreviews(grid);
 
     // Attach card click handlers to open drawer
     grid.querySelectorAll('.clip-card').forEach(card => {
@@ -465,8 +386,72 @@ async function loadClips() {
   }
 }
 
+// Global observer variable that monitors which preview videos are currently visible on screen
+let inlinePreviewObserver = null;
+
+// This function manages inline video playback so clips automatically play when visible on screen.
+// To keep the computer running fast and smooth, at most 3 videos can play at the same time.
 function initInlinePreviews(container) {
-  // Gallery uses static poster thumbnails only for 100% smooth scrolling and zero video decoder lag.
+  if (inlinePreviewObserver) {
+    inlinePreviewObserver.disconnect();
+    inlinePreviewObserver = null;
+  }
+  // Static thumbnails only per user requirement. Video decoders are reserved solely for smooth clip drawer playback.
+}
+
+function attachPurgeHandler() {
+  const btnPurge = document.getElementById('btn-purge-all-clips-page');
+  if (!btnPurge) return;
+
+  btnPurge.onclick = async () => {
+    const pin = await promptSecurityPin({
+      title: 'Delete All Clips',
+      description: 'Permanently wipe all past evidence clips and recordings from disk and database. This cannot be undone.',
+      confirmText: 'Delete All Clips',
+      isDanger: true
+    });
+    if (!pin) return;
+
+    btnPurge.disabled = true;
+    btnPurge.textContent = 'Deleting clips…';
+
+    try {
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const edge = isLocal ? '' : (window.__vyzn_edge_url || '');
+
+      if (edge) {
+        try {
+          await fetch(`${edge}/api/clips/purge-all`, {
+            method: 'POST',
+            headers: { 'X-Security-Pin': pin },
+            mode: 'cors'
+          });
+        } catch (e) {
+          console.warn('Edge purge failed:', e);
+        }
+      }
+
+      const res = await fetch('/api/clips/purge-all', {
+        method: 'POST',
+        headers: { 'X-Security-Pin': pin },
+        credentials: 'include'
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        showToast(data.message || 'All clips purged successfully.');
+        loadedClips = [];
+        await loadClips();
+      } else {
+        showToast(data.detail || 'Failed to purge clips. Check Security PIN.', true);
+      }
+    } catch (err) {
+      showToast('Error purging clips.', true);
+    } finally {
+      btnPurge.disabled = false;
+      btnPurge.innerHTML = '<span>🗑️</span><span>Delete all clips</span>';
+    }
+  };
 }
 
 /**

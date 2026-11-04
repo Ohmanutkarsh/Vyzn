@@ -128,8 +128,10 @@ class ClipStateMachine:
         self.pre_roll_seconds = float(kwargs.get("pre_roll_seconds", kwargs.get("pre_roll_sec", cfg.pre_roll_seconds)))
         self.post_roll_seconds = float(kwargs.get("post_roll_seconds", kwargs.get("post_roll_sec", cfg.post_roll_seconds)))
         self.min_active_ticks = int(kwargs.get("min_active_ticks", cfg.min_active_ticks))
-        self.max_clip_seconds = float(kwargs.get("max_clip_seconds", kwargs.get("max_clip_duration_sec", cfg.max_clip_seconds)))
-        self.preview_seconds = float(kwargs.get("preview_seconds", cfg.preview_seconds))
+        max_sec = kwargs.get("max_clip_seconds", kwargs.get("max_clip_duration_sec", cfg.max_clip_seconds))
+        self.max_clip_seconds = float(max_sec) if (max_sec is not None and float(max_sec) > 0) else None
+        prev_sec = kwargs.get("preview_seconds", cfg.preview_seconds)
+        self.preview_seconds = float(prev_sec) if (prev_sec is not None and float(prev_sec) > 0) else 0.0
         self.target_fps = max(1.0, float(target_fps))
 
         # Backward compatibility properties
@@ -320,8 +322,8 @@ class ClipStateMachine:
                 if self.quiet_duration > self.quiet_gap_seconds:
                     finalized_segment = self._close_active_clip(close_reason="quiet_gap_exceeded")
 
-            # Check max_clip_seconds (e.g. 600s or 300s) from the start of real activity
-            if self.state == ClipState.ACTIVE and (tick.tick_end_pts - self.first_active_window_start) >= self.max_clip_seconds:
+            # Check max_clip_seconds if configured (None or <= 0 means infinite)
+            if self.state == ClipState.ACTIVE and self.max_clip_seconds is not None and (tick.tick_end_pts - self.first_active_window_start) >= self.max_clip_seconds:
                 finalized_segment = self._split_at_lowest_score_tick()
 
         return finalized_segment
@@ -401,10 +403,11 @@ class ClipStateMachine:
         # Check if this pure-motion burst was shorter than or equal to min_motion_only_sec (<=3s) without recognized targets
         active_dur = max(0.0, self.last_active_window_end - self.first_active_window_start)
         is_discarded = False
-        if (self.primary_object in ("unclassified", "movement", "")) and active_dur <= self.min_motion_only_sec:
+        # Instruction rule: Never clip or save anything with score < 30!
+        if final_score < 30:
             is_discarded = True
-        # In simple terms: if an event was split into parts and the very last trailing fragment has less than 3 seconds of footage, discard it so we do not save a 1-second useless stub
-        if self.current_part_index > 0 and active_dur < self.score_interval_seconds:
+        # In simple terms: if an event was split into parts and the very last trailing fragment has less than 1 second of footage, discard it so we do not save a tiny stub
+        elif self.current_part_index > 0 and active_dur < 1.0:
             is_discarded = True
 
         # Trim ticks past clip_end_pts and before clip_start_pts
@@ -462,7 +465,8 @@ class ClipStateMachine:
         marking the next clip 'continued'.
         """
         # Select candidates within the last 6s of the maximum duration limit
-        split_window_start = self.first_active_window_start + max(0.0, self.max_clip_seconds - 6.0)
+        max_dur = self.max_clip_seconds or 600.0
+        split_window_start = self.first_active_window_start + max(0.0, max_dur - 6.0)
         candidates = [t for t in self.active_ticks if t.tick_end_pts >= split_window_start]
         if not candidates:
             candidates = self.active_ticks[-2:] if len(self.active_ticks) >= 2 else self.active_ticks
@@ -492,12 +496,12 @@ class ClipStateMachine:
             highest_score=self.highest_score,
             primary_object=self.primary_object,
             max_confidence=self.max_confidence,
-            is_discarded=False,
+            is_discarded=bool(self.highest_score < 30),
             is_alert=self.alert_fired,
             score=self.highest_score,
             score_raw=float(self.highest_score),
-            tier="review" if self.highest_score < 70 else "alert",
-            severity_label="Medium" if self.highest_score < 70 else "High",
+            tier="low" if self.highest_score < 30 else ("review" if self.highest_score < 70 else "alert"),
+            severity_label="Low" if self.highest_score < 30 else ("Medium" if self.highest_score < 70 else "High"),
             score_breakdown=self.peak_breakdown,
             ticks=[t for t in self.active_ticks if t.tick_end_pts <= split_pts],
             peak_frame_idx=0,
@@ -578,27 +582,25 @@ class ClipStateMachine:
         person_tracks = [
             t for t in all_tracks
             if getattr(t, "label", "").lower() == "person"
-            and getattr(t, "hits", 1) >= 2
-            and getattr(t, "confidence", 0.0) >= 0.40
+            and getattr(t, "confidence", 0.0) >= 0.35
         ]
         person_dets = [
             d for d in all_dets
             if getattr(d, "label", "").lower() == "person"
-            and getattr(d, "confidence", 0.0) >= 0.45
+            and getattr(d, "confidence", 0.0) >= 0.35
         ]
-        has_confirmed_person = bool(person_tracks) or len(person_dets) >= 2 or (len(person_dets) >= 1 and any(getattr(d, "confidence", 0.0) >= 0.65 for d in person_dets))
+        has_confirmed_person = bool(person_tracks) or bool(person_dets)
 
         # Confirmed vehicles / animals
         vehicle_tracks = [
             t for t in all_tracks
             if getattr(t, "label", "").lower() in ("vehicle", "car", "motorcycle", "bus", "truck", "dog", "cat", "animal")
-            and getattr(t, "hits", 1) >= 2
-            and getattr(t, "confidence", 0.0) >= 0.40
+            and getattr(t, "confidence", 0.0) >= 0.35
         ]
         vehicle_dets = [
             d for d in all_dets
             if getattr(d, "label", "").lower() in ("vehicle", "car", "motorcycle", "bus", "truck", "dog", "cat", "animal")
-            and getattr(d, "confidence", 0.0) >= 0.45
+            and getattr(d, "confidence", 0.0) >= 0.35
         ]
         has_confirmed_target = has_confirmed_person or bool(vehicle_tracks) or bool(vehicle_dets)
 
@@ -624,10 +626,11 @@ class ClipStateMachine:
                 else:
                     peak_score = max(peak_score, 35.0)
         elif not has_confirmed_target:
-            # In simple terms: if the camera only sees background motion (like a spinning fan or hair moving)
-            # with NO confirmed person or vehicle, cap the score at 20 (strictly below the active threshold of 30).
-            # This ensures fan motion never starts a recording, and allows existing clips to close peacefully.
-            peak_score = min(peak_score, 20.0)
+            # If the tick score already evaluated to >= 30 with motion, don't blindly clamp to 20 unless it is pure noise
+            if peak_score >= 30.0 and tick_has_motion:
+                pass
+            else:
+                peak_score = min(peak_score, 20.0)
 
         # Find the frame with the highest activity to use as the peak highlight snapshot
         peak_f = self.current_tick_frames[0]

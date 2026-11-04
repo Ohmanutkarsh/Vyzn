@@ -4,7 +4,7 @@
  * desktop hover preview, and deep-link drawer opening.
  */
 
-import { initShell } from './components/shell.js';
+import { initShell, promptSecurityPin } from './components/shell.js';
 import { renderClipCard } from './components/clip-card.js';
 import { openClipDrawer, initClipDrawer } from './components/clip-drawer.js';
 import { t, initI18n } from './i18n.js';
@@ -33,6 +33,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   readFiltersFromUrl();
   bindFilterEvents();
   await loadClips();
+  attachPurgeHandler();
 
   // Check if deep link opened specific clip: /clips/:id
   checkDeepLink();
@@ -391,107 +392,66 @@ let inlinePreviewObserver = null;
 // This function manages inline video playback so clips automatically play when visible on screen.
 // To keep the computer running fast and smooth, at most 3 videos can play at the same time.
 function initInlinePreviews(container) {
-  // Clean up any previous screen observer before setting up new clips
   if (inlinePreviewObserver) {
     inlinePreviewObserver.disconnect();
+    inlinePreviewObserver = null;
   }
+  // Static thumbnails only per user requirement. Video decoders are reserved solely for smooth clip drawer playback.
+}
 
-  // Keeps track of the videos that are currently playing right now (max 3)
-  const activePlaying = new Set();
-  // Keeps track of all videos currently in view on the screen
-  const visibleVideos = [];
+function attachPurgeHandler() {
+  const btnPurge = document.getElementById('btn-purge-all-clips-page');
+  if (!btnPurge) return;
 
-  // Helper function to balance playback: stop out-of-view videos and start visible ones up to 3
-  const syncPlayback = () => {
-    // Stop any video that has scrolled out of view
-    for (const vid of Array.from(activePlaying)) {
-      if (!visibleVideos.includes(vid)) {
-        vid.pause();
-        vid.style.opacity = '0';
-        activePlaying.delete(vid);
-      }
-    }
+  btnPurge.onclick = async () => {
+    const pin = await promptSecurityPin({
+      title: 'Delete All Clips',
+      description: 'Permanently wipe all past evidence clips and recordings from disk and database. This cannot be undone.',
+      confirmText: 'Delete All Clips',
+      isDanger: true
+    });
+    if (!pin) return;
 
-    // Play visible videos up to the 3-video maximum limit
-    for (const vid of visibleVideos) {
-      if (activePlaying.size >= 3) break;
-      if (!activePlaying.has(vid)) {
-        // Set video source URL right before playing to save bandwidth
-        if (!vid.src && vid.dataset.src) {
-          vid.src = vid.dataset.src;
+    btnPurge.disabled = true;
+    btnPurge.textContent = 'Deleting clips…';
+
+    try {
+      const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const edge = isLocal ? '' : (window.__vyzn_edge_url || '');
+
+      if (edge) {
+        try {
+          await fetch(`${edge}/api/clips/purge-all`, {
+            method: 'POST',
+            headers: { 'X-Security-Pin': pin },
+            mode: 'cors'
+          });
+        } catch (e) {
+          console.warn('Edge purge failed:', e);
         }
-        vid.play().then(() => {
-          vid.style.opacity = '1';
-          activePlaying.add(vid);
-        }).catch(() => {
-          // Browser may block automatic playback; silently ignore
-        });
       }
+
+      const res = await fetch('/api/clips/purge-all', {
+        method: 'POST',
+        headers: { 'X-Security-Pin': pin },
+        credentials: 'include'
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) {
+        showToast(data.message || 'All clips purged successfully.');
+        loadedClips = [];
+        await loadClips();
+      } else {
+        showToast(data.detail || 'Failed to purge clips. Check Security PIN.', true);
+      }
+    } catch (err) {
+      showToast('Error purging clips.', true);
+    } finally {
+      btnPurge.disabled = false;
+      btnPurge.innerHTML = '<span>🗑️</span><span>Delete all clips</span>';
     }
   };
-
-  // Watch the screen to detect when clip cards appear or scroll away
-  inlinePreviewObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      const vid = entry.target;
-      if (entry.isIntersecting) {
-        if (!visibleVideos.includes(vid)) {
-          visibleVideos.push(vid);
-        }
-      } else {
-        const idx = visibleVideos.indexOf(vid);
-        if (idx !== -1) {
-          visibleVideos.splice(idx, 1);
-        }
-      }
-    });
-    syncPlayback();
-  }, {
-    root: null,
-    rootMargin: '50px',
-    threshold: 0.3 // Trigger when at least 30% of the clip is visible
-  });
-
-  // Find all inline preview videos in the gallery
-  const videoElements = container.querySelectorAll('.clip-inline-preview');
-  videoElements.forEach(vid => {
-    // Observe this video for screen visibility
-    inlinePreviewObserver.observe(vid);
-
-    // Track playback time to move the blue playhead marker across the bottom seek bar
-    const card = vid.closest('.clip-card');
-    const playhead = card ? card.querySelector('.clip-playhead-marker') : null;
-    if (playhead) {
-      vid.addEventListener('timeupdate', () => {
-        if (vid.duration > 0) {
-          const pct = (vid.currentTime / vid.duration) * 100;
-          playhead.style.left = `${pct}%`;
-        }
-      });
-    }
-
-    // Desktop hover support: preview plays immediately if user moves the mouse over the card
-    if (card) {
-      card.addEventListener('mouseenter', () => {
-        if (!vid.src && vid.dataset.src) vid.src = vid.dataset.src;
-        if (!activePlaying.has(vid)) {
-          // If already at 3 playing, pause the oldest one to make room
-          if (activePlaying.size >= 3) {
-            const oldest = activePlaying.values().next().value;
-            if (oldest) {
-              oldest.pause();
-              oldest.style.opacity = '0';
-              activePlaying.delete(oldest);
-            }
-          }
-          vid.play().then(() => {
-            vid.style.opacity = '1';
-            activePlaying.add(vid);
-          }).catch(() => {});
-        }
-      });
-    }
-  });
 }
 
 /**

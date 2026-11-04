@@ -262,7 +262,7 @@ let currentTgToken = null;
 // ------------------------------------------------------------------------------
 // When you click 'Connect VYZN Telegram':
 // 1. We ask the server to create a secure 10-minute linking code.
-// 2. We open the official Telegram Bot (@Vyzn_security_bot) in a new browser tab.
+// 2. We open the official Telegram Bot (@Vyzn_security_alert_bot) in a new browser tab.
 // 3. When you tap 'Start' on Telegram, your account is instantly linked!
 // 4. All camera alerts and threat photos will automatically go to your Telegram.
 // ==============================================================================
@@ -357,7 +357,7 @@ async function initTelegramControls() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ bot_token: tokVal, bot_username: 'Vyzn_security_bot' })
+          body: JSON.stringify({ bot_token: tokVal, bot_username: 'Vyzn_security_alert_bot' })
         });
         const d = await res.json();
         if (!res.ok) throw new Error(d.detail || 'Failed to save bot token');
@@ -826,7 +826,24 @@ async function initStorageControls() {
       btnBrowse.textContent = '📁 Opening Explorer…';
 
       try {
-        // Strategy 1: Local Edge Node Native Windows Explorer Dialog
+        const edge = await checkEdgeServer();
+        if (edge) {
+          try {
+            const res = await fetch(`${edge}/api/settings/browse-folder`, { method: 'POST', mode: 'cors' });
+            const data = await res.json();
+            if (data.ok && data.selected_path) {
+              if (inputFolder) inputFolder.value = data.selected_path;
+              showToast(`Selected folder: ${data.selected_path}`);
+              if (btnSave) btnSave.click();
+              return;
+            } else if (data.cancelled) {
+              return;
+            }
+          } catch (e) {
+            console.warn('Edge browse-folder error:', e);
+          }
+        }
+
         const isLocalHost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.port === '8000';
         if (isLocalHost) {
           try {
@@ -845,36 +862,13 @@ async function initStorageControls() {
           }
         }
 
-        // Strategy 2: File System Access API (Native Windows Explorer Directory Dialog)
-        if (typeof window.showDirectoryPicker === 'function') {
-          try {
-            const dirHandle = await window.showDirectoryPicker({ id: 'vyzn_storage', mode: 'readwrite' });
-            if (dirHandle && dirHandle.name) {
-              const currentDir = inputFolder ? inputFolder.value.trim() : '';
-              let selectedPath = `C:\\${dirHandle.name}`;
-              if (currentDir && (currentDir.includes('\\') || currentDir.includes('/'))) {
-                const sep = currentDir.includes('\\') ? '\\' : '/';
-                const parts = currentDir.split(sep);
-                parts[parts.length - 1] = dirHandle.name;
-                selectedPath = parts.join(sep);
-              }
-              if (inputFolder) inputFolder.value = selectedPath;
-              showToast(`Selected storage folder: ${selectedPath}`);
-              if (btnSave) btnSave.click();
-              return;
-            }
-          } catch (err) {
-            if (err.name === 'AbortError') {
-              // User closed or cancelled the picker
-              return;
-            }
-            console.warn('showDirectoryPicker notice:', err);
-          }
-        }
-
-        // Strategy 3: Native HTML input webkitdirectory picker
-        if (inputDirPicker) {
-          inputDirPicker.click();
+        // On cloud or fallback: prompt user for exact folder path
+        const currentVal = inputFolder ? inputFolder.value : 'C:\\VyznFootage';
+        const entered = prompt('Choose local folder path for saving clips and footage:', currentVal);
+        if (entered && entered.trim()) {
+          if (inputFolder) inputFolder.value = entered.trim();
+          showToast(`Storage path set to: ${entered.trim()}`);
+          if (btnSave) btnSave.click();
           return;
         }
 

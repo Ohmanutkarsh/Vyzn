@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/tokens.css">
   <link rel="stylesheet" href="/static/components/ui.css">
   <link rel="stylesheet" href="/static/components/wall-view.css?v=2.3">
+  <link rel="stylesheet" href="/static/components/live-player.css?v=2.6">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -39,55 +40,26 @@
           <div class="overview-main-col">
             <!-- Live Camera Section (Section 6.2) -->
             <section class="live-player-section">
-              <div class="live-player-header">
-                <h2 style="font-size: 18px; font-weight: 600; margin: 0;">Live camera</h2>
-                <!-- Camera Picker: Segmented control up to 4, dropdown beyond -->
-                <div id="camera-picker-container"></div>
+              <div class="live-player-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 8px;">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                  <h2 style="font-size: 18px; font-weight: 600; margin: 0;">Live camera</h2>
+                  <!-- Camera Picker: Segmented control up to 4, dropdown beyond -->
+                  <div id="camera-picker-container"></div>
+                </div>
+                <div class="overview-camera-actions" style="display: flex; align-items: center; gap: 8px;">
+                  <div class="search-input-wrap" style="position: relative; width: 170px;">
+                    <input type="text" id="camera-search-input" placeholder="Search cameras…" class="form-input" style="height: 34px; padding: 0 10px 0 28px; font-size: 13px; width: 100%; box-sizing: border-box;" />
+                    <span style="position: absolute; left: 8px; top: 8px; font-size: 13px; color: var(--text-3); pointer-events: none;">🔍</span>
+                  </div>
+                  <a href="/cameras/new" class="btn btn-primary" id="btn-overview-add-cam" style="height: 34px; padding: 0 12px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; text-decoration: none;">
+                    <span>+</span>
+                    <span>Add camera</span>
+                  </a>
+                </div>
               </div>
 
-              <!-- 16:9 Letterbox Video Frame -->
-              <div class="live-player-frame" id="live-player-frame">
-                <!-- Video / Image Stream element -->
-                <img id="live-stream-img" class="live-video-element" alt="Live Camera Stream" />
-                <video id="live-stream-video" class="live-video-element" autoplay playsinline muted style="display: none; width: 100%; height: 100%; object-fit: contain;"></video>
-
-                <!-- Watch Areas Canvas / SVG Overlay -->
-                <svg id="watch-areas-overlay" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: none; z-index: 3;"></svg>
-
-                <!-- Top Left Overlay: Camera Name & Live Badge -->
-                <div class="player-overlay-top-left" id="player-top-left">
-                  <span id="player-camera-name">Camera</span>
-                  <div style="display: flex; align-items: center; gap: 4px;" id="badge-live-container">
-                    <span class="live-pulse-dot" id="live-pulse-dot"></span>
-                    <span id="player-status-badge">Live</span>
-                  </div>
-                </div>
-
-                <!-- Top Right Overlay: Controls -->
-                <div class="player-overlay-top-right">
-                  <button type="button" class="player-btn" id="btn-save-picture" title="Save picture" aria-label="Save picture">📷</button>
-                  <button type="button" class="player-btn" id="btn-fullscreen" title="Full screen" aria-label="Full screen">⛶</button>
-                </div>
-
-                <!-- Bottom Overlay: Toggle Watch Areas -->
-                <div class="player-overlay-bottom">
-                  <button type="button" class="btn-toggle-areas" id="btn-toggle-areas">Show watch areas</button>
-                </div>
-
-                <!-- State Overlays: Connecting, Stalled, Offline -->
-                <div class="player-state-overlay" id="player-connecting-overlay" style="display: none;">
-                  <div class="skeleton" style="width: 80px; height: 12px; margin-bottom: 8px;"></div>
-                  <div style="font-size: 15px; font-weight: 500;">Connecting…</div>
-                </div>
-
-                <div class="player-state-overlay" id="player-offline-overlay" style="display: none;">
-                  <div class="offline-card-banner" id="offline-banner-text">Offline since 9:12 pm</div>
-                  <div style="display: flex; gap: var(--space-3); margin-top: var(--space-2);">
-                    <button type="button" class="btn btn-primary" id="btn-player-retry">Try again</button>
-                    <button type="button" class="btn btn-secondary" id="btn-player-why-offline">Why is it offline?</button>
-                  </div>
-                </div>
-              </div>
+              <!-- Live CCTV Stream Root -->
+              <div id="overview-live-player-mount" class="overview-live-player-mount" style="width: 100%; border-radius: var(--radius-card, 8px); overflow: hidden; margin-top: var(--space-2);"></div>
             </section>
 
             <!-- Cameras Strip (Section 6.2) -->

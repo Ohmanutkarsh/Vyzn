@@ -6,7 +6,7 @@
     "pre_roll_seconds": 10,
     "post_roll_seconds": 10,
     "min_active_ticks": 1,
-    "max_clip_seconds": 600,
-    "preview_seconds": 6
+    "max_clip_seconds": null,
+    "preview_seconds": 0
   }
 }

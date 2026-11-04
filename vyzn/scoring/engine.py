@@ -314,9 +314,11 @@ class ScoringEngine:
         # to avoid hair or spinning fan flicker from being falsely confirmed as an intruder.
         min_required_conf = 0.35 if is_restricted else conf_min_conf
         is_confirmed = (
-            track_hits >= conf_min_hits
-            and c_mean >= min_required_conf
-            and r9 >= conf_min_rel
+            (
+                (track_hits >= 2 and c_mean >= min_required_conf) or
+                (track_hits >= 1 and conf >= 0.40) or
+                (track_hits >= conf_min_hits and c_mean >= min_required_conf and r9 >= conf_min_rel)
+            )
             and obj_type in ["person", "vehicle", "animal", "carried_item"]
         )
 
@@ -601,7 +603,7 @@ class ScoringEngine:
             if is_alert_area and is_confirmed:
                 s_final = min(100.0, s_final + 8.0)
 
-            if not is_confirmed:
+            if not is_confirmed and obj_type not in ["person", "vehicle", "animal", "carried_item"]:
                 s_final = min(s_final, 20.0)
             if obj_type == "unclassified" and not (is_restricted and is_after_hours and track_dur >= 3.0 and r9 >= 0.85):
                 s_final = min(s_final, 20.0)

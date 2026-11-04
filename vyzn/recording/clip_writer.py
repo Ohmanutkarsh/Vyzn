@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import cv2
 import time
+import queue
 import subprocess
 import logging
 import threading
@@ -43,12 +44,22 @@ class ClipWriter:
 
     def __init__(self, data_root: Path):
         self.data_root = Path(data_root)
-        # Continuous whole-footage streaming writers (one file per day, up to 24 hours per file)
-        self._continuous_writers: Dict[str, cv2.VideoWriter] = {}
+        # Continuous whole-footage streaming state
+        self._continuous_buffers: Dict[str, List[np.ndarray]] = {}
+        self._continuous_buffer_starts: Dict[str, float] = {}
         self._continuous_dates: Dict[str, str] = {}
-        self._continuous_start_pts: Dict[str, float] = {}
+        self._continuous_fps: Dict[str, float] = {}
         self._continuous_paths: Dict[str, Path] = {}
         self._continuous_lock = threading.Lock()
+        # Background worker for continuous footage encoding & concat
+        self._footage_queue: queue.Queue = queue.Queue(maxsize=300)
+        self._worker_running = True
+        self._footage_worker = threading.Thread(
+            target=self._run_footage_worker,
+            daemon=True,
+            name="ContinuousFootageWorker"
+        )
+        self._footage_worker.start()
 
     def get_event_dir(self, camera_id: str, event_group_id: str) -> Path:
         date_str = time.strftime("%Y-%m-%d")
@@ -72,79 +83,187 @@ class ClipWriter:
         current_pts: Optional[float] = None
     ) -> Optional[str]:
         """
-        Appends incoming camera frame directly into the continuous daily whole footage video file.
-        Stored under <storage_dir>/full_footage/<camera_id>/<date>/footage_<date>.mp4.
-        Ensures a single continuous 24h video is recorded with zero fragmentation.
+        Appends incoming camera frame at its original (OG) size into the continuous 24h whole footage.
+        Buffers frames and flushes in chunks using FFmpeg into <storage_dir>/full_footage/<camera_id>/<date>/footage_<date>.mp4.
+        Ensures footage_<date>.mp4 is always a 100% valid, playable H.264 video with faststart.
         """
         if frame is None:
             return None
 
         date_str = time.strftime("%Y-%m-%d")
         pts = current_pts if current_pts is not None else time.time()
+        fps = max(1.0, float(fps))
 
         with self._continuous_lock:
-            # Check if writer exists and if date rolled over or 24 hours elapsed (86400s)
-            active_writer = self._continuous_writers.get(camera_id)
-            active_date = self._continuous_dates.get(camera_id)
-            start_pts = self._continuous_start_pts.get(camera_id, pts)
+            buf = self._continuous_buffers.setdefault(camera_id, [])
+            buf.append(frame)
+            if camera_id not in self._continuous_buffer_starts:
+                self._continuous_buffer_starts[camera_id] = pts
+            self._continuous_fps[camera_id] = fps
+            active_date = self._continuous_dates.setdefault(camera_id, date_str)
 
-            needs_rollover = (
-                active_writer is not None
-                and (active_date != date_str or (pts - start_pts) >= 86400.0)
-            )
-            if needs_rollover:
+            # Flush when buffer reaches ~30 seconds of video OR when date rolls over at midnight
+            buf_dur = len(buf) / fps
+            date_changed = (active_date != date_str)
+            if buf_dur >= 30.0 or date_changed:
+                frames_to_flush = list(buf)
+                buf.clear()
+                self._continuous_buffer_starts[camera_id] = pts
+                flush_date = active_date
+                if date_changed:
+                    self._continuous_dates[camera_id] = date_str
+
                 try:
-                    active_writer.release()
-                except Exception:
-                    pass
-                self._continuous_writers.pop(camera_id, None)
-                active_writer = None
+                    self._footage_queue.put_nowait((camera_id, flush_date, frames_to_flush, fps))
+                except Exception as e:
+                    logger.warning(f"Footage queue full for {camera_id}: {e}")
 
-            if active_writer is None:
-                footage_dir = self.data_root / "full_footage" / camera_id / date_str
-                footage_dir.mkdir(parents=True, exist_ok=True)
-                out_path = footage_dir / f"footage_{date_str}.mp4"
-                h, w = frame.shape[:2]
-                fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-                writer = cv2.VideoWriter(str(out_path), fourcc, max(1.0, float(fps)), (w, h))
-                self._continuous_writers[camera_id] = writer
-                self._continuous_dates[camera_id] = date_str
-                self._continuous_start_pts[camera_id] = pts
-                self._continuous_paths[camera_id] = out_path
-                active_writer = writer
+            footage_dir = self.data_root / "full_footage" / camera_id / date_str
+            daily_file = footage_dir / f"footage_{date_str}.mp4"
+            self._continuous_paths[camera_id] = daily_file
+            return str(daily_file)
 
+    def _run_footage_worker(self):
+        """Processes continuous footage chunk encoding and stream-copy concat in the background."""
+        while self._worker_running or not self._footage_queue.empty():
             try:
-                active_writer.write(frame)
-            except Exception as e:
-                logger.warning(f"Error writing continuous frame for {camera_id}: {e}")
+                item = self._footage_queue.get(timeout=1.0)
+            except Exception:
+                continue
 
-            return str(self._continuous_paths.get(camera_id, ""))
+            if item is None:
+                self._footage_queue.task_done()
+                break
+
+            camera_id, date_str, frames, fps = item
+            try:
+                self._flush_camera_continuous_chunk(camera_id, date_str, frames, fps)
+            except Exception as e:
+                logger.error(f"Error encoding continuous footage for {camera_id}: {e}")
+            finally:
+                self._footage_queue.task_done()
+
+    def _flush_camera_continuous_chunk(self, camera_id: str, date_str: str, frames: List[np.ndarray], fps: float):
+        if not frames:
+            return
+        h, w = frames[0].shape[:2]
+        even_w = w - (w % 2)
+        even_h = h - (h % 2)
+
+        footage_dir = self.data_root / "full_footage" / camera_id / date_str
+        footage_dir.mkdir(parents=True, exist_ok=True)
+        chunks_dir = footage_dir / ".chunks"
+        chunks_dir.mkdir(parents=True, exist_ok=True)
+
+        daily_file = footage_dir / f"footage_{date_str}.mp4"
+        ts = time.strftime("%H%M%S")
+        chunk_file = chunks_dir / f"chunk_{ts}_{int(time.time()*1000)}.mp4"
+
+        ffmpeg_exe = FFmpegUtil.get_executable()
+
+        # Encode chunk in universal H.264 at original (OG) camera resolution
+        cmd_chunk = [
+            ffmpeg_exe, "-y",
+            "-f", "rawvideo",
+            "-vcodec", "rawvideo",
+            "-s", f"{even_w}x{even_h}",
+            "-pix_fmt", "bgr24",
+            "-r", str(fps),
+            "-i", "-",
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "fastdecode",
+            "-crf", "24",
+            "-g", "15",
+            "-keyint_min", "15",
+            "-sc_threshold", "0",
+            "-pix_fmt", "yuv420p",
+            "-f", "mp4",
+            "-movflags", "+faststart",
+            str(chunk_file)
+        ]
+
+        try:
+            p = subprocess.Popen(cmd_chunk, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for f in frames:
+                if f.shape[:2] != (even_h, even_w):
+                    f = cv2.resize(f, (even_w, even_h))
+                p.stdin.write(f.tobytes())
+            p.stdin.close()
+            p.wait(timeout=30.0)
+        except Exception as e:
+            logger.error(f"Failed to encode continuous chunk for {camera_id}: {e}")
+            return
+
+        if not chunk_file.exists() or chunk_file.stat().st_size == 0:
+            return
+
+        # Atomically append chunk to daily 24-hour file
+        if not daily_file.exists() or daily_file.stat().st_size == 0:
+            try:
+                if daily_file.exists():
+                    daily_file.unlink()
+                chunk_file.rename(daily_file)
+                logger.info(f"Initialized 24h continuous footage for {camera_id}: {daily_file}")
+            except Exception as e:
+                logger.error(f"Failed to initialize daily file {daily_file}: {e}")
+        else:
+            # Stream-copy concat existing daily file with new chunk
+            list_file = chunks_dir / "concat_list.txt"
+            tmp_merged = footage_dir / f"footage_{date_str}.tmp.mp4"
+            try:
+                with open(list_file, "w", encoding="utf-8") as lf:
+                    lf.write(f"file '{daily_file.resolve()}'\n")
+                    lf.write(f"file '{chunk_file.resolve()}'\n")
+
+                cmd_concat = [
+                    ffmpeg_exe, "-y",
+                    "-f", "concat",
+                    "-safe", "0",
+                    "-i", str(list_file),
+                    "-c", "copy",
+                    "-movflags", "+faststart",
+                    str(tmp_merged)
+                ]
+                res = subprocess.run(cmd_concat, capture_output=True, timeout=30.0)
+                if res.returncode == 0 and tmp_merged.exists() and tmp_merged.stat().st_size > 0:
+                    daily_file.unlink(missing_ok=True)
+                    tmp_merged.rename(daily_file)
+                    chunk_file.unlink(missing_ok=True)
+            except Exception as e:
+                logger.error(f"Failed to concat continuous footage chunk into {daily_file}: {e}")
 
     def close_continuous_writer(self, camera_id: str):
-        """Flushes and closes the continuous daily footage writer for a specific camera."""
+        """Flushes and seals the continuous daily footage for a specific camera."""
         with self._continuous_lock:
-            writer = self._continuous_writers.pop(camera_id, None)
-            if writer is not None:
+            buf = self._continuous_buffers.get(camera_id, [])
+            if buf:
+                d_str = self._continuous_dates.get(camera_id, time.strftime("%Y-%m-%d"))
+                fps = self._continuous_fps.get(camera_id, 15.0)
                 try:
-                    writer.release()
+                    self._footage_queue.put_nowait((camera_id, d_str, list(buf), fps))
                 except Exception:
                     pass
-            self._continuous_dates.pop(camera_id, None)
-            self._continuous_start_pts.pop(camera_id, None)
-            self._continuous_paths.pop(camera_id, None)
+                buf.clear()
 
     def close_continuous_recorders(self):
-        """Flushes and releases all continuous whole-footage writers."""
+        """Flushes and seals all continuous 24h whole-footage daily files."""
         with self._continuous_lock:
-            for cid, writer in list(self._continuous_writers.items()):
-                try:
-                    writer.release()
-                except Exception:
-                    pass
-            self._continuous_writers.clear()
-            self._continuous_dates.clear()
-            self._continuous_start_pts.clear()
-            self._continuous_paths.clear()
+            for cid, buf in list(self._continuous_buffers.items()):
+                if buf:
+                    d_str = self._continuous_dates.get(cid, time.strftime("%Y-%m-%d"))
+                    fps = self._continuous_fps.get(cid, 15.0)
+                    try:
+                        self._footage_queue.put_nowait((cid, d_str, list(buf), fps))
+                    except Exception:
+                        pass
+                buf.clear()
+
+        # Wait for queue to flush
+        try:
+            self._footage_queue.join()
+        except Exception:
+            pass
 
     def write_continuous_footage_chunk(
         self,
@@ -154,9 +273,9 @@ class ClipWriter:
         start_time_str: Optional[str] = None
     ) -> Optional[str]:
         """
-        Encodes and saves continuous full video footage without clip filters.
+        Encodes and saves continuous full video footage without clip filters in universal H.264 format.
         Stored under <storage_dir>/full_footage/<camera_id>/<date>/footage_<timestamp>.mp4.
-        Ensures entire continuous camera footage is safely stored and crash-resistant.
+        Ensures entire continuous camera footage is safely stored and 100% playable.
         """
         if not frames:
             return None
@@ -179,20 +298,45 @@ class ClipWriter:
             return None
 
         h, w = decoded_frames[0].shape[:2]
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(tmp_path), fourcc, max(1.0, fps), (w, h))
-        for df in decoded_frames:
-            if df.shape[:2] != (h, w):
-                df = cv2.resize(df, (w, h))
-            writer.write(df)
-        writer.release()
+        even_w = w - (w % 2)
+        even_h = h - (h % 2)
+        ffmpeg_exe = FFmpegUtil.get_executable()
 
-        # Atomic rename once file is written
-        if tmp_path.exists() and tmp_path.stat().st_size > 0:
-            if out_path.exists():
-                out_path.unlink()
-            tmp_path.rename(out_path)
-            return str(out_path)
+        cmd = [
+            ffmpeg_exe, "-y",
+            "-f", "rawvideo",
+            "-vcodec", "rawvideo",
+            "-s", f"{even_w}x{even_h}",
+            "-pix_fmt", "bgr24",
+            "-r", str(max(1.0, float(fps))),
+            "-i", "-",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-tune", "fastdecode",
+            "-crf", "24",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            str(tmp_path)
+        ]
+
+        try:
+            p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for df in decoded_frames:
+                if df.shape[:2] != (even_h, even_w):
+                    df = cv2.resize(df, (even_w, even_h))
+                p.stdin.write(df.tobytes())
+            p.stdin.close()
+            p.wait(timeout=15.0)
+
+            if tmp_path.exists() and tmp_path.stat().st_size > 0:
+                if out_path.exists():
+                    out_path.unlink()
+                tmp_path.rename(out_path)
+                return str(out_path)
+        except Exception as e:
+            logger.error(f"Error encoding continuous footage chunk: {e}")
+            if tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)
         return None
 
     def verify_video_file(self, video_path: Path, expected_duration: float) -> Tuple[bool, float]:
@@ -385,7 +529,7 @@ class ClipWriter:
         even_w = w - (w % 2)
         even_h = h - (h % 2)
 
-        # Build FFmpeg command with smooth 15+ FPS, GOP 15 (1 keyframe/s), fastdecode, baseline profile, and +faststart
+        # Build FFmpeg command with smooth 15+ FPS, GOP 15 (1 keyframe/s), fastdecode, universal H.264, +faststart, and silent audio
         cmd = [
             ffmpeg_exe, "-y",
             "-f", "rawvideo",
@@ -394,16 +538,17 @@ class ClipWriter:
             "-pix_fmt", "bgr24",
             "-r", str(out_fps),
             "-i", "-",  # Read from stdin
+            "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",  # Universal silent audio
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-tune", "fastdecode",
-            "-profile:v", "baseline",
-            "-level", "3.0",
+            "-crf", "23",
             "-g", "15",
             "-keyint_min", "15",
             "-sc_threshold", "0",
-            "-crf", "24",
             "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "64k",
+            "-shortest",
             "-f", "mp4",
             "-movflags", "+faststart",
             str(tmp_clip_path)
@@ -481,31 +626,44 @@ class ClipWriter:
         size: tuple[int, int]
     ):
         w, h = size
+        even_w = w - (w % 2)
+        even_h = h - (h % 2)
+        tmp_cv2 = output_path.with_suffix(".cv2.mp4")
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out = cv2.VideoWriter(str(output_path), fourcc, fps, (w, h))
+        out = cv2.VideoWriter(str(tmp_cv2), fourcc, fps, (even_w, even_h))
         for f in frames:
-            if f.shape[:2] != (h, w):
-                f = cv2.resize(f, (w, h))
+            if f.shape[:2] != (even_h, even_w):
+                f = cv2.resize(f, (even_w, even_h))
             out.write(f)
         out.release()
 
-        # Transcode cv2 mp4v to mobile-compatible H.264 if FFmpeg is available
+        # Immediately transcode cv2 mp4v to universal H.264 +faststart with audio
         try:
             ffmpeg_exe = FFmpegUtil.get_executable()
             tmp_transcode = output_path.with_suffix(".h264.mp4")
             cmd = [
                 ffmpeg_exe, "-y",
-                "-i", str(output_path),
+                "-i", str(tmp_cv2),
+                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
-                "-crf", "26",
+                "-tune", "fastdecode",
+                "-crf", "23",
                 "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "64k",
+                "-shortest",
                 "-movflags", "+faststart",
                 str(tmp_transcode)
             ]
-            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10.0)
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15.0)
             if res.returncode == 0 and tmp_transcode.exists() and tmp_transcode.stat().st_size > 0:
                 output_path.unlink(missing_ok=True)
                 tmp_transcode.rename(output_path)
+            elif tmp_cv2.exists() and not output_path.exists():
+                tmp_cv2.rename(output_path)
         except Exception:
-            pass
+            if tmp_cv2.exists() and not output_path.exists():
+                tmp_cv2.rename(output_path)
+        finally:
+            if tmp_cv2.exists():
+                tmp_cv2.unlink(missing_ok=True)

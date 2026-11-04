@@ -1464,6 +1464,12 @@ class EventDatabase:
             self.update_telegram_link_status(token, "expired")
             return False, "expired_token", link
 
+        # Reject duplicate chat linking to multiple different accounts
+        existing_user = self.get_user_by_telegram_chat_id(str(chat_id))
+        if existing_user and existing_user.get("id") != link["user_id"]:
+            self.update_telegram_link_status(token, "duplicate_chat")
+            return False, "duplicate_chat", existing_user
+
         # Re-assign chat_id to the authorized user who consumed this link token.
         # Disconnect any other user account that previously held this chat_id.
         sql_unlink_others = "UPDATE users SET telegram_chat_id = NULL, telegram_status = 'not_linked' WHERE telegram_chat_id = ? AND id != ?"

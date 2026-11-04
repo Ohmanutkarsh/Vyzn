@@ -387,6 +387,13 @@ function connectMultiplexedWebSocket() {
     return;
   }
 
+  // Gracefully handle serverless environments without WebSocket support (Vercel)
+  const isServerless = window.location.hostname.includes('vercel.app') || window.location.hostname.includes('netlify.app');
+  if (isServerless) {
+    updateConnectionIndicator('online', 'Live (Cloud Sync)');
+    return;
+  }
+
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/api/wall/stream`;
 
@@ -455,8 +462,8 @@ function startWallSnapshotPolling() {
       const cid = cam.id || cam.camera_id;
       const imgEl = document.getElementById(`img-${cid}`);
       if (imgEl && spotlightCameraId !== cid) {
-        // Do NOT overwrite active live MJPEG stream on online cameras!
-        if (cam.status === 'online' && imgEl.dataset.streamFailed !== 'true') {
+        const isServerless = window.location.hostname.includes('vercel.app') || window.location.hostname.includes('netlify.app');
+        if (!isServerless && cam.status === 'online' && imgEl.dataset.streamFailed !== 'true') {
           continue;
         }
 

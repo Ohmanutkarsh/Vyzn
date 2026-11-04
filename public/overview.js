@@ -3,17 +3,28 @@ import { renderCameraTile } from './components/camera-tile.js';
 import { renderFlagRow } from './components/flag-row.js';
 import { openClipDrawer, initClipDrawer } from './components/clip-drawer.js';
 import { openWallView } from './components/wall-view.js';
+import { mountLiveCctvPlayer } from './components/live-player.js';
 import { t, initI18n } from './i18n.js';
 import { escapeHtml } from './utils.js';
 
 let camerasList = [];
 let activeCameraId = null;
+let activeLivePlayer = null;
 let showWatchAreas = false;
 let stalledTimer = null;
 let lastFrameTime = Date.now();
 let flagsData = [];
+let cameraSearchQuery = '';
 
 document.addEventListener('DOMContentLoaded', async () => {
+  const searchInput = document.getElementById('camera-search-input');
+  if (searchInput) {
+    searchInput.addEventListener('input', (e) => {
+      cameraSearchQuery = (e.target.value || '').trim().toLowerCase();
+      renderPicker();
+      renderStrip();
+    });
+  }
   await initI18n();
   initShell({ activePage: 'overview' });
   initClipDrawer({ onClipUpdated: () => loadFlags() });
@@ -100,7 +111,7 @@ async function loadOverviewData() {
 
     renderPicker();
     renderStrip();
-    startLiveStream(activeCameraId);
+    await mountOverviewPlayer(activeCameraId);
   } catch (err) {
     if (emptyState) {
       emptyState.style.display = 'flex';
@@ -113,10 +124,19 @@ function renderPicker() {
   const container = document.getElementById('camera-picker-container');
   if (!container) return;
 
-  if (camerasList.length <= 4) {
+  const filtered = cameraSearchQuery
+    ? camerasList.filter(c => ((c.name || '') + ' ' + (c.id || c.camera_id || '')).toLowerCase().includes(cameraSearchQuery))
+    : camerasList;
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<span style="font-size: 12px; color: var(--text-3);">No matching cameras</span>`;
+    return;
+  }
+
+  if (filtered.length <= 4) {
     container.innerHTML = `
       <div class="segmented-control" role="tablist">
-        ${camerasList.map(c => {
+        ${filtered.map(c => {
           const cid = c.id || c.camera_id;
           const isSelected = cid === activeCameraId;
           return `
@@ -137,7 +157,7 @@ function renderPicker() {
   } else {
     container.innerHTML = `
       <select class="form-input" id="select-camera-picker" style="height: 34px; padding: 0 8px; font-size: 13px;">
-        ${camerasList.map(c => {
+        ${filtered.map(c => {
           const cid = c.id || c.camera_id;
           return `<option value="${escapeHtml(cid)}" ${cid === activeCameraId ? 'selected' : ''}>${escapeHtml(c.name)}</option>`;
         }).join('')}
@@ -157,7 +177,16 @@ function renderStrip() {
   const strip = document.getElementById('cameras-strip-list');
   if (!strip) return;
 
-  strip.innerHTML = camerasList.map(c => {
+  const filtered = cameraSearchQuery
+    ? camerasList.filter(c => ((c.name || '') + ' ' + (c.id || c.camera_id || '')).toLowerCase().includes(cameraSearchQuery))
+    : camerasList;
+
+  if (filtered.length === 0) {
+    strip.innerHTML = `<div style="padding: 16px; font-size: 13px; color: var(--text-3);">No cameras match "${escapeHtml(cameraSearchQuery)}"</div>`;
+    return;
+  }
+
+  strip.innerHTML = filtered.map(c => {
     const cid = c.id || c.camera_id;
     const camCopy = { ...c };
     if (edgeBaseUrl) {
@@ -284,14 +313,45 @@ async function activateBrowserWebcam(cam, cid) {
   }
 }
 
+async function mountOverviewPlayer(cid) {
+  const mountEl = document.getElementById('overview-live-player-mount');
+  if (!mountEl) return;
+
+  const cam = camerasList.find(c => (c.id || c.camera_id) === cid) || camerasList[0];
+  const camName = cam ? cam.name : cid;
+
+  if (activeLivePlayer) {
+    activeLivePlayer.destroy();
+    activeLivePlayer = null;
+  }
+
+  activeLivePlayer = await mountLiveCctvPlayer(mountEl, {
+    cameraId: cid,
+    cameraName: camName,
+    cameras: camerasList,
+    apiBaseUrl: edgeBaseUrl || '',
+    isInline: true,
+    onCameraChange: (newCid) => {
+      switchActiveCamera(newCid);
+    }
+  });
+
+  
+}
+
 function switchActiveCamera(cid) {
   if (cid === activeCameraId) return;
-  stopCurrentWebcamStream();
   activeCameraId = cid;
   renderPicker();
   renderStrip();
-  startLiveStream(activeCameraId);
-  if (showWatchAreas) renderWatchAreasOverlay();
+  const cam = camerasList.find(c => (c.id || c.camera_id) === cid);
+  const camName = cam ? cam.name : cid;
+  if (activeLivePlayer) {
+    activeLivePlayer.loadCamera(cid, camName);
+  } else {
+    mountOverviewPlayer(cid);
+  }
+  
 }
 
 async function startLiveStream(cid) {
@@ -411,15 +471,8 @@ async function startLiveStream(cid) {
 }
 
 function handleVisibilityChange() {
-  const streamImg = document.getElementById('live-stream-img');
-
-  if (document.visibilityState === 'hidden') {
-    // Drop stream immediately to save bandwidth & CPU
-    if (streamImg) streamImg.src = '';
-    stopCurrentWebcamStream();
-  } else {
-    // Tab active again: resume stream
-    if (activeCameraId) startLiveStream(activeCameraId);
+  if (document.visibilityState === 'visible' && activeCameraId && activeLivePlayer) {
+    activeLivePlayer.setLive();
   }
 }
 
@@ -476,7 +529,7 @@ function attachPlayerControls() {
       showWatchAreas = !showWatchAreas;
       btnToggleAreas.classList.toggle('is-active', showWatchAreas);
       areasSvg.style.display = showWatchAreas ? 'block' : 'none';
-      if (showWatchAreas) renderWatchAreasOverlay();
+      
     });
   }
 

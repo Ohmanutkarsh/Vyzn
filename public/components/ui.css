@@ -490,13 +490,13 @@
 }
 
 .brand-name {
-  font-size: 28px;
+  font-size: 34px;
   font-weight: 900;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   color: #ffffff;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   text-transform: uppercase;
   background: linear-gradient(135deg, #ffffff 10%, #38bdf8 100%);
   -webkit-background-clip: text;
@@ -505,11 +505,11 @@
 }
 
 .brand-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: #0ea5e9;
-  box-shadow: 0 0 12px #38bdf8;
+  box-shadow: 0 0 16px #38bdf8;
   display: inline-block;
   flex-shrink: 0;
 }
@@ -576,6 +576,13 @@
   overflow-x: hidden;
 }
 
+#app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  width: 100%;
+}
+
 .shell-header {
   height: 56px;
   background: var(--bg-surface);
@@ -584,9 +591,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  position: sticky;
-  top: 0;
-  z-index: 50;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .header-left {
@@ -610,6 +616,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  flex-shrink: 0;
 }
 
 /* Priority Status Pill */

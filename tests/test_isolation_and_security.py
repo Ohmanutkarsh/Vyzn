@@ -161,6 +161,54 @@ def test_multi_tenant_isolation_and_security_gate():
         finally:
             db.close()
 
+
+def test_no_hardcoded_telegram_tokens_in_tracked_code():
+    """
+    Security Invariant Test:
+    Ensures that no Telegram bot tokens or credentials are hardcoded in any tracked Git file.
+    Tokens must be supplied exclusively through environment variables (.env / OS).
+    """
+    import subprocess
+    import re
+    from pathlib import Path
+
+    # 1. Ensure .env is properly gitignored
+    git_check = subprocess.run(
+        ["git", "check-ignore", ".env"],
+        capture_output=True,
+        text=True
+    )
+    assert git_check.returncode == 0, ".env file must be strictly ignored by git!"
+
+    # 2. Get all tracked files in git
+    tracked = subprocess.run(
+        ["git", "ls-files"],
+        capture_output=True,
+        text=True,
+        check=True
+    ).stdout.splitlines()
+
+    # Bot token regex pattern for telegram bot tokens
+    token_pattern = re.compile(r"[0-9]{8,10}:[a-zA-Z0-9_-]{35}")
+
+    offending_files = []
+    for rel_path in tracked:
+        # Ignore binary or large media assets
+        if any(rel_path.endswith(ext) for ext in [".pt", ".woff2", ".png", ".jpg", ".mp4", ".pdf", ".db"]):
+            continue
+        p = Path(rel_path)
+        if not p.exists() or not p.is_file():
+            continue
+        try:
+            content = p.read_text(encoding="utf-8", errors="ignore")
+            matches = token_pattern.findall(content)
+            if matches:
+                offending_files.append((rel_path, matches))
+        except Exception:
+            pass
+
+    assert len(offending_files) == 0, f"Found hardcoded Telegram bot tokens in tracked files: {offending_files}"
+
 if __name__ == "__main__":
     test_multi_tenant_isolation_and_security_gate()
     print("ALL TESTS PASSED SUCCESSFULLY!")

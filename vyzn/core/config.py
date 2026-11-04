@@ -45,8 +45,8 @@ class ClipConfig(BaseModel):
     pre_roll_seconds: float = 10.0
     post_roll_seconds: float = 10.0
     min_active_ticks: int = 1
-    max_clip_seconds: float = 600.0
-    preview_seconds: float = 6.0
+    max_clip_seconds: Optional[float] = None
+    preview_seconds: float = 0.0
 
 
 class LocationConfig(BaseModel):
@@ -65,8 +65,9 @@ class CameraConfig(BaseModel):
     target_fps: float = 20.0
     capture_fps: float = 20.0
     ai_inference_fps: float = 20.0
-    downscale_width: int = 854
-    downscale_height: int = 480
+    downscale_width: int = 1920
+    downscale_height: int = 1080
+    use_native_resolution: bool = True
     is_night_ir: bool = False
     owner_email: Optional[str] = None
     business_hours: BusinessHours = Field(default_factory=BusinessHours)
@@ -131,7 +132,7 @@ class EdgeSettings(BaseSettings):
 
     # Alerts
     telegram_bot_token: Optional[str] = None
-    telegram_bot_username: Optional[str] = "Vyzn_security_bot"
+    telegram_bot_username: Optional[str] = "Vyzn_security_alert_bot"
     telegram_chat_id: Optional[str] = "6856103038"
     telegram_webhook_secret: Optional[str] = None
     internal_alert_token: Optional[str] = None
